@@ -175,7 +175,12 @@ def favorites_loaded(window: MainWindow, token: int, result: object) -> None:
         item.setData(Qt.ItemDataRole.UserRole, post)
         window.favorites_list.addItem(item)
 
-    if window.favorites_list.count() > 0:
+    should_restore_selection = (
+        window.left_tabs.currentWidget() is window.favorites_list
+        or previous_current_id is not None
+    )
+
+    if should_restore_selection and window.favorites_list.count() > 0:
         target_row = 0
         if previous_current_id is not None:
             for index, post in enumerate(window.favorite_posts):
