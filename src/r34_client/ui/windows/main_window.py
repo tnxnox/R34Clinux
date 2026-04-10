@@ -183,7 +183,7 @@ class MainWindow(QMainWindow):
         self.left_tabs = QTabWidget()
         self.left_tabs.addTab(self.results_list, "Search Results")
         self.left_tabs.addTab(self.favorites_list, "Favorites")
-        self.left_tabs.currentChanged.connect(self._update_action_state)
+        self.left_tabs.currentChanged.connect(self._on_tab_changed)
 
         self.preview_label = QLabel("Search for a post to preview it here.")
         self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -693,6 +693,18 @@ class MainWindow(QMainWindow):
 
     def _handle_selection_change(self, current: QListWidgetItem | None, _: QListWidgetItem | None) -> None:
         preview_feature.handle_selection_change(self, current, _)
+
+    def _on_tab_changed(self, _index: int) -> None:
+        self._update_action_state()
+        active_list = self._active_posts_list()
+        current = active_list.currentItem()
+        if current is None and active_list.count() > 0:
+            # This emits currentItemChanged in the normal path and updates the preview there.
+            active_list.setCurrentRow(0)
+            current = active_list.currentItem()
+        if current is not None:
+            # Force sync in case currentItemChanged did not fire because the row was already current.
+            self._handle_selection_change(current, None)
 
     def _show_post(self, post: Post, allow_hydrate: bool = True) -> None:
         preview_feature.show_post(self, post, allow_hydrate)
