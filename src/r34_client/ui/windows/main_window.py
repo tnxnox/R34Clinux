@@ -48,6 +48,8 @@ from ..rendering.post_helpers import (
     format_post_metadata,
     format_post_tile,
     is_video_post,
+    needs_hydration,
+    probe_file_size,
 )
 from ..features import autocomplete as autocomplete_feature
 from ..features import context_menu as context_menu_feature
