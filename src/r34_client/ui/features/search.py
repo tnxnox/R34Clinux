@@ -144,6 +144,13 @@ def favorites_loaded(window: MainWindow, token: int, result: object) -> None:
     if token != window._favorites_token:
         return
 
+    previous_current_id: int | None = None
+    previous_current_item = window.favorites_list.currentItem()
+    if previous_current_item is not None:
+        previous_post = previous_current_item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(previous_post, Post):
+            previous_current_id = previous_post.id
+
     loaded_posts: list[Post]
     if isinstance(result, tuple) and len(result) == 2 and isinstance(result[0], list):
         loaded_posts = result[0]
@@ -167,6 +174,21 @@ def favorites_loaded(window: MainWindow, token: int, result: object) -> None:
         item = QListWidgetItem(window._format_post_tile(post))
         item.setData(Qt.ItemDataRole.UserRole, post)
         window.favorites_list.addItem(item)
+
+    if window.favorites_list.count() > 0:
+        target_row = 0
+        if previous_current_id is not None:
+            for index, post in enumerate(window.favorite_posts):
+                if post.id == previous_current_id:
+                    target_row = index
+                    break
+
+        window.favorites_list.setCurrentRow(target_row)
+        selected_item = window.favorites_list.item(target_row)
+        if selected_item is not None:
+            selected_item.setSelected(True)
+            if window.left_tabs.currentWidget() is window.favorites_list:
+                window._handle_selection_change(selected_item, None)
 
     if window._sync_enabled():
         if window._favorites_sync_fallback_used:
