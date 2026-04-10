@@ -22,3 +22,6 @@ dist/
 
 # Logs and local runtime files
 *.log
+
+# Test folder
+tests/
