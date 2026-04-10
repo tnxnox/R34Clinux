@@ -48,7 +48,7 @@ def add_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dict[s
     for post in posts:
         if sync_client is not None:
             if window._degraded_mode_active():
-                if not _wait_for_degraded_mode_window(window, max_wait_seconds=8.0):
+                if not _wait_for_degraded_mode_window(window, max_wait_seconds=0.5):
                     deferred_sync_ids.append(post.id)
                     failed_errors.append(
                         f"#{post.id}: deferred remote add (degraded mode active: {window._degraded_mode_remaining()}s remaining)"
@@ -57,7 +57,7 @@ def add_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dict[s
                     added_ids.append(post.id)
                     continue
 
-            attempts = 5
+            attempts = 2
             remote_success = False
             last_error = ""
             for attempt in range(1, attempts + 1):
@@ -69,10 +69,10 @@ def add_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dict[s
                 except FlareSolverrError as exc:
                     last_error = str(exc)
                     window._mark_rate_limited_if_needed("favorite_bulk_add", last_error)
-                    if is_rate_limited_error_message(last_error) and attempt < attempts:
-                        delay = max(0.35 * attempt, min(3.0, float(window._degraded_mode_remaining() or 0)))
-                        time.sleep(delay)
-                        continue
+                    # In bulk mode, immediate defer is better UX than repeatedly retrying a
+                    # known rate-limited path for the same post.
+                    if is_rate_limited_error_message(last_error):
+                        break
                     break
 
             if not remote_success:
