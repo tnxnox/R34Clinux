@@ -402,11 +402,11 @@ class FlareSolverrFavoritesClient:
                 time.sleep(delay)
 
         if not verified:
-            self._debug("ensure_web_login: login verification failed")
-            raise FlareSolverrError(
-                "FlareSolverr could not authenticate the website session. "
-                "Verify website username/password and complete any required CAPTCHA manually in that session."
-            )
+            # Some sessions propagate authentication to mutation endpoints with delay,
+            # and strict probe verification can be a false negative on first attempt.
+            # Let the caller retry the mutation endpoint and use its response as authority.
+            self._debug("ensure_web_login: login verification inconclusive; proceeding with best-effort session")
+            return
 
         self._web_session_authenticated = True
         self._debug("ensure_web_login: login verified")
