@@ -109,6 +109,30 @@ class FlareSolverrFavoritesClient:
 
         raise FlareSolverrError(message or "Unable to create FlareSolverr session.")
 
+    def _destroy_session(self) -> None:
+        payload = {
+            "cmd": "sessions.destroy",
+            "session": self._session_name(),
+        }
+        try:
+            response = requests.post(self._solver_endpoint(), json=payload, timeout=self.timeout)
+            response.raise_for_status()
+            body = response.json()
+        except (requests.RequestException, ValueError) as exc:
+            self._debug(f"destroy_session: ignored error={exc}")
+            return
+
+        status = str(body.get("status", "")).lower()
+        if status == "ok":
+            self._debug("destroy_session: ok")
+            return
+
+        message = str(body.get("message") or body.get("error") or "")
+        if "not found" in message.lower() or "doesn't exist" in message.lower() or "does not exist" in message.lower():
+            self._debug("destroy_session: already absent")
+            return
+        self._debug(f"destroy_session: ignored status={status} message={message}")
+
     @staticmethod
     def _is_session_error(message: str) -> bool:
         lowered = (message or "").lower()
@@ -511,6 +535,7 @@ class FlareSolverrFavoritesClient:
             for auth_attempt in range(1, 3):
                 raw = self._request_via_solver(add_url, headers=None)
                 body = self._extract_body_text(raw)
+                effective_body = body
                 self._debug(f"mutate_favorite: endpoint={add_url} body={body[:120]}")
 
                 if self._looks_rate_limited(body):
@@ -520,7 +545,9 @@ class FlareSolverrFavoritesClient:
 
                 if body == "2":
                     if auth_attempt == 1:
-                        self._debug("mutate_favorite: add endpoint reported not logged in, forcing re-login")
+                        self._debug("mutate_favorite: add endpoint reported not logged in, resetting session and re-login")
+                        self._destroy_session()
+                        self._session_ready = False
                         self._web_session_authenticated = False
                         self._ensure_web_login()
                         continue
@@ -528,7 +555,12 @@ class FlareSolverrFavoritesClient:
                     alt_url = f"https://rule34.xxx/index.php?page=favorites&s=add&id={target_id}"
                     alt_raw = self._request_via_solver(alt_url, headers={"Referer": favorites_view_url})
                     alt_body = self._extract_body_text(alt_raw)
+                    effective_body = alt_body
                     self._debug(f"mutate_favorite: endpoint={alt_url} body={alt_body[:120]}")
+                    if self._looks_rate_limited(alt_body):
+                        raise FlareSolverrError(
+                            "Rule34 temporarily rate limited favorite add (HTTP 429). Please retry in a few seconds."
+                        )
                     if alt_body == "2":
                         raise FlareSolverrError(
                             "Favorites mutation requires a logged rule34 web session in FlareSolverr (server replied not logged in)."
@@ -543,7 +575,7 @@ class FlareSolverrFavoritesClient:
                 if after_present is True:
                     return
                 raise FlareSolverrError(
-                    f"Unable to add account favorite #{target_id}. Latest server response: {body or 'empty response'}"
+                    f"Unable to add account favorite #{target_id}. Latest server response: {effective_body or 'empty response'}"
                 )
             return
 
