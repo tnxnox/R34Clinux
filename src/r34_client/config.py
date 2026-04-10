@@ -28,6 +28,25 @@ class SettingsStore:
     def __init__(self) -> None:
         self._settings = QSettings("R34LinuxClient", "R34LinuxClient")
 
+    @staticmethod
+    def _load_string_list(values: object | None, limit: int) -> list[str]:
+        if not values:
+            return []
+        if isinstance(values, list):
+            items = values
+        else:
+            items = [values]
+
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for item in items:
+            query = str(item).strip()
+            if not query or query in seen:
+                continue
+            seen.add(query)
+            cleaned.append(query)
+        return cleaned[: max(0, int(limit))]
+
     def load(self) -> AppSettings:
         return AppSettings(
             user_id=self._settings.value("api/user_id", "", str),
@@ -53,6 +72,39 @@ class SettingsStore:
         self._settings.setValue("sync/flaresolverr_url", settings.flaresolverr_url)
         self._settings.setValue("sync/conflict_strategy", settings.sync_conflict_strategy)
         self._settings.setValue("sync/background_interval_minutes", settings.background_sync_interval_minutes)
+        self._settings.sync()
+
+    def load_search_history(self, limit: int = 12) -> list[str]:
+        raw_history = self._settings.value("search/history", [], list)
+        history = [str(item).strip() for item in (raw_history or []) if str(item).strip()]
+        unique_history: list[str] = []
+        seen: set[str] = set()
+        for query in history:
+            if query in seen:
+                continue
+            seen.add(query)
+            unique_history.append(query)
+        return unique_history[: max(0, int(limit))]
+
+    def save_search_history(self, queries: list[str], limit: int = 12) -> None:
+        cleaned_queries = [query.strip() for query in queries if query and query.strip()]
+        self._settings.setValue("search/history", cleaned_queries[: max(0, int(limit))])
+        self._settings.sync()
+
+    def load_saved_searches(self, limit: int = 12) -> list[str]:
+        return self._load_string_list(self._settings.value("search/saved_queries", [], list), limit)
+
+    def save_saved_searches(self, queries: list[str], limit: int = 12) -> None:
+        cleaned_queries = [query.strip() for query in queries if query and query.strip()]
+        self._settings.setValue("search/saved_queries", cleaned_queries[: max(0, int(limit))])
+        self._settings.sync()
+
+    def load_pinned_filters(self, limit: int = 12) -> list[str]:
+        return self._load_string_list(self._settings.value("search/pinned_queries", [], list), limit)
+
+    def save_pinned_filters(self, queries: list[str], limit: int = 12) -> None:
+        cleaned_queries = [query.strip() for query in queries if query and query.strip()]
+        self._settings.setValue("search/pinned_queries", cleaned_queries[: max(0, int(limit))])
         self._settings.sync()
 
     @staticmethod
