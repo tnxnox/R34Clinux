@@ -1,0 +1,60 @@
+Metadata-Version: 2.4
+Name: r34-linux-client
+Version: 0.1.0
+Summary: Linux desktop client for rule34.xxx using the official API
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: PySide6>=6.7
+Requires-Dist: requests>=2.32
+Requires-Dist: python-vlc>=3.0.21203
+
+# R34 Linux Client
+
+Python desktop client for rule34.xxx using the official authenticated API.
+
+## Features
+
+- Search posts by tag query
+- Browse paginated results
+- Preview a selected post
+- Save favorites locally with instant indexing in the Favorites tab
+- Optional real-time favorites sync through FlareSolverr
+- Open the post in the browser
+- Download the original file or preview image
+- Persist API credentials and download location with Qt settings
+
+## Requirements
+
+- Python 3.11 or newer
+- A rule34.xxx API account with `user_id` and `api_key`
+
+## Run
+
+Recommended (auto-installs dependencies, starts FlareSolverr in Docker, launches app, then stops FlareSolverr on exit):
+
+```bash
+chmod +x start_r34.sh
+./start_r34.sh
+```
+
+Manual setup:
+
+```bash
+python -m venv .venv
+.venv/bin/pip install -e .
+.venv/bin/r34-linux-client
+```
+
+Or run directly:
+
+```bash
+python -m r34_client
+```
+
+## Notes
+
+The official API requires authentication. Open Settings on first launch and enter your API credentials before searching.
+
+To enable account favorites sync, run FlareSolverr locally and enable the sync checkbox in Settings (default URL: `http://127.0.0.1:8191`).
+
+For account favorites add/remove through FlareSolverr, also fill in website username/password in Settings so a web session can be authenticated.
