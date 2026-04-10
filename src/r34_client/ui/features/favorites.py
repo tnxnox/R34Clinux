@@ -179,6 +179,7 @@ def remove_multiple_favorites(window: MainWindow, posts: list[Post]) -> None:
 def remove_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dict[str, object]:
     removed_ids: list[int] = []
     failed_ids: list[int] = []
+    deferred_sync_ids: list[int] = []
     failed_errors: list[str] = []
 
     sync_client = window._make_sync_client(window.settings)
@@ -189,12 +190,16 @@ def remove_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dic
             continue
 
         if window._degraded_mode_active():
-            if not _wait_for_degraded_mode_window(window, max_wait_seconds=8.0):
-                failed_ids.append(post.id)
-                failed_errors.append(f"#{post.id}: degraded mode active ({window._degraded_mode_remaining()}s remaining)")
+            if not _wait_for_degraded_mode_window(window, max_wait_seconds=0.5):
+                deferred_sync_ids.append(post.id)
+                failed_errors.append(
+                    f"#{post.id}: deferred remote remove (degraded mode active: {window._degraded_mode_remaining()}s remaining)"
+                )
+                window.local_favorites.remove_favorite(post.id)
+                removed_ids.append(post.id)
                 continue
 
-        attempts = 5
+        attempts = 2
         success = False
         last_error = ""
         for attempt in range(1, attempts + 1):
@@ -206,13 +211,23 @@ def remove_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dic
             except FlareSolverrError as exc:
                 last_error = str(exc)
                 window._mark_rate_limited_if_needed("favorite_bulk_remove", last_error)
-                if is_rate_limited_error_message(last_error) and attempt < attempts:
-                    delay = max(0.35 * attempt, min(3.0, float(window._degraded_mode_remaining() or 0)))
-                    time.sleep(delay)
-                    continue
+                # In bulk mode, immediately defer on rate limits to keep the batch responsive.
+                if is_rate_limited_error_message(last_error):
+                    break
                 break
 
         if success:
+            window.local_favorites.remove_favorite(post.id)
+            removed_ids.append(post.id)
+            continue
+
+        if is_rate_limited_error_message(last_error):
+            deferred_sync_ids.append(post.id)
+            failed_errors.append(f"#{post.id}: deferred remote remove ({last_error or 'rate limited'})")
+            window._log_sync_debug(
+                f"Bulk favorite remove deferred for #{post.id}",
+                f"Reason: {last_error or 'rate limited'}\n\n{sync_client.debug_summary()}",
+            )
             window.local_favorites.remove_favorite(post.id)
             removed_ids.append(post.id)
             continue
@@ -236,6 +251,7 @@ def remove_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dic
     return {
         "removed_ids": removed_ids,
         "failed_ids": failed_ids,
+        "deferred_sync_ids": deferred_sync_ids,
         "failed_errors": failed_errors,
     }
 
@@ -246,10 +262,12 @@ def favorite_bulk_mutation_finished(window: MainWindow, token: int, result: obje
     if isinstance(result, dict):
         removed_ids = [int(item) for item in result.get("removed_ids", [])]
         failed_ids = [int(item) for item in result.get("failed_ids", [])]
+        deferred_sync_ids = [int(item) for item in result.get("deferred_sync_ids", [])]
         failed_errors = [str(item) for item in result.get("failed_errors", [])]
     else:
         removed_ids = []
         failed_ids = []
+        deferred_sync_ids = []
         failed_errors = []
 
     for post_id in removed_ids:
@@ -266,7 +284,12 @@ def favorite_bulk_mutation_finished(window: MainWindow, token: int, result: obje
             + "\n".join(failed_errors[:12]),
         )
     else:
-        window._set_status(f"Removed {len(removed_ids)} favorites.")
+        if deferred_sync_ids:
+            window._set_status(
+                f"Removed {len(removed_ids)} favorites locally; remote sync deferred for {len(deferred_sync_ids)} due to rate limits."
+            )
+        else:
+            window._set_status(f"Removed {len(removed_ids)} favorites.")
 
     if window._sync_enabled() and failed_ids:
         window._refresh_favorites()
