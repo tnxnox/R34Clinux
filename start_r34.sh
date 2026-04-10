@@ -33,6 +33,10 @@ init_logging() {
 }
 
 configure_display_backend() {
+  # Keep media decode on software paths for this app process to avoid fragile VAAPI/VDPAU behavior.
+  export LIBVA_DRIVER_NAME=""
+  export VDPAU_DRIVER=""
+
   if [[ -n "${QT_QPA_PLATFORM:-}" ]]; then
     return
   fi
