@@ -201,9 +201,14 @@ class MainWindow(QMainWindow):
 
         self._vlc_instance = None
         self._vlc_player = None
+        self._vlc_fallback_active = False
         if vlc is not None:
             try:
-                self._vlc_instance = vlc.Instance("--no-video-title-show", "--network-caching=300")
+                # Primary backend profile: keep defaults for broad Linux compatibility.
+                self._vlc_instance = vlc.Instance(
+                    "--no-video-title-show",
+                    "--network-caching=300",
+                )
                 self._vlc_player = self._vlc_instance.media_player_new()
             except Exception:
                 self._vlc_instance = None
