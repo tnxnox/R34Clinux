@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
-    QMenu,
     QMessageBox,
     QInputDialog,
     QPushButton,
@@ -61,6 +60,19 @@ from .post_helpers import (
     probe_file_size,
 )
 from .favorites_sync import sync_remote_favorites
+from .context_menu_feature import (
+    open_favorites_context_menu,
+    open_results_context_menu,
+    selected_favorite_posts,
+    selected_results_posts,
+)
+from .navigation_feature import (
+    active_posts_list,
+    extend_selection,
+    invoke_global_navigation,
+    move_selection,
+    register_global_shortcuts,
+)
 from .settings_dialog import SettingsDialog
 from .widgets import ClickSeekSlider, ClickVideoSurface
 
@@ -457,27 +469,10 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
 
     def _register_global_shortcuts(self) -> None:
-        shortcut_specs = [
-            ("Esc", self._cancel_current_operations),
-            ("J", lambda: self._invoke_global_navigation(lambda: self._move_selection(+1))),
-            ("K", lambda: self._invoke_global_navigation(lambda: self._move_selection(-1))),
-            ("Ctrl+J", lambda: self._invoke_global_navigation(lambda: self._extend_selection(+1))),
-            ("Ctrl+K", lambda: self._invoke_global_navigation(lambda: self._extend_selection(-1))),
-            ("F", lambda: self._invoke_global_navigation(self._toggle_current_favorite)),
-            ("O", lambda: self._invoke_global_navigation(self.open_selected_post)),
-            ("D", lambda: self._invoke_global_navigation(self.download_selected_post)),
-        ]
-
-        for key_sequence, callback in shortcut_specs:
-            shortcut = QShortcut(key_sequence, self)
-            shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
-            shortcut.activated.connect(callback)
-            self._global_shortcuts.append(shortcut)
+        register_global_shortcuts(self)
 
     def _invoke_global_navigation(self, callback) -> None:
-        if isinstance(self.focusWidget(), QLineEdit):
-            return
-        callback()
+        invoke_global_navigation(self, callback)
 
     def _update_action_state(self) -> None:
         has_selection = self._current_post() is not None
@@ -768,50 +763,10 @@ class MainWindow(QMainWindow):
             self._set_right_status(f"Local favorites refresh failed: {first_line}")
 
     def _open_results_context_menu(self, position) -> None:
-        item = self.results_list.itemAt(position)
-        if item is None:
-            return
-        if item not in self.results_list.selectedItems():
-            self.results_list.setCurrentItem(item)
-            item.setSelected(True)
-
-        selected_posts = self._selected_results_posts()
-        if not selected_posts:
-            return
-
-        menu = QMenu(self)
-
-        selected_not_favorited = [post for post in selected_posts if post.id not in self.favorite_ids]
-        selected_favorited = [post for post in selected_posts if post.id in self.favorite_ids]
-
-        if len(selected_posts) > 1:
-            if selected_not_favorited:
-                add_action = menu.addAction(f"Add {len(selected_not_favorited)} selected to favorites")
-                add_action.triggered.connect(lambda: self._add_multiple_favorites(selected_not_favorited))
-            if selected_favorited:
-                remove_action = menu.addAction(f"Remove {len(selected_favorited)} selected from favorites")
-                remove_action.triggered.connect(lambda: self._remove_multiple_favorites(selected_favorited))
-        else:
-            post = selected_posts[0]
-            if post.id in self.favorite_ids:
-                action = menu.addAction("Remove from favorites")
-                action.triggered.connect(lambda: self._remove_favorite(post))
-            else:
-                action = menu.addAction("Add to favorites")
-                action.triggered.connect(lambda: self._add_favorite(post))
-        menu.exec(self.results_list.viewport().mapToGlobal(position))
+        open_results_context_menu(self, position)
 
     def _selected_results_posts(self) -> list[Post]:
-        posts: list[Post] = []
-        selected_items = self.results_list.selectedItems()
-        for item in selected_items:
-            post = item.data(Qt.ItemDataRole.UserRole)
-            if isinstance(post, Post):
-                posts.append(post)
-        if posts:
-            return posts
-        current = self._current_post()
-        return [current] if current is not None else []
+        return selected_results_posts(self)
 
     def _add_multiple_favorites(self, posts: list[Post]) -> None:
         unique_posts = {post.id: post for post in posts}
@@ -917,69 +872,17 @@ class MainWindow(QMainWindow):
         else:
             self._set_status(f"Added {len(added_ids)} favorites.")
 
-        if self._sync_enabled():
+        # Fast path: when all remote mutations succeeded, refresh local cache only.
+        if self._sync_enabled() and failed_ids:
             self._refresh_favorites()
         else:
             self._refresh_local_favorites()
 
     def _open_favorites_context_menu(self, position) -> None:
-        item = self.favorites_list.itemAt(position)
-        if item is None:
-            return
-        if item not in self.favorites_list.selectedItems():
-            self.favorites_list.setCurrentItem(item)
-            item.setSelected(True)
-
-        selected_posts = self._selected_favorite_posts()
-        if not selected_posts:
-            return
-
-        menu = QMenu(self)
-
-        if len(selected_posts) > 1:
-            remove_action = menu.addAction(f"Remove {len(selected_posts)} selected from favorites")
-            remove_action.triggered.connect(lambda: self._remove_multiple_favorites(selected_posts))
-
-            download_action = menu.addAction(f"Download {len(selected_posts)} selected")
-            download_action.triggered.connect(lambda: self._download_multiple_posts(selected_posts))
-
-            open_action = menu.addAction(f"Open {len(selected_posts)} selected in browser")
-            open_action.triggered.connect(lambda: self._open_multiple_posts(selected_posts))
-        else:
-            remove_action = menu.addAction("Remove from favorites")
-            remove_action.triggered.connect(lambda: self._remove_favorite(selected_posts[0]))
-
-        menu.addSeparator()
-        assign_submenu = menu.addMenu("Add selected to collection")
-        new_collection_action = assign_submenu.addAction("New collection...")
-        new_collection_action.triggered.connect(lambda: self._assign_selection_to_new_collection(selected_posts))
-
-        for collection in self.local_favorites.list_collections():
-            action = assign_submenu.addAction(collection)
-            action.triggered.connect(
-                lambda _checked=False, c=collection: self._assign_selection_to_collection(selected_posts, c)
-            )
-
-        current_collection = self._selected_collection_name()
-        if current_collection:
-            remove_collection_action = menu.addAction(f"Remove selected from '{current_collection}'")
-            remove_collection_action.triggered.connect(
-                lambda: self._remove_selection_from_collection(selected_posts, current_collection)
-            )
-
-        menu.exec(self.favorites_list.viewport().mapToGlobal(position))
+        open_favorites_context_menu(self, position)
 
     def _selected_favorite_posts(self) -> list[Post]:
-        posts: list[Post] = []
-        selected_items = self.favorites_list.selectedItems()
-        for item in selected_items:
-            post = item.data(Qt.ItemDataRole.UserRole)
-            if isinstance(post, Post):
-                posts.append(post)
-        if posts:
-            return posts
-        current = self._current_post()
-        return [current] if current is not None else []
+        return selected_favorite_posts(self)
 
     def _remove_multiple_favorites(self, posts: list[Post]) -> None:
         unique_posts = {post.id: post for post in posts}
@@ -1084,7 +987,8 @@ class MainWindow(QMainWindow):
         else:
             self._set_status(f"Removed {len(removed_ids)} favorites.")
 
-        if self._sync_enabled():
+        # Fast path: when all remote mutations succeeded, refresh local cache only.
+        if self._sync_enabled() and failed_ids:
             self._refresh_favorites()
         else:
             self._refresh_local_favorites()
@@ -1108,7 +1012,7 @@ class MainWindow(QMainWindow):
     def _remove_selection_from_collection(self, posts: list[Post], collection_name: str) -> None:
         removed = self.local_favorites.remove_posts_from_collection([post.id for post in posts], collection_name)
         self._set_status(f"Removed {removed} favorites from '{collection_name}'.")
-        self._refresh_favorites()
+        self._refresh_local_favorites()
 
     def _add_favorite(self, post: Post) -> None:
         if self._sync_enabled():
@@ -1252,7 +1156,7 @@ class MainWindow(QMainWindow):
             self._refresh_local_favorites()
         elif self._sync_enabled():
             self._set_status(f"Favorite updated for post #{post_id}.")
-            self._refresh_favorites()
+            self._refresh_local_favorites()
         else:
             self._set_status(f"Local favorite updated for post #{post_id}.")
             self._refresh_local_favorites()
@@ -1754,38 +1658,13 @@ class MainWindow(QMainWindow):
         return post if isinstance(post, Post) else None
 
     def _active_posts_list(self) -> QListWidget:
-        return self.favorites_list if self.left_tabs.currentWidget() is self.favorites_list else self.results_list
+        return active_posts_list(self)
 
     def _move_selection(self, delta: int) -> None:
-        target_list = self._active_posts_list()
-        if target_list.count() <= 0:
-            return
-        current_row = target_list.currentRow()
-        if current_row < 0:
-            current_row = 0
-        new_row = max(0, min(target_list.count() - 1, current_row + delta))
-        target_list.setCurrentRow(new_row)
+        move_selection(self, delta)
 
     def _extend_selection(self, delta: int) -> None:
-        """Extend selection to the next/previous item (Ctrl+J/K)."""
-        target_list = self._active_posts_list()
-        if target_list.count() <= 0:
-            return
-        current_row = target_list.currentRow()
-        if current_row < 0:
-            current_row = 0
-        new_row = max(0, min(target_list.count() - 1, current_row + delta))
-        
-        # Set new row as current
-        target_list.setCurrentRow(new_row)
-        
-        # Select from min to max row to create continuous selection
-        min_row = min(current_row, new_row)
-        max_row = max(current_row, new_row)
-        for row in range(min_row, max_row + 1):
-            item = target_list.item(row)
-            if item is not None:
-                item.setSelected(True)
+        extend_selection(self, delta)
 
     def _toggle_current_favorite(self) -> None:
         post = self._current_post()
