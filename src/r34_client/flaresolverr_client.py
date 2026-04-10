@@ -306,6 +306,12 @@ class FlareSolverrFavoritesClient:
     def _looks_rate_limited(text: str) -> bool:
         return looks_rate_limited(text)
 
+    @staticmethod
+    def _looks_transient_web_gate(text: str) -> bool:
+        lowered = (text or "").strip().lower()
+        compact = re.sub(r"\s+", "", lowered)
+        return compact in {"<br>", "<br><br>", "<br/><br/>", "<br/><br>", "<br><br/>"}
+
     def _request_body_with_rate_limit_retries(
         self,
         *,
@@ -557,7 +563,7 @@ class FlareSolverrFavoritesClient:
                     alt_body = self._extract_body_text(alt_raw)
                     effective_body = alt_body
                     self._debug(f"mutate_favorite: endpoint={alt_url} body={alt_body[:120]}")
-                    if self._looks_rate_limited(alt_body):
+                    if self._looks_rate_limited(alt_body) or self._looks_transient_web_gate(alt_body):
                         raise FlareSolverrError(
                             "Rule34 temporarily rate limited favorite add (HTTP 429). Please retry in a few seconds."
                         )
@@ -602,7 +608,18 @@ class FlareSolverrFavoritesClient:
                 raise FlareSolverrError(
                     "Favorites mutation requires a logged rule34 web session in FlareSolverr (server replied not logged in)."
                 )
-            if self._looks_rate_limited(last_body):
+            if self._looks_rate_limited(last_body) or self._looks_transient_web_gate(last_body):
+                after_present = self._favorite_exists_in_view_with_retries(
+                    target_id,
+                    attempts=2,
+                    allow_unknown=True,
+                )
+                self._debug(f"mutate_favorite: delete after rate limit after_present={after_present}")
+                if after_present is False:
+                    return
+                if after_present is None:
+                    self._debug("mutate_favorite: delete verification deferred due to temporary rate limit")
+                    return
                 raise FlareSolverrError(
                     "Rule34 temporarily rate limited favorite removal (HTTP 429). Please retry in a few seconds."
                 )
