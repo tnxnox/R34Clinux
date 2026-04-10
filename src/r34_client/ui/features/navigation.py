@@ -14,10 +14,10 @@ if TYPE_CHECKING:
 def register_global_shortcuts(window: MainWindow) -> None:
     shortcut_specs = [
         ("Esc", window._cancel_current_operations),
-        ("J", lambda: invoke_global_navigation(window, lambda: move_selection(window, +1))),
-        ("K", lambda: invoke_global_navigation(window, lambda: move_selection(window, -1))),
-        ("Ctrl+J", lambda: invoke_global_navigation(window, lambda: extend_selection(window, +1))),
-        ("Ctrl+K", lambda: invoke_global_navigation(window, lambda: extend_selection(window, -1))),
+        ("K", lambda: invoke_global_navigation(window, lambda: move_selection(window, +1))),
+        ("J", lambda: invoke_global_navigation(window, lambda: move_selection(window, -1))),
+        ("Ctrl+K", lambda: invoke_global_navigation(window, lambda: extend_selection(window, +1))),
+        ("Ctrl+J", lambda: invoke_global_navigation(window, lambda: extend_selection(window, -1))),
         ("F", lambda: invoke_global_navigation(window, window._toggle_current_favorite)),
         ("O", lambda: invoke_global_navigation(window, window.open_selected_post)),
         ("D", lambda: invoke_global_navigation(window, window.download_selected_post)),
