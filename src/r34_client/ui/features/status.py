@@ -13,11 +13,17 @@ if TYPE_CHECKING:
 
 def update_action_state(window: MainWindow) -> None:
     has_selection = window._current_post() is not None
+    has_query = bool(window.search_input.text().strip())
     window.download_button.setEnabled(has_selection)
     window.open_button.setEnabled(has_selection)
     window.copy_button.setEnabled(has_selection)
     window.volume_slider.setEnabled(window._vlc_player is not None)
     window.seek_slider.setEnabled(window._vlc_player is not None and has_selection and window._current_post_is_video())
+    window.save_search_button.setEnabled(has_query)
+    window.pin_filter_button.setEnabled(has_query)
+    window.pin_filter_button.setText(
+        "Unpin filter" if has_query and window.search_input.text().strip() in window._pinned_filters else "Pin filter"
+    )
 
 
 def set_left_status(window: MainWindow, message: str) -> None:
