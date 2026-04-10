@@ -12,6 +12,49 @@ except ImportError:  # pragma: no cover
     vlc = None
 
 
+def _configure_vlc_backend(window: MainWindow, *, fallback: bool) -> bool:
+    if vlc is None:
+        window._vlc_instance = None
+        window._vlc_player = None
+        window._vlc_fallback_active = False
+        return False
+
+    args = ["--no-video-title-show", "--network-caching=300"]
+    if fallback:
+        # Fallback profile avoids problematic GPU decode/output paths on some Linux systems.
+        args.extend(["--avcodec-hw=none", "--vout=xcb_x11"])
+
+    try:
+        window._vlc_instance = vlc.Instance(*args)
+        window._vlc_player = window._vlc_instance.media_player_new()
+        window._vlc_fallback_active = fallback
+        return True
+    except Exception:
+        window._vlc_instance = None
+        window._vlc_player = None
+        window._vlc_fallback_active = False
+        return False
+
+
+def _start_embedded_playback(window: MainWindow, source_url: str) -> None:
+    if window._vlc_player is None or window._vlc_instance is None:
+        raise RuntimeError("In-app VLC backend unavailable")
+
+    media = window._vlc_instance.media_new(source_url)
+    window._vlc_player.set_media(media)
+    window_id = int(window.video_surface.winId())
+    if hasattr(window._vlc_player, "set_xwindow"):
+        window._vlc_player.set_xwindow(window_id)
+    elif hasattr(window._vlc_player, "set_hwnd"):
+        window._vlc_player.set_hwnd(window_id)
+    elif hasattr(window._vlc_player, "set_nsobject"):
+        window._vlc_player.set_nsobject(window_id)
+
+    result = window._vlc_player.play()
+    if result == -1:
+        raise RuntimeError("VLC could not start playback")
+
+
 def show_video_preview(window: MainWindow, post: Post) -> None:
     window._base_preview_pixmap = None
     window._is_long_strip_image = False
@@ -33,26 +76,28 @@ def show_video_preview(window: MainWindow, post: Post) -> None:
     window.preview_container.hide()
     window.video_surface.show()
 
+    playback_error = ""
     try:
-        media = window._vlc_instance.media_new(source_url)
-        window._vlc_player.set_media(media)
-        window_id = int(window.video_surface.winId())
-        if hasattr(window._vlc_player, "set_xwindow"):
-            window._vlc_player.set_xwindow(window_id)
-        elif hasattr(window._vlc_player, "set_hwnd"):
-            window._vlc_player.set_hwnd(window_id)
-        elif hasattr(window._vlc_player, "set_nsobject"):
-            window._vlc_player.set_nsobject(window_id)
-
-        result = window._vlc_player.play()
-        if result == -1:
-            raise RuntimeError("VLC could not start playback")
+        _start_embedded_playback(window, source_url)
         on_volume_changed(window, window.volume_slider.value())
-        window._set_status("Playing video preview in-app.")
+        if window._vlc_fallback_active:
+            window._set_status("Playing video preview in-app (VLC safe fallback backend).")
+        else:
+            window._set_status("Playing video preview in-app.")
     except Exception as exc:
+        playback_error = str(exc)
+        if not window._vlc_fallback_active and _configure_vlc_backend(window, fallback=True):
+            try:
+                _start_embedded_playback(window, source_url)
+                on_volume_changed(window, window.volume_slider.value())
+                window._set_status("Playing video preview in-app (VLC safe fallback backend).")
+                return
+            except Exception as fallback_exc:
+                playback_error = str(fallback_exc)
+
         hide_video_view(window)
         window.preview_label.setText("Unable to play this video in-app. Click 'Play Video' again to open externally.")
-        window._set_status(str(exc))
+        window._set_status(playback_error or "Video playback failed")
 
 
 def hide_video_view(window: MainWindow) -> None:
