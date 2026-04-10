@@ -56,18 +56,33 @@ def sync_remote_favorites(
 
     if not remote_posts:
         # Empty remote favorites is a valid account state, not a sync failure.
-        # Keep local cache visible until an explicit remote mutation occurs.
+        # Apply conflict strategy without marking fallback/failure.
+        strategy = (settings.sync_conflict_strategy or "merge").strip().lower()
+        if strategy == "local_wins":
+            log_sync_debug(
+                "Favorites sync remote empty (local_wins)",
+                "\n".join(
+                    [
+                        "Outcome: remote favorites list is empty.",
+                        f"Local cache count kept: {len(local_posts)}",
+                        *sync_attempt_notes,
+                    ]
+                ),
+            )
+            return (local_posts, False)
+
+        local_favorites.replace_all([])
         log_sync_debug(
             "Favorites sync remote empty",
             "\n".join(
                 [
                     "Outcome: remote favorites list is empty.",
-                    f"Local cache count: {len(local_posts)}",
+                    "Applied remote empty state to local cache.",
                     *sync_attempt_notes,
                 ]
             ),
         )
-        return (local_posts, False)
+        return (local_favorites.list_favorites(), False)
 
     strategy = (settings.sync_conflict_strategy or "merge").strip().lower()
     if strategy == "local_wins":
