@@ -619,6 +619,22 @@ class FlareSolverrFavoritesClient:
 
             after_present = self._favorite_exists_in_view_with_retries(target_id, attempts=2, allow_unknown=True)
             self._debug(f"mutate_favorite: after_present={after_present}")
+            if want_present and after_present is False:
+                # First add can lag before the favorites view reflects the change.
+                for verify_attempt in range(1, 4):
+                    delay_seconds = 0.5 * verify_attempt
+                    self._debug(
+                        f"mutate_favorite: add verification lag attempt={verify_attempt}/3 wait={delay_seconds:.1f}s"
+                    )
+                    time.sleep(delay_seconds)
+                    after_present = self._favorite_exists_in_view_with_retries(
+                        target_id,
+                        attempts=3,
+                        allow_unknown=True,
+                    )
+                    self._debug(f"mutate_favorite: add verification retry result={after_present}")
+                    if after_present in (True, None):
+                        break
             if after_present is None:
                 self._debug("mutate_favorite: add verification deferred due to temporary rate limit")
                 return
