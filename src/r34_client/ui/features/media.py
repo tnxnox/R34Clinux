@@ -285,7 +285,7 @@ def refresh_playback_controls(window: MainWindow) -> None:
         window.seek_slider.setEnabled(False)
         return
 
-    if window._pending_seek_target_ms is not None and not window._seek_dragging:
+    if window._seek_ui_locked and not window._seek_dragging:
         if time.monotonic() >= window._seek_ui_unlock_deadline:
             window._pending_seek_target_ms = None
             window._seek_ui_locked = False
@@ -302,7 +302,7 @@ def refresh_playback_controls(window: MainWindow) -> None:
             window.seek_slider.setValue(min(shown_ms, total_ms))
         else:
             window.seek_slider.setValue(max(0, shown_ms))
-    elif window._seek_ui_locked and window._pending_seek_target_ms is not None:
+    elif window._seek_ui_locked:
         shown_ms = window._seek_ui_hold_ms
         if total_ms > 0:
             window.seek_slider.setValue(min(shown_ms, total_ms))
