@@ -201,13 +201,15 @@ class MainWindow(QMainWindow):
 
         self._vlc_instance = None
         self._vlc_player = None
-        self._vlc_fallback_active = False
+        self._vlc_fallback_active = True
         if vlc is not None:
             try:
-                # Primary backend profile: keep defaults for broad Linux compatibility.
+                # Compatibility-first profile avoids flaky VAAPI/VDPAU decode paths on Linux.
                 self._vlc_instance = vlc.Instance(
                     "--no-video-title-show",
                     "--network-caching=300",
+                    "--avcodec-hw=none",
+                    "--vout=xcb_x11",
                 )
                 self._vlc_player = self._vlc_instance.media_player_new()
             except Exception:
@@ -251,7 +253,11 @@ class MainWindow(QMainWindow):
         self.seek_time_label = QLabel("00:00 / 00:00")
 
         self._seek_dragging = False
+        self._seek_was_playing = False
         self._pending_seek_ms = 0
+        self._pending_seek_target_ms: int | None = None
+        self._pending_seek_deadline = 0.0
+        self._pending_seek_retries = 0
 
         self.playback_timer = QTimer(self)
         self.playback_timer.setInterval(250)
