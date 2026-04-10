@@ -211,7 +211,7 @@ def on_seek_slider_released(window: MainWindow) -> None:
     target = int(window._pending_seek_ms)
     total_ms = max(window.seek_slider.maximum(), 0)
     window._seek_ui_locked = True
-    window._seek_ui_unlock_deadline = time.monotonic() + 1.0
+    window._seek_ui_unlock_deadline = time.monotonic() + 3.0
 
     window.seek_slider.blockSignals(True)
     window.seek_slider.setValue(min(target, total_ms))
