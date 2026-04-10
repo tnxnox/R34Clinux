@@ -6,7 +6,7 @@ import time
 
 import requests
 from PySide6.QtCore import QEvent, QThreadPool, Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QImage, QKeyEvent, QPixmap
+from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QImage, QKeyEvent, QPixmap, QShortcut
 from PySide6.QtGui import QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QApplication,
@@ -213,8 +213,11 @@ class MainWindow(QMainWindow):
         self.copy_button = QPushButton("Copy Link")
         self.copy_button.clicked.connect(self.copy_selected_link)
 
+        self._global_shortcuts: list[QShortcut] = []
+
         self._build_layout()
         self._build_toolbar()
+        self._register_global_shortcuts()
         self._update_action_state()
         self._refresh_favorites()
 
@@ -369,6 +372,27 @@ class MainWindow(QMainWindow):
         toolbar.addAction(diagnostics_action)
 
         self.addToolBar(toolbar)
+
+    def _register_global_shortcuts(self) -> None:
+        shortcut_specs = [
+            ("Esc", self._cancel_current_operations),
+            ("J", lambda: self._invoke_global_navigation(lambda: self._move_selection(+1))),
+            ("K", lambda: self._invoke_global_navigation(lambda: self._move_selection(-1))),
+            ("F", lambda: self._invoke_global_navigation(self._toggle_current_favorite)),
+            ("O", lambda: self._invoke_global_navigation(self.open_selected_post)),
+            ("D", lambda: self._invoke_global_navigation(self.download_selected_post)),
+        ]
+
+        for key_sequence, callback in shortcut_specs:
+            shortcut = QShortcut(key_sequence, self)
+            shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+            shortcut.activated.connect(callback)
+            self._global_shortcuts.append(shortcut)
+
+    def _invoke_global_navigation(self, callback) -> None:
+        if isinstance(self.focusWidget(), QLineEdit):
+            return
+        callback()
 
     def _update_action_state(self) -> None:
         has_selection = self._current_post() is not None
@@ -1308,31 +1332,6 @@ class MainWindow(QMainWindow):
             self._add_favorite(post)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # type: ignore[override]
-        focus = self.focusWidget()
-        if isinstance(focus, QLineEdit):
-            super().keyPressEvent(event)
-            return
-
-        key = event.key()
-        if key == Qt.Key.Key_Escape:
-            self._cancel_current_operations()
-            return
-        if key == Qt.Key.Key_J:
-            self._move_selection(+1)
-            return
-        if key == Qt.Key.Key_K:
-            self._move_selection(-1)
-            return
-        if key == Qt.Key.Key_F:
-            self._toggle_current_favorite()
-            return
-        if key == Qt.Key.Key_O:
-            self.open_selected_post()
-            return
-        if key == Qt.Key.Key_D:
-            self.download_selected_post()
-            return
-
         super().keyPressEvent(event)
 
     def open_selected_post(self) -> None:
