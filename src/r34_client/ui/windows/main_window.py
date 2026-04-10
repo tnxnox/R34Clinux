@@ -729,6 +729,12 @@ class MainWindow(QMainWindow):
     def _on_tab_changed(self, _index: int) -> None:
         self._update_action_state()
         active_list = self._active_posts_list()
+        if active_list.count() <= 0:
+            self._hide_video_view()
+            self._base_preview_pixmap = None
+            self.preview_label.clear()
+            self.meta_view.clear()
+            return
         current = active_list.currentItem()
         if current is None and active_list.count() > 0:
             # This emits currentItemChanged in the normal path and updates the preview there.

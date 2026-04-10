@@ -54,8 +54,9 @@ def run_search(window: MainWindow) -> None:
 
     window.page_label.setText(f"Page {window.current_page + 1}")
     window.results_list.clear()
-    window.preview_label.setText("Loading results...")
-    window.meta_view.clear()
+    if window.left_tabs.currentWidget() is window.results_list:
+        window.preview_label.setText("Loading results...")
+        window.meta_view.clear()
     window.current_posts = []
     window._refresh_related_tags([])
     window._update_action_state()
@@ -85,7 +86,8 @@ def search_finished(window: MainWindow, token: int, result: object) -> None:
         window.results_list.addItem(item)
 
     if posts:
-        window.results_list.setCurrentRow(0)
+        if window.left_tabs.currentWidget() is window.results_list:
+            window.results_list.setCurrentRow(0)
         window._set_status(f"Loaded {len(posts)} posts.")
     else:
         window.preview_label.setText("No posts matched the search query.")
