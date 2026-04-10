@@ -285,28 +285,37 @@ def refresh_playback_controls(window: MainWindow) -> None:
         window.seek_slider.setEnabled(False)
         return
 
-    if (
-        window._pending_seek_target_ms is not None
-        and not window._seek_dragging
-        and total_ms > 0
-    ):
+    if window._pending_seek_target_ms is not None and not window._seek_dragging:
         if time.monotonic() >= window._seek_ui_unlock_deadline:
             window._pending_seek_target_ms = None
             window._seek_ui_locked = False
             window._seek_ui_hold_ms = 0
 
-    window.seek_slider.setEnabled(total_ms > 0)
+    # Keep the slider interactive while a seek-lock is active, even if VLC length is temporarily unknown.
+    window.seek_slider.setEnabled(total_ms > 0 or window._seek_ui_locked)
     window.seek_slider.blockSignals(True)
-    window.seek_slider.setRange(0, total_ms)
+    if total_ms > 0:
+        window.seek_slider.setRange(0, total_ms)
     if window._seek_dragging:
         shown_ms = window._pending_seek_ms
-        window.seek_slider.setValue(min(shown_ms, total_ms))
+        if total_ms > 0:
+            window.seek_slider.setValue(min(shown_ms, total_ms))
+        else:
+            window.seek_slider.setValue(max(0, shown_ms))
     elif window._seek_ui_locked and window._pending_seek_target_ms is not None:
-        shown_ms = min(window._seek_ui_hold_ms, total_ms)
+        shown_ms = window._seek_ui_hold_ms
+        if total_ms > 0:
+            window.seek_slider.setValue(min(shown_ms, total_ms))
+        else:
+            window.seek_slider.setValue(max(0, shown_ms))
     else:
-        shown_ms = min(current_ms, total_ms)
-        window.seek_slider.setValue(shown_ms)
+        shown_ms = min(current_ms, total_ms) if total_ms > 0 else current_ms
+        if total_ms > 0:
+            window.seek_slider.setValue(shown_ms)
     window.seek_slider.blockSignals(False)
     if not window._seek_ui_locked:
         window.seek_slider.update()
-    window.seek_time_label.setText(f"{window._format_millis(shown_ms)} / {window._format_millis(total_ms)}")
+    shown_total_ms = total_ms if total_ms > 0 else max(window.seek_slider.maximum(), shown_ms)
+    window.seek_time_label.setText(
+        f"{window._format_millis(shown_ms)} / {window._format_millis(shown_total_ms)}"
+    )
