@@ -255,6 +255,7 @@ class MainWindow(QMainWindow):
         self._seek_dragging = False
         self._seek_was_playing = False
         self._seek_ui_locked = False
+        self._seek_ui_unlock_deadline = 0.0
         self._pending_seek_ms = 0
         self._pending_seek_target_ms: int | None = None
         self._pending_seek_deadline = 0.0
