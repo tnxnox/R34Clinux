@@ -140,6 +140,7 @@ def hide_video_view(window: MainWindow) -> None:
             window._vlc_player.stop()
         except Exception:
             pass
+    window._seek_ui_locked = False
     window.seek_slider.blockSignals(True)
     window.seek_slider.setRange(0, 0)
     window.seek_slider.setValue(0)
@@ -208,6 +209,7 @@ def on_seek_slider_released(window: MainWindow) -> None:
     post = window._current_post()
     target = int(window._pending_seek_ms)
     total_ms = max(window.seek_slider.maximum(), 0)
+    window._seek_ui_locked = True
 
     window.seek_slider.blockSignals(True)
     window.seek_slider.setValue(min(target, total_ms))
@@ -278,6 +280,7 @@ def refresh_playback_controls(window: MainWindow) -> None:
         if delta <= 1500:
             window._pending_seek_target_ms = None
             window._pending_seek_retries = 0
+            window._seek_ui_locked = False
         elif time.monotonic() <= window._pending_seek_deadline and window._pending_seek_retries < 3:
             try:
                 window._vlc_player.set_position(
@@ -291,6 +294,7 @@ def refresh_playback_controls(window: MainWindow) -> None:
         else:
             window._pending_seek_target_ms = None
             window._pending_seek_retries = 0
+            window._seek_ui_locked = False
 
     window.seek_slider.setEnabled(total_ms > 0)
     window.seek_slider.blockSignals(True)
@@ -298,7 +302,7 @@ def refresh_playback_controls(window: MainWindow) -> None:
     if window._seek_dragging:
         shown_ms = window._pending_seek_ms
         window.seek_slider.setValue(min(shown_ms, total_ms))
-    elif window._pending_seek_target_ms is not None:
+    elif window._seek_ui_locked and window._pending_seek_target_ms is not None:
         shown_ms = min(window._pending_seek_target_ms, total_ms)
         window.seek_slider.setValue(shown_ms)
     else:
