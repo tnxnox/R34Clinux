@@ -1426,7 +1426,6 @@ class MainWindow(QMainWindow):
             return
         if isinstance(result, Path):
             self._set_status(f"Saved to {result}")
-            QMessageBox.information(self, "R34 Linux Client", f"Downloaded to:\n{result}")
 
     def open_settings(self, initial: bool = False) -> None:
         dialog = SettingsDialog(self.settings, self.store, self)
