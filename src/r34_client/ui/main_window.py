@@ -239,10 +239,10 @@ class MainWindow(QMainWindow):
         self._refresh_favorites()
 
         if not self.settings.has_credentials:
-            self.statusBar().showMessage("Enter API credentials in Settings before searching.")
+            self._set_left_status("Enter API credentials in Settings before searching.")
             self.open_settings(initial=True)
         else:
-            self.statusBar().showMessage("Ready.")
+            self._set_left_status("Ready.")
 
     def _make_client(self, settings: AppSettings) -> Rule34Client:
         return Rule34Client(user_id=settings.user_id, api_key=settings.api_key)
@@ -384,7 +384,14 @@ class MainWindow(QMainWindow):
         layout.addWidget(splitter, 1)
 
         self.setCentralWidget(root)
-        self.setStatusBar(QStatusBar())
+        
+        # Setup status bar with left (client info) and right (sync info) sections
+        status_bar = QStatusBar()
+        self.left_status_label = QLabel("Ready.")
+        self.right_status_label = QLabel("")
+        status_bar.addWidget(self.left_status_label)
+        status_bar.addPermanentWidget(self.right_status_label)
+        self.setStatusBar(status_bar)
 
     def _build_toolbar(self) -> None:
         toolbar = QToolBar("Main")
@@ -478,8 +485,17 @@ class MainWindow(QMainWindow):
         self.volume_slider.setEnabled(self._vlc_player is not None)
         self.seek_slider.setEnabled(self._vlc_player is not None and has_selection and self._current_post_is_video())
 
+    def _set_left_status(self, message: str) -> None:
+        """Set status message on the left side (client info)."""
+        self.left_status_label.setText(message)
+    
+    def _set_right_status(self, message: str) -> None:
+        """Set status message on the right side (sync info)."""
+        self.right_status_label.setText(message)
+    
     def _set_status(self, message: str) -> None:
-        self.statusBar().showMessage(message)
+        """Deprecated: Use _set_left_status or _set_right_status instead."""
+        self._set_left_status(message)
 
     def _set_fit_mode(self, mode: FitMode) -> None:
         self._fit_mode = mode
@@ -664,10 +680,10 @@ class MainWindow(QMainWindow):
         self._favorites_token += 1
         token = self._favorites_token
         if self._sync_enabled() and not local_only:
-            self._set_status("Syncing favorites via FlareSolverr...")
+            self._set_right_status("Syncing favorites via FlareSolverr...")
             worker = FunctionWorker(self._sync_remote_favorites)
         else:
-            self._set_status("Refreshing local favorites...")
+            self._set_right_status("Refreshing local favorites...")
             worker = FunctionWorker(
                 lambda: self.local_favorites.list_favorites(collection_name=self._selected_collection_name())
             )
@@ -734,9 +750,9 @@ class MainWindow(QMainWindow):
                     )
             else:
                 self._rate_limit.note_success()
-                self._set_status(f"Favorites synced ({len(self.favorite_posts)} posts).")
+                self._set_right_status(f"Favorites synced ({len(self.favorite_posts)} posts).")
         else:
-            self._set_status(f"Local favorites loaded ({len(self.favorite_posts)} posts).")
+            self._set_right_status(f"Local favorites loaded ({len(self.favorite_posts)} posts).")
         self._update_action_state()
 
     def _favorites_failed(self, token: int, error_text: str) -> None:
@@ -745,9 +761,9 @@ class MainWindow(QMainWindow):
         first_line = error_text.splitlines()[0] if error_text else "unknown error"
         self._log_sync_debug("Favorites refresh failure", error_text)
         if self._sync_enabled():
-            self._set_status(f"Favorites sync failed: {first_line} (see {self._sync_debug_log_path})")
+            self._set_right_status(f"Favorites sync failed: {first_line} (see {self._sync_debug_log_path})")
         else:
-            self._set_status(f"Local favorites refresh failed: {first_line}")
+            self._set_right_status(f"Local favorites refresh failed: {first_line}")
 
     def _open_results_context_menu(self, position) -> None:
         item = self.results_list.itemAt(position)
@@ -1094,9 +1110,9 @@ class MainWindow(QMainWindow):
 
     def _add_favorite(self, post: Post) -> None:
         if self._sync_enabled():
-            self._set_status(f"Adding #{post.id} to account favorites via FlareSolverr...")
+            self._set_right_status(f"Adding #{post.id} to account favorites via FlareSolverr...")
         else:
-            self._set_status(f"Adding #{post.id} to local favorites...")
+            self._set_right_status(f"Adding #{post.id} to local favorites...")
 
         self._mutation_token += 1
         token = self._mutation_token
@@ -1108,9 +1124,9 @@ class MainWindow(QMainWindow):
 
     def _remove_favorite(self, post: Post) -> None:
         if self._sync_enabled():
-            self._set_status(f"Removing #{post.id} from account favorites via FlareSolverr...")
+            self._set_right_status(f"Removing #{post.id} from account favorites via FlareSolverr...")
         else:
-            self._set_status(f"Removing #{post.id} from local favorites...")
+            self._set_right_status(f"Removing #{post.id} from local favorites...")
 
         self._mutation_token += 1
         token = self._mutation_token
