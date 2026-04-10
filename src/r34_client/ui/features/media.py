@@ -209,6 +209,11 @@ def on_seek_slider_released(window: MainWindow) -> None:
     target = int(window._pending_seek_ms)
     total_ms = max(window.seek_slider.maximum(), 0)
 
+    window.seek_slider.blockSignals(True)
+    window.seek_slider.setValue(min(target, total_ms))
+    window.seek_slider.blockSignals(False)
+    window.seek_time_label.setText(f"{window._format_millis(target)} / {window._format_millis(total_ms)}")
+
     if post is not None:
         source_url = _media_source_url(post)
         if source_url.startswith("http://") or source_url.startswith("https://"):
@@ -290,8 +295,14 @@ def refresh_playback_controls(window: MainWindow) -> None:
     window.seek_slider.setEnabled(total_ms > 0)
     window.seek_slider.blockSignals(True)
     window.seek_slider.setRange(0, total_ms)
-    if not window._seek_dragging:
-        window.seek_slider.setValue(min(current_ms, total_ms))
+    if window._seek_dragging:
+        shown_ms = window._pending_seek_ms
+        window.seek_slider.setValue(min(shown_ms, total_ms))
+    elif window._pending_seek_target_ms is not None:
+        shown_ms = min(window._pending_seek_target_ms, total_ms)
+        window.seek_slider.setValue(shown_ms)
+    else:
+        shown_ms = min(current_ms, total_ms)
+        window.seek_slider.setValue(shown_ms)
     window.seek_slider.blockSignals(False)
-    shown_ms = window.seek_slider.value() if window._seek_dragging else current_ms
     window.seek_time_label.setText(f"{window._format_millis(shown_ms)} / {window._format_millis(total_ms)}")
