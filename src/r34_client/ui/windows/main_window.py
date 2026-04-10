@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from PySide6.QtCore import QEvent, QThreadPool, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QKeyEvent, QPixmap, QShortcut
@@ -76,6 +77,10 @@ class MainWindow(QMainWindow):
         self.client = self._make_client(self.settings)
         self.local_favorites = LocalFavoritesStore()
         self.pool = QThreadPool.globalInstance()
+        cpu_count = max(1, os.cpu_count() or 1)
+        target_threads = max(8, min(24, cpu_count * 3))
+        if self.pool.maxThreadCount() < target_threads:
+            self.pool.setMaxThreadCount(target_threads)
 
         self.current_posts: list[Post] = []
         self.favorite_posts: list[Post] = []

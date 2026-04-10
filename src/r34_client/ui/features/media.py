@@ -20,7 +20,7 @@ def _configure_vlc_backend(window: MainWindow, *, fallback: bool) -> bool:
         window._vlc_fallback_active = False
         return False
 
-    args = ["--no-video-title-show", "--network-caching=1500"]
+    args = ["--no-video-title-show", "--network-caching=600", "--file-caching=300"]
     if fallback:
         # Compatibility profile avoids problematic GPU decode/output paths on some Linux systems.
         args.extend(["--avcodec-hw=none", "--vout=xcb_x11", "--codec=avcodec"])
@@ -44,7 +44,8 @@ def _start_embedded_playback(window: MainWindow, source_url: str) -> None:
     media = window._vlc_instance.media_new(source_url)
     media.add_option(":avcodec-hw=none")
     media.add_option(":codec=avcodec")
-    media.add_option(":network-caching=1500")
+    media.add_option(":network-caching=600")
+    media.add_option(":file-caching=300")
     window._vlc_player.set_media(media)
     window_id = int(window.video_surface.winId())
     if hasattr(window._vlc_player, "set_xwindow"):
@@ -88,7 +89,8 @@ def _restart_playback_at(window: MainWindow, post: Post, target_ms: int) -> None
     media.add_option(f":start-time={start_seconds:.3f}")
     media.add_option(":avcodec-hw=none")
     media.add_option(":codec=avcodec")
-    media.add_option(":network-caching=1500")
+    media.add_option(":network-caching=600")
+    media.add_option(":file-caching=300")
     window._vlc_player.set_media(media)
     window_id = int(window.video_surface.winId())
     if hasattr(window._vlc_player, "set_xwindow"):
