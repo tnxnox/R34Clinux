@@ -63,6 +63,19 @@ def _media_source_url(post: Post) -> str:
     return post.file_url or post.sample_url or post.preview_url
 
 
+def _reset_seek_state(window: MainWindow) -> None:
+    window._seek_dragging = False
+    window._seek_was_playing = False
+    window._seek_ui_locked = False
+    window._seek_ui_unlock_deadline = 0.0
+    window._seek_ui_hold_ms = 0
+    window._seek_ui_stable_ticks = 0
+    window._pending_seek_ms = 0
+    window._pending_seek_target_ms = None
+    window._pending_seek_deadline = 0.0
+    window._pending_seek_retries = 0
+
+
 def _restart_playback_at(window: MainWindow, post: Post, target_ms: int) -> None:
     if window._vlc_player is None or window._vlc_instance is None:
         return
@@ -90,6 +103,7 @@ def _restart_playback_at(window: MainWindow, post: Post, target_ms: int) -> None
 
 
 def show_video_preview(window: MainWindow, post: Post) -> None:
+    _reset_seek_state(window)
     window._base_preview_pixmap = None
     window._is_long_strip_image = False
     window._image_zoom_percent = 100
@@ -140,10 +154,7 @@ def hide_video_view(window: MainWindow) -> None:
             window._vlc_player.stop()
         except Exception:
             pass
-    window._seek_ui_locked = False
-    window._seek_ui_unlock_deadline = 0.0
-    window._seek_ui_hold_ms = 0
-    window._seek_ui_stable_ticks = 0
+    _reset_seek_state(window)
     window.seek_slider.blockSignals(True)
     window.seek_slider.setRange(0, 0)
     window.seek_slider.setValue(0)
