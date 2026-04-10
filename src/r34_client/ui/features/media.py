@@ -224,9 +224,7 @@ def on_seek_slider_released(window: MainWindow) -> None:
     target = int(window._pending_seek_ms)
     total_ms = max(window.seek_slider.maximum(), 0)
     window._seek_ui_locked = True
-    window._seek_ui_unlock_deadline = time.monotonic() + 5.0
     window._seek_ui_hold_ms = target
-    window._seek_ui_stable_ticks = 0
 
     window.seek_slider.blockSignals(True)
     window.seek_slider.setValue(min(target, total_ms))
@@ -241,7 +239,6 @@ def on_seek_slider_released(window: MainWindow) -> None:
                 on_volume_changed(window, window.volume_slider.value())
                 window._pending_seek_target_ms = target
                 window._pending_seek_deadline = time.monotonic() + 2.0
-                window._pending_seek_retries = 0
                 return
             except Exception:
                 # Fall back to direct seek methods below.
@@ -267,7 +264,6 @@ def on_seek_slider_released(window: MainWindow) -> None:
 
     window._pending_seek_target_ms = target
     window._pending_seek_deadline = time.monotonic() + 2.0
-    window._pending_seek_retries = 0
 
 
 def refresh_playback_controls(window: MainWindow) -> None:
@@ -293,27 +289,10 @@ def refresh_playback_controls(window: MainWindow) -> None:
         and not window._seek_dragging
         and total_ms > 0
     ):
-        delta = abs(current_ms - window._pending_seek_target_ms)
-        if time.monotonic() <= window._pending_seek_deadline and window._pending_seek_retries < 3:
-            try:
-                window._vlc_player.set_position(
-                    max(0.0, min(1.0, window._pending_seek_target_ms / total_ms))
-                )
-            except Exception:
-                pass
-            window._pending_seek_retries += 1
-        else:
-            if time.monotonic() >= window._seek_ui_unlock_deadline and delta <= 1000:
-                window._seek_ui_stable_ticks += 1
-                if window._seek_ui_stable_ticks >= 3:
-                    window._pending_seek_target_ms = None
-                    window._pending_seek_retries = 0
-                    window._seek_ui_locked = False
-                    window._seek_ui_unlock_deadline = 0.0
-                    window._seek_ui_hold_ms = 0
-                    window._seek_ui_stable_ticks = 0
-            else:
-                window._seek_ui_stable_ticks = 0
+        if current_ms >= window._pending_seek_target_ms:
+            window._pending_seek_target_ms = None
+            window._seek_ui_locked = False
+            window._seek_ui_hold_ms = 0
 
     window.seek_slider.setEnabled(total_ms > 0)
     window.seek_slider.blockSignals(True)
