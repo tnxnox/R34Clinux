@@ -6,6 +6,9 @@ Python desktop client for rule34.xxx using the official authenticated API.
 
 - Search posts by tag query
 - Browse paginated results
+- Re-run recent searches from a quick history dropdown
+- Save and pin common searches for one-click reuse
+- See related tags suggested from current search results
 - Preview a selected post
 - Save favorites locally with instant indexing in the Favorites tab
 - Optional real-time favorites sync through FlareSolverr
