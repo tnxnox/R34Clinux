@@ -25,3 +25,7 @@ dist/
 
 # Test folder
 tests/
+
+# Internal project notes/agent configs
+.github/ROADMAP_INTERNAL.md
+.github/agents/
