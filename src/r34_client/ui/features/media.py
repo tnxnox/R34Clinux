@@ -74,6 +74,7 @@ def _reset_seek_state(window: MainWindow) -> None:
     window._pending_seek_target_ms = None
     window._pending_seek_deadline = 0.0
     window._pending_seek_retries = 0
+    window.seek_slider.setUpdatesEnabled(True)
 
 
 def _restart_playback_at(window: MainWindow, post: Post, target_ms: int) -> None:
@@ -226,6 +227,7 @@ def on_seek_slider_released(window: MainWindow) -> None:
     window._seek_ui_locked = True
     window._seek_ui_hold_ms = target
     window._seek_ui_unlock_deadline = time.monotonic() + 3.0
+    window.seek_slider.setUpdatesEnabled(False)
 
     window.seek_slider.blockSignals(True)
     window.seek_slider.setValue(min(target, total_ms))
@@ -294,6 +296,7 @@ def refresh_playback_controls(window: MainWindow) -> None:
             window._pending_seek_target_ms = None
             window._seek_ui_locked = False
             window._seek_ui_hold_ms = 0
+            window.seek_slider.setUpdatesEnabled(True)
 
     window.seek_slider.setEnabled(total_ms > 0)
     window.seek_slider.blockSignals(True)
@@ -303,7 +306,7 @@ def refresh_playback_controls(window: MainWindow) -> None:
         window.seek_slider.setValue(min(shown_ms, total_ms))
     elif window._seek_ui_locked and window._pending_seek_target_ms is not None:
         shown_ms = min(window._seek_ui_hold_ms, total_ms)
-        window.seek_slider.setValue(shown_ms)
+        # Keep the slider visually frozen during the restart window.
     else:
         shown_ms = min(current_ms, total_ms)
         window.seek_slider.setValue(shown_ms)
