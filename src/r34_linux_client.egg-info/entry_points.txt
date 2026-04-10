@@ -1,2 +1,0 @@
-[console_scripts]
-r34-linux-client = r34_client.__main__:main

@@ -3,6 +3,10 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
 
 # Virtual envs
 .venv/
@@ -22,6 +26,7 @@ dist/
 
 # Logs and local runtime files
 *.log
+logs/
 
 # Test folder
 tests/
