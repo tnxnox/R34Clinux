@@ -8,7 +8,7 @@ from xml.etree import ElementTree as ET
 import requests
 
 from .autocomplete import AutocompleteClient
-from .models import Post
+from .models import Post, TagSuggestion
 
 
 class Rule34APIError(RuntimeError):
@@ -94,5 +94,5 @@ class Rule34Client:
         except ET.ParseError as exc:
             raise Rule34APIError("The API returned data that could not be parsed.") from exc
 
-    def autocomplete_tags(self, prefix: str) -> list["TagSuggestion"]:
+    def autocomplete_tags(self, prefix: str) -> list[TagSuggestion]:
         return AutocompleteClient().fetch(prefix)
