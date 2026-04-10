@@ -838,21 +838,96 @@ class MainWindow(QMainWindow):
         worker.signals.failed.connect(self._operation_failed)
         self._start_worker(worker)
 
-    def _remove_multiple_favorites_impl(self, posts: list[Post]) -> list[int]:
+    def _remove_multiple_favorites_impl(self, posts: list[Post]) -> dict[str, object]:
         removed_ids: list[int] = []
+        failed_ids: list[int] = []
+        failed_errors: list[str] = []
+
+        sync_client = self._make_sync_client(self.settings)
         for post in posts:
-            self._remove_favorite_impl(post)
-            removed_ids.append(post.id)
-        return removed_ids
+            if sync_client is None:
+                self.local_favorites.remove_favorite(post.id)
+                removed_ids.append(post.id)
+                continue
+
+            if self._degraded_mode_active():
+                failed_ids.append(post.id)
+                failed_errors.append(f"#{post.id}: degraded mode active ({self._degraded_mode_remaining()}s remaining)")
+                continue
+
+            attempts = 3
+            success = False
+            last_error = ""
+            for attempt in range(1, attempts + 1):
+                try:
+                    sync_client.remove_favorite(post.id)
+                    self._rate_limit.note_success()
+                    success = True
+                    break
+                except FlareSolverrError as exc:
+                    last_error = str(exc)
+                    self._mark_rate_limited_if_needed("favorite_bulk_remove", last_error)
+                    if is_rate_limited_error_message(last_error) and attempt < attempts:
+                        time.sleep(0.35 * attempt)
+                        continue
+                    break
+
+            if success:
+                self.local_favorites.remove_favorite(post.id)
+                removed_ids.append(post.id)
+                continue
+
+            failed_ids.append(post.id)
+            failed_errors.append(f"#{post.id}: {last_error or 'unknown sync error'}")
+            self._log_sync_debug(
+                f"Bulk favorite remove sync failure for #{post.id}",
+                f"Error: {last_error or 'unknown sync error'}\n\n{sync_client.debug_summary()}",
+            )
+
+        if failed_ids:
+            self._last_favorite_sync_failed = True
+            self._last_favorite_sync_error = f"Bulk remove failed for {len(failed_ids)} post(s)."
+            self._last_favorite_sync_debug = "\n".join(failed_errors)
+        else:
+            self._last_favorite_sync_failed = False
+            self._last_favorite_sync_error = ""
+            self._last_favorite_sync_debug = ""
+
+        return {
+            "removed_ids": removed_ids,
+            "failed_ids": failed_ids,
+            "failed_errors": failed_errors,
+        }
 
     def _favorite_bulk_mutation_finished(self, token: int, result: object) -> None:
         if token != self._mutation_token:
             return
-        removed_ids = [int(item) for item in result] if isinstance(result, list) else []
+        if isinstance(result, dict):
+            removed_ids = [int(item) for item in result.get("removed_ids", [])]
+            failed_ids = [int(item) for item in result.get("failed_ids", [])]
+            failed_errors = [str(item) for item in result.get("failed_errors", [])]
+        else:
+            removed_ids = []
+            failed_ids = []
+            failed_errors = []
+
         for post_id in removed_ids:
             self.favorite_ids.discard(post_id)
-        self._set_status(f"Removed {len(removed_ids)} favorites.")
-        if self._sync_enabled() and not self._last_favorite_sync_failed:
+
+        if failed_ids:
+            self._set_status(
+                f"Removed {len(removed_ids)} favorites; {len(failed_ids)} failed and were kept."
+            )
+            QMessageBox.warning(
+                self,
+                "Bulk Remove Partial Failure",
+                "Some favorites could not be removed remotely and were kept locally to avoid desync.\n\n"
+                + "\n".join(failed_errors[:12]),
+            )
+        else:
+            self._set_status(f"Removed {len(removed_ids)} favorites.")
+
+        if self._sync_enabled():
             self._refresh_favorites()
         else:
             self._refresh_local_favorites()
