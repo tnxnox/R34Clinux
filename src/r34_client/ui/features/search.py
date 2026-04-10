@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from collections import Counter
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QListWidgetItem
 
 from ...concurrency import FunctionWorker
-from ...models import Post
+from ...models import Post, TagSuggestion
 from ..sync.favorites_sync import sync_remote_favorites
 
 if TYPE_CHECKING:
@@ -15,9 +16,7 @@ if TYPE_CHECKING:
 
 def search(window: MainWindow) -> None:
     query = window.search_input.text().strip()
-    window.current_query = query
-    window.current_page = 0
-    run_search(window)
+    apply_search_query(window, query)
 
 
 def next_page(window: MainWindow) -> None:
@@ -34,6 +33,20 @@ def previous_page(window: MainWindow) -> None:
     run_search(window)
 
 
+def apply_search_query(window: MainWindow, query: str, *, record_history: bool = True) -> None:
+    normalized_query = query.strip()
+    if not normalized_query:
+        return
+
+    window.search_input.setText(normalized_query)
+    window.current_query = normalized_query
+    window.current_page = 0
+    window._update_action_state()
+    if record_history:
+        record_search_history(window, normalized_query)
+    run_search(window)
+
+
 def run_search(window: MainWindow) -> None:
     if not window.settings.has_credentials:
         window.open_settings(initial=True)
@@ -44,6 +57,7 @@ def run_search(window: MainWindow) -> None:
     window.preview_label.setText("Loading results...")
     window.meta_view.clear()
     window.current_posts = []
+    window._refresh_related_tags([])
     window._update_action_state()
     window._set_status("Searching...")
 
@@ -78,6 +92,7 @@ def search_finished(window: MainWindow, token: int, result: object) -> None:
         window.meta_view.setPlainText("No results.")
         window._set_status("Search completed with no results.")
 
+    update_related_tags(window, posts)
     window._update_action_state()
 
 
@@ -181,3 +196,155 @@ def favorites_failed(window: MainWindow, token: int, error_text: str) -> None:
         window._set_right_status(f"Favorites sync failed: {first_line} (see {window._sync_debug_log_path})")
     else:
         window._set_right_status(f"Local favorites refresh failed: {first_line}")
+
+
+def record_search_history(window: MainWindow, query: str) -> None:
+    normalized_query = query.strip()
+    if not normalized_query:
+        return
+
+    history = [item for item in window._search_history if item != normalized_query]
+    history.insert(0, normalized_query)
+    window._search_history = history[: window._search_history_limit]
+    window.store.save_search_history(window._search_history, window._search_history_limit)
+    refresh_search_history(window)
+
+
+def refresh_search_history(window: MainWindow) -> None:
+    current_query = window.search_history_combo.currentData()
+    window.search_history_combo.blockSignals(True)
+    window.search_history_combo.clear()
+    window.search_history_combo.addItem("Recent searches", None)
+    for query in window._search_history:
+        window.search_history_combo.addItem(query, query)
+    if current_query is not None:
+        index = window.search_history_combo.findData(current_query)
+        if index >= 0:
+            window.search_history_combo.setCurrentIndex(index)
+    else:
+        window.search_history_combo.setCurrentIndex(0)
+    window.search_history_combo.blockSignals(False)
+
+
+def on_search_history_activated(window: MainWindow, index: int) -> None:
+    query = window.search_history_combo.itemData(index)
+    normalized_query = str(query).strip() if query is not None else ""
+    if not normalized_query:
+        return
+
+    apply_search_query(window, normalized_query)
+    window.search_history_combo.blockSignals(True)
+    window.search_history_combo.setCurrentIndex(0)
+    window.search_history_combo.blockSignals(False)
+
+
+def save_current_search(window: MainWindow) -> None:
+    normalized_query = window.search_input.text().strip()
+    if not normalized_query:
+        return
+
+    queries = [item for item in window._saved_searches if item != normalized_query]
+    queries.insert(0, normalized_query)
+    window._saved_searches = queries[: window._saved_searches_limit]
+    window.store.save_saved_searches(window._saved_searches, window._saved_searches_limit)
+    refresh_saved_searches(window)
+    window._update_action_state()
+
+
+def refresh_saved_searches(window: MainWindow) -> None:
+    current_query = window.saved_searches_combo.currentData()
+    window.saved_searches_combo.blockSignals(True)
+    window.saved_searches_combo.clear()
+    window.saved_searches_combo.addItem("Saved searches", None)
+    for query in window._saved_searches:
+        window.saved_searches_combo.addItem(query, query)
+    if current_query is not None:
+        index = window.saved_searches_combo.findData(current_query)
+        if index >= 0:
+            window.saved_searches_combo.setCurrentIndex(index)
+    else:
+        window.saved_searches_combo.setCurrentIndex(0)
+    window.saved_searches_combo.blockSignals(False)
+
+
+def on_saved_search_activated(window: MainWindow, index: int) -> None:
+    query = window.saved_searches_combo.itemData(index)
+    normalized_query = str(query).strip() if query is not None else ""
+    if not normalized_query:
+        return
+
+    apply_search_query(window, normalized_query)
+    window.saved_searches_combo.blockSignals(True)
+    window.saved_searches_combo.setCurrentIndex(0)
+    window.saved_searches_combo.blockSignals(False)
+
+
+def toggle_pinned_filter(window: MainWindow) -> None:
+    normalized_query = window.search_input.text().strip()
+    if not normalized_query:
+        return
+
+    pinned = [item for item in window._pinned_filters if item != normalized_query]
+    if len(pinned) == len(window._pinned_filters):
+        pinned.insert(0, normalized_query)
+    window._pinned_filters = pinned[: window._pinned_filters_limit]
+    window.store.save_pinned_filters(window._pinned_filters, window._pinned_filters_limit)
+    refresh_pinned_filters(window)
+    window._update_action_state()
+
+
+def refresh_pinned_filters(window: MainWindow) -> None:
+    current_query = window.pinned_filters_combo.currentData()
+    window.pinned_filters_combo.blockSignals(True)
+    window.pinned_filters_combo.clear()
+    window.pinned_filters_combo.addItem("Pinned filters", None)
+    for query in window._pinned_filters:
+        window.pinned_filters_combo.addItem(query, query)
+    if current_query is not None:
+        index = window.pinned_filters_combo.findData(current_query)
+        if index >= 0:
+            window.pinned_filters_combo.setCurrentIndex(index)
+    else:
+        window.pinned_filters_combo.setCurrentIndex(0)
+    window.pinned_filters_combo.blockSignals(False)
+
+
+def on_pinned_filter_activated(window: MainWindow, index: int) -> None:
+    query = window.pinned_filters_combo.itemData(index)
+    normalized_query = str(query).strip() if query is not None else ""
+    if not normalized_query:
+        return
+
+    apply_search_query(window, normalized_query)
+    window.pinned_filters_combo.blockSignals(True)
+    window.pinned_filters_combo.setCurrentIndex(0)
+    window.pinned_filters_combo.blockSignals(False)
+
+
+def update_related_tags(window: MainWindow, posts: list[Post]) -> None:
+    window.related_tags_list.blockSignals(True)
+    window.related_tags_list.clear()
+
+    suggestions = build_related_tags(posts, window.current_query, limit=12)
+    for suggestion in suggestions:
+        item = QListWidgetItem(f"{suggestion.value} ({suggestion.count or 1})")
+        item.setData(Qt.ItemDataRole.UserRole, suggestion.value)
+        window.related_tags_list.addItem(item)
+
+    window.related_tags_list.blockSignals(False)
+    window.related_tags_list.setEnabled(bool(suggestions))
+
+
+def build_related_tags(posts: list[Post], query: str, limit: int = 12) -> list[TagSuggestion]:
+    if not posts:
+        return []
+
+    excluded_tokens = {token.strip() for token in query.split() if token.strip()}
+    tag_counts: Counter[str] = Counter()
+    for post in posts:
+        tag_counts.update(tag for tag in post.tags if tag not in excluded_tokens)
+
+    suggestions: list[TagSuggestion] = []
+    for tag, count in sorted(tag_counts.items(), key=lambda item: (-item[1], item[0]))[: max(0, int(limit))]:
+        suggestions.append(TagSuggestion(value=tag, label=f"{tag} ({count})", count=count))
+    return suggestions
