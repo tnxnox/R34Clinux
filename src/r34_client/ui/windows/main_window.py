@@ -82,6 +82,12 @@ class MainWindow(QMainWindow):
         self.favorite_ids: set[int] = set()
         self.current_page = 0
         self.current_query = ""
+        self._search_history_limit = 12
+        self._search_history = self.store.load_search_history(self._search_history_limit)
+        self._saved_searches_limit = 12
+        self._saved_searches = self.store.load_saved_searches(self._saved_searches_limit)
+        self._pinned_filters_limit = 8
+        self._pinned_filters = self.store.load_pinned_filters(self._pinned_filters_limit)
         self._search_token = 0
         self._preview_token = 0
         self._favorites_token = 0
@@ -104,6 +110,7 @@ class MainWindow(QMainWindow):
         self.search_input.setPlaceholderText("Search tags, e.g. character rating:safe")
         self.search_input.returnPressed.connect(self.search)
         self.search_input.textEdited.connect(self._schedule_autocomplete)
+        self.search_input.textChanged.connect(self._update_action_state)
 
         self.autocomplete_timer = QTimer(self)
         self.autocomplete_timer.setSingleShot(True)
@@ -121,6 +128,24 @@ class MainWindow(QMainWindow):
 
         self.search_button = QPushButton("Search")
         self.search_button.clicked.connect(self.search)
+
+        self.search_history_combo = QComboBox()
+        self.search_history_combo.setMinimumWidth(220)
+        self.search_history_combo.activated[int].connect(self._on_search_history_selected)
+
+        self.saved_searches_combo = QComboBox()
+        self.saved_searches_combo.setMinimumWidth(220)
+        self.saved_searches_combo.activated[int].connect(self._on_saved_search_selected)
+
+        self.pinned_filters_combo = QComboBox()
+        self.pinned_filters_combo.setMinimumWidth(220)
+        self.pinned_filters_combo.activated[int].connect(self._on_pinned_filter_selected)
+
+        self.save_search_button = QPushButton("Save search")
+        self.save_search_button.clicked.connect(self._save_current_search)
+
+        self.pin_filter_button = QPushButton("Pin filter")
+        self.pin_filter_button.clicked.connect(self._toggle_current_pinned_filter)
 
         self.prev_button = QPushButton("Previous")
         self.prev_button.clicked.connect(self.previous_page)
@@ -148,6 +173,12 @@ class MainWindow(QMainWindow):
 
         self.manage_collections_button = QPushButton("Collections")
         self.manage_collections_button.clicked.connect(self._open_collection_manager)
+
+        self.related_tags_label = QLabel("Related tags")
+        self.related_tags_list = QListWidget()
+        self.related_tags_list.setMaximumHeight(140)
+        self.related_tags_list.itemClicked.connect(self._related_tag_selected)
+        self.related_tags_list.setEnabled(False)
 
         self.left_tabs = QTabWidget()
         self.left_tabs.addTab(self.results_list, "Search Results")
@@ -233,7 +264,11 @@ class MainWindow(QMainWindow):
         self._build_layout()
         self._build_toolbar()
         self._register_global_shortcuts()
+        self._refresh_search_history()
+        self._refresh_saved_searches()
+        self._refresh_pinned_filters()
         self._refresh_collection_filter()
+        self._refresh_related_tags([])
         self._configure_background_sync_timer()
         self._update_action_state()
         self._refresh_favorites()
@@ -298,6 +333,42 @@ class MainWindow(QMainWindow):
                 self.collection_filter.setCurrentIndex(index)
         self.collection_filter.blockSignals(False)
 
+    def _refresh_search_history(self) -> None:
+        search_feature.refresh_search_history(self)
+
+    def _on_search_history_selected(self, index: int) -> None:
+        search_feature.on_search_history_activated(self, index)
+
+    def _refresh_saved_searches(self) -> None:
+        search_feature.refresh_saved_searches(self)
+
+    def _on_saved_search_selected(self, index: int) -> None:
+        search_feature.on_saved_search_activated(self, index)
+
+    def _save_current_search(self) -> None:
+        search_feature.save_current_search(self)
+
+    def _refresh_pinned_filters(self) -> None:
+        search_feature.refresh_pinned_filters(self)
+
+    def _on_pinned_filter_selected(self, index: int) -> None:
+        search_feature.on_pinned_filter_activated(self, index)
+
+    def _toggle_current_pinned_filter(self) -> None:
+        search_feature.toggle_pinned_filter(self)
+
+    def _refresh_related_tags(self, posts: list[Post]) -> None:
+        search_feature.update_related_tags(self, posts)
+
+    def _related_tag_selected(self, item: QListWidgetItem | None) -> None:
+        if item is None:
+            return
+        query = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(query, str) or not query.strip():
+            return
+        combined_query = f"{self.current_query} {query}".strip()
+        search_feature.apply_search_query(self, combined_query)
+
     def _on_collection_filter_changed(self, _: int) -> None:
         self._refresh_favorites()
 
@@ -322,10 +393,21 @@ class MainWindow(QMainWindow):
         search_row = QHBoxLayout()
         search_row.addWidget(self.search_input, 1)
         search_row.addWidget(self.search_button)
+        search_row.addWidget(QLabel("Recent"))
+        search_row.addWidget(self.search_history_combo)
         search_row.addWidget(self.prev_button)
         search_row.addWidget(self.next_button)
         search_row.addWidget(self.page_label)
         layout.addLayout(search_row)
+
+        preset_row = QHBoxLayout()
+        preset_row.addWidget(QLabel("Pinned"))
+        preset_row.addWidget(self.pinned_filters_combo)
+        preset_row.addWidget(QLabel("Saved"))
+        preset_row.addWidget(self.saved_searches_combo)
+        preset_row.addWidget(self.save_search_button)
+        preset_row.addWidget(self.pin_filter_button)
+        layout.addLayout(preset_row)
 
         splitter = QSplitter()
         splitter.setOrientation(Qt.Orientation.Horizontal)
@@ -338,6 +420,9 @@ class MainWindow(QMainWindow):
         collection_row.addWidget(self.collection_filter, 1)
         collection_row.addWidget(self.manage_collections_button)
         left_layout.addLayout(collection_row)
+
+        left_layout.addWidget(self.related_tags_label)
+        left_layout.addWidget(self.related_tags_list)
 
         left_layout.addWidget(self.left_tabs)
 
