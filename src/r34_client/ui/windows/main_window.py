@@ -308,6 +308,8 @@ class MainWindow(QMainWindow):
             solver_url=settings.flaresolverr_url,
             website_username=settings.website_username,
             website_password=settings.website_password,
+            timeout=20,
+            max_timeout_ms=20000,
         )
 
     def _sync_enabled(self) -> bool:
