@@ -461,6 +461,8 @@ class MainWindow(QMainWindow):
             ("Esc", self._cancel_current_operations),
             ("J", lambda: self._invoke_global_navigation(lambda: self._move_selection(+1))),
             ("K", lambda: self._invoke_global_navigation(lambda: self._move_selection(-1))),
+            ("Ctrl+J", lambda: self._invoke_global_navigation(lambda: self._extend_selection(+1))),
+            ("Ctrl+K", lambda: self._invoke_global_navigation(lambda: self._extend_selection(-1))),
             ("F", lambda: self._invoke_global_navigation(self._toggle_current_favorite)),
             ("O", lambda: self._invoke_global_navigation(self.open_selected_post)),
             ("D", lambda: self._invoke_global_navigation(self.download_selected_post)),
@@ -1763,6 +1765,27 @@ class MainWindow(QMainWindow):
             current_row = 0
         new_row = max(0, min(target_list.count() - 1, current_row + delta))
         target_list.setCurrentRow(new_row)
+
+    def _extend_selection(self, delta: int) -> None:
+        """Extend selection to the next/previous item (Ctrl+J/K)."""
+        target_list = self._active_posts_list()
+        if target_list.count() <= 0:
+            return
+        current_row = target_list.currentRow()
+        if current_row < 0:
+            current_row = 0
+        new_row = max(0, min(target_list.count() - 1, current_row + delta))
+        
+        # Set new row as current
+        target_list.setCurrentRow(new_row)
+        
+        # Select from min to max row to create continuous selection
+        min_row = min(current_row, new_row)
+        max_row = max(current_row, new_row)
+        for row in range(min_row, max_row + 1):
+            item = target_list.item(row)
+            if item is not None:
+                item.setSelected(True)
 
     def _toggle_current_favorite(self) -> None:
         post = self._current_post()
