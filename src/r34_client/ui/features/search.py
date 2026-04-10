@@ -137,6 +137,7 @@ def sync_remote(window: MainWindow) -> tuple[list[Post], bool]:
         make_sync_client=window._make_sync_client,
         log_sync_debug=window._log_sync_debug,
         on_sync_error=lambda message: window._mark_rate_limited_if_needed("favorites_sync", message),
+        pending_remote_add_ids=window._pending_remote_add_ids,
     )
 
 

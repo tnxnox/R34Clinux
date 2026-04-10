@@ -108,6 +108,7 @@ class MainWindow(QMainWindow):
         self._last_favorite_sync_failed = False
         self._last_favorite_sync_error = ""
         self._last_favorite_sync_debug = ""
+        self._pending_remote_add_ids: set[int] = set()
         self._sync_debug_log_path = self.local_favorites.database_path.parent / "sync-debug.log"
         self._is_long_strip_image = False
 

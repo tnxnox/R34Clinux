@@ -64,6 +64,7 @@ def add_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dict[s
                 try:
                     sync_client.add_favorite(post.id)
                     window._rate_limit.note_success()
+                    window._pending_remote_add_ids.discard(post.id)
                     remote_success = True
                     break
                 except FlareSolverrError as exc:
@@ -84,6 +85,7 @@ def add_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dict[s
                         f"Reason: {last_error or 'rate limited'}\n\n{sync_client.debug_summary()}",
                     )
                     window.local_favorites.add_favorite(post)
+                    window._pending_remote_add_ids.add(post.id)
                     added_ids.append(post.id)
                     continue
 
@@ -96,6 +98,7 @@ def add_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dict[s
                 continue
 
         window.local_favorites.add_favorite(post)
+        window._pending_remote_add_ids.discard(post.id)
         added_ids.append(post.id)
 
     if failed_ids:
@@ -196,6 +199,7 @@ def remove_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dic
                     f"#{post.id}: deferred remote remove (degraded mode active: {window._degraded_mode_remaining()}s remaining)"
                 )
                 window.local_favorites.remove_favorite(post.id)
+                window._pending_remote_add_ids.discard(post.id)
                 removed_ids.append(post.id)
                 continue
 
@@ -206,6 +210,7 @@ def remove_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dic
             try:
                 sync_client.remove_favorite(post.id)
                 window._rate_limit.note_success()
+                window._pending_remote_add_ids.discard(post.id)
                 success = True
                 break
             except FlareSolverrError as exc:
@@ -218,6 +223,7 @@ def remove_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dic
 
         if success:
             window.local_favorites.remove_favorite(post.id)
+            window._pending_remote_add_ids.discard(post.id)
             removed_ids.append(post.id)
             continue
 
@@ -388,6 +394,10 @@ def add_favorite_impl(window: MainWindow, post: Post) -> int:
                     )
                     break
     window.local_favorites.add_favorite(post)
+    if window._last_favorite_sync_failed and is_rate_limited_error_message(window._last_favorite_sync_error):
+        window._pending_remote_add_ids.add(post.id)
+    else:
+        window._pending_remote_add_ids.discard(post.id)
     return post.id
 
 
@@ -434,6 +444,7 @@ def remove_favorite_impl(window: MainWindow, post: Post) -> int:
                 return post.id
 
     window.local_favorites.remove_favorite(post.id)
+    window._pending_remote_add_ids.discard(post.id)
     return post.id
 
 
