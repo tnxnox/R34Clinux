@@ -4,6 +4,7 @@ import html
 import json
 import re
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 from xml.etree import ElementTree as ET
 
 
@@ -55,9 +56,31 @@ def looks_logged_in(html_text: str) -> bool:
 
 def extract_post_ids(html_text: str) -> list[int]:
     normalized = html.unescape(html_text or "")
-    matches = re.findall(r"page=post(?:&|\?)s=view(?:&|\?)id=(\d+)", normalized)
     seen: set[int] = set()
     ids: list[int] = []
+
+    href_matches = re.findall(r"href\s*=\s*['\"]([^'\"]+)['\"]", normalized, flags=re.IGNORECASE)
+    for href in href_matches:
+        parsed = urlparse(href)
+        query = parse_qs(parsed.query)
+        if query.get("page", [""])[0] != "post":
+            continue
+        if query.get("s", [""])[0] != "view":
+            continue
+        post_id_raw = query.get("id", [""])[0]
+        if not str(post_id_raw).isdigit():
+            continue
+        post_id = int(str(post_id_raw))
+        if post_id in seen:
+            continue
+        seen.add(post_id)
+        ids.append(post_id)
+
+    if ids:
+        return ids
+
+    # Fallback for malformed links without a quoted href value.
+    matches = re.findall(r"page=post(?:&|\?)s=view(?:&|\?)id=(\d+)", normalized)
     for value in matches:
         post_id = int(value)
         if post_id in seen:
@@ -71,7 +94,7 @@ def extract_items(html_text: str) -> list[tuple[int, str]]:
     normalized = html.unescape(html_text or "")
 
     tile_matches = re.findall(
-        r'<a[^>]+id="p(\d+)"[^>]*>\s*<img[^>]+src="([^"]+)"',
+        r"<a[^>]+id=['\"]p(\d+)['\"][^>]*>\s*<img[^>]+src=['\"]([^'\"]+)['\"]",
         normalized,
         flags=re.IGNORECASE,
     )

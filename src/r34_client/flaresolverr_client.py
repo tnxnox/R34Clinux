@@ -505,7 +505,9 @@ class FlareSolverrFavoritesClient:
 
         for url in candidates:
             html = self._request_via_solver(url)
-            for post_id, preview_url in self._extract_items(html):
+            items = self._extract_items(html)
+            self._debug(f"list_favorites_html: url={url} extracted_items={len(items)}")
+            for post_id, preview_url in items:
                 if post_id in seen_ids:
                     continue
                 seen_ids.add(post_id)
@@ -521,6 +523,7 @@ class FlareSolverrFavoritesClient:
                 if len(posts) >= max(1, int(limit)):
                     return posts
 
+            self._debug(f"list_favorites_html: total_unique_items={len(posts)}")
         return posts
 
     def add_favorite(self, post_id: int) -> None:
