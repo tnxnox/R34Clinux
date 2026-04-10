@@ -14,6 +14,15 @@ if TYPE_CHECKING:
     from ..windows.main_window import MainWindow
 
 
+def _wait_for_degraded_mode_window(window: MainWindow, *, max_wait_seconds: float) -> bool:
+    waited = 0.0
+    while window._degraded_mode_active() and waited < max_wait_seconds:
+        step = min(0.5, max_wait_seconds - waited)
+        time.sleep(step)
+        waited += step
+    return not window._degraded_mode_active()
+
+
 def add_multiple_favorites(window: MainWindow, posts: list[Post]) -> None:
     unique_posts = {post.id: post for post in posts}
     if not unique_posts:
@@ -32,17 +41,23 @@ def add_multiple_favorites(window: MainWindow, posts: list[Post]) -> None:
 def add_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dict[str, object]:
     added_ids: list[int] = []
     failed_ids: list[int] = []
+    deferred_sync_ids: list[int] = []
     failed_errors: list[str] = []
 
     sync_client = window._make_sync_client(window.settings)
     for post in posts:
         if sync_client is not None:
             if window._degraded_mode_active():
-                failed_ids.append(post.id)
-                failed_errors.append(f"#{post.id}: degraded mode active ({window._degraded_mode_remaining()}s remaining)")
-                continue
+                if not _wait_for_degraded_mode_window(window, max_wait_seconds=8.0):
+                    deferred_sync_ids.append(post.id)
+                    failed_errors.append(
+                        f"#{post.id}: deferred remote add (degraded mode active: {window._degraded_mode_remaining()}s remaining)"
+                    )
+                    window.local_favorites.add_favorite(post)
+                    added_ids.append(post.id)
+                    continue
 
-            attempts = 3
+            attempts = 5
             remote_success = False
             last_error = ""
             for attempt in range(1, attempts + 1):
@@ -55,11 +70,23 @@ def add_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dict[s
                     last_error = str(exc)
                     window._mark_rate_limited_if_needed("favorite_bulk_add", last_error)
                     if is_rate_limited_error_message(last_error) and attempt < attempts:
-                        time.sleep(0.35 * attempt)
+                        delay = max(0.35 * attempt, min(3.0, float(window._degraded_mode_remaining() or 0)))
+                        time.sleep(delay)
                         continue
                     break
 
             if not remote_success:
+                if is_rate_limited_error_message(last_error):
+                    deferred_sync_ids.append(post.id)
+                    failed_errors.append(f"#{post.id}: deferred remote add ({last_error or 'rate limited'})")
+                    window._log_sync_debug(
+                        f"Bulk favorite add deferred for #{post.id}",
+                        f"Reason: {last_error or 'rate limited'}\n\n{sync_client.debug_summary()}",
+                    )
+                    window.local_favorites.add_favorite(post)
+                    added_ids.append(post.id)
+                    continue
+
                 failed_ids.append(post.id)
                 failed_errors.append(f"#{post.id}: {last_error or 'unknown sync error'}")
                 window._log_sync_debug(
@@ -83,6 +110,7 @@ def add_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dict[s
     return {
         "added_ids": added_ids,
         "failed_ids": failed_ids,
+        "deferred_sync_ids": deferred_sync_ids,
         "failed_errors": failed_errors,
     }
 
@@ -94,10 +122,12 @@ def favorite_bulk_add_finished(window: MainWindow, token: int, result: object) -
     if isinstance(result, dict):
         added_ids = [int(item) for item in result.get("added_ids", [])]
         failed_ids = [int(item) for item in result.get("failed_ids", [])]
+        deferred_sync_ids = [int(item) for item in result.get("deferred_sync_ids", [])]
         failed_errors = [str(item) for item in result.get("failed_errors", [])]
     else:
         added_ids = []
         failed_ids = []
+        deferred_sync_ids = []
         failed_errors = []
 
     for post_id in added_ids:
@@ -118,7 +148,12 @@ def favorite_bulk_add_finished(window: MainWindow, token: int, result: object) -
                 "Some favorites could not be added remotely.\n\n" + "\n".join(failed_errors[:12]),
             )
     else:
-        window._set_status(f"Added {len(added_ids)} favorites.")
+        if deferred_sync_ids:
+            window._set_status(
+                f"Added {len(added_ids)} favorites locally; remote sync deferred for {len(deferred_sync_ids)} due to rate limits."
+            )
+        else:
+            window._set_status(f"Added {len(added_ids)} favorites.")
 
     if window._sync_enabled() and failed_ids:
         window._refresh_favorites()
@@ -154,11 +189,12 @@ def remove_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dic
             continue
 
         if window._degraded_mode_active():
-            failed_ids.append(post.id)
-            failed_errors.append(f"#{post.id}: degraded mode active ({window._degraded_mode_remaining()}s remaining)")
-            continue
+            if not _wait_for_degraded_mode_window(window, max_wait_seconds=8.0):
+                failed_ids.append(post.id)
+                failed_errors.append(f"#{post.id}: degraded mode active ({window._degraded_mode_remaining()}s remaining)")
+                continue
 
-        attempts = 3
+        attempts = 5
         success = False
         last_error = ""
         for attempt in range(1, attempts + 1):
@@ -171,7 +207,8 @@ def remove_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dic
                 last_error = str(exc)
                 window._mark_rate_limited_if_needed("favorite_bulk_remove", last_error)
                 if is_rate_limited_error_message(last_error) and attempt < attempts:
-                    time.sleep(0.35 * attempt)
+                    delay = max(0.35 * attempt, min(3.0, float(window._degraded_mode_remaining() or 0)))
+                    time.sleep(delay)
                     continue
                 break
 
