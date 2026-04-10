@@ -504,18 +504,42 @@ class FlareSolverrFavoritesClient:
         want_present = query == "add"
         self._debug(f"mutate_favorite: action={query} post_id={target_id}")
         self._ensure_web_login()
-        before_present = self._favorite_exists_in_view(target_id)
-        self._debug(f"mutate_favorite: before_present={before_present}")
-        if before_present == want_present:
-            self._debug("mutate_favorite: already in desired state")
+        if want_present:
+            add_url = f"https://rule34.xxx/public/addfav.php?id={target_id}"
+            for auth_attempt in range(1, 3):
+                raw = self._request_via_solver(add_url, headers=None)
+                body = self._extract_body_text(raw)
+                self._debug(f"mutate_favorite: endpoint={add_url} body={body[:120]}")
+
+                if self._looks_rate_limited(body):
+                    raise FlareSolverrError(
+                        "Rule34 temporarily rate limited favorite add (HTTP 429). Please retry in a few seconds."
+                    )
+
+                if body != "2":
+                    # Endpoint accepted the add request. Favor responsiveness over heavy verification polling.
+                    return
+
+                if auth_attempt == 1:
+                    self._debug("mutate_favorite: add endpoint reported not logged in, forcing re-login")
+                    self._web_session_authenticated = False
+                    self._ensure_web_login()
+                    continue
+
+                raise FlareSolverrError(
+                    "Favorites mutation requires a logged rule34 web session in FlareSolverr (server replied not logged in)."
+                )
             return
 
-        urls: list[str]
-        if want_present:
-            urls = [f"https://rule34.xxx/public/addfav.php?id={target_id}"]
-        else:
+        if not want_present:
             favorites_view_url = f"https://rule34.xxx/index.php?page=favorites&s=view&id={self.user_id.strip()}"
             web_delete_url = f"https://rule34.xxx/index.php?page=favorites&s=delete&id={target_id}&return_pid=0"
+
+            before_present = self._favorite_exists_in_view(target_id)
+            self._debug(f"mutate_favorite: before_present={before_present}")
+            if before_present == want_present:
+                self._debug("mutate_favorite: already in desired state")
+                return
 
             for auth_attempt in range(1, 3):
                 last_body = self._request_body_with_rate_limit_retries(
@@ -562,89 +586,6 @@ class FlareSolverrFavoritesClient:
                     f"Unable to remove account favorite #{target_id}. "
                     f"Latest server response: {last_body or 'empty response'}"
                 )
-
-        for auth_attempt in range(1, 5):
-            last_body = ""
-            needs_reauth = False
-            favorites_view_url = f"https://rule34.xxx/index.php?page=favorites&s=view&id={self.user_id.strip()}"
-            post_page_url = f"https://rule34.xxx/index.php?page=post&s=view&id={target_id}"
-
-            for url in urls:
-                raw = self._request_via_solver(url, headers=None)
-                body = self._extract_body_text(raw)
-                last_body = body
-                self._debug(f"mutate_favorite: endpoint={url} body={body[:120]}")
-                if body == "2" and want_present and auth_attempt >= 2:
-                    # Some sessions require a post-style referer or alternate add endpoint semantics.
-                    post_body = self._post_via_solver(
-                        url,
-                        urlencode({"id": str(target_id)}),
-                        referer=post_page_url,
-                    )
-                    body = self._extract_body_text(post_body)
-                    last_body = body
-                    self._debug(f"mutate_favorite: endpoint={url} method=post body={body[:120]}")
-
-                if body == "2" and want_present and auth_attempt >= 2:
-                    alt_url = f"https://rule34.xxx/index.php?page=favorites&s=add&id={target_id}"
-                    alt_raw = self._request_via_solver(alt_url, headers={"Referer": favorites_view_url})
-                    body = self._extract_body_text(alt_raw)
-                    last_body = body
-                    self._debug(f"mutate_favorite: endpoint={alt_url} body={body[:120]}")
-
-                if body == "2":
-                    needs_reauth = True
-                    break
-
-            if needs_reauth:
-                if auth_attempt == 1:
-                    self._debug("mutate_favorite: add endpoint reported not logged in, forcing re-login")
-                    self._web_session_authenticated = False
-                    self._ensure_web_login()
-                    continue
-                if auth_attempt < 4:
-                    delay_seconds = 0.4 * auth_attempt
-                    self._debug(
-                        f"mutate_favorite: add endpoint still not logged in attempt={auth_attempt}/4 wait={delay_seconds:.1f}s"
-                    )
-                    time.sleep(delay_seconds)
-                    if auth_attempt == 3:
-                        self._debug("mutate_favorite: forcing one more re-login before final add attempt")
-                        self._web_session_authenticated = False
-                        self._ensure_web_login()
-                    continue
-                raise FlareSolverrError(
-                    "Favorites mutation requires a logged rule34 web session in FlareSolverr (server replied not logged in)."
-                )
-
-            after_present = self._favorite_exists_in_view_with_retries(target_id, attempts=2, allow_unknown=True)
-            self._debug(f"mutate_favorite: after_present={after_present}")
-            if want_present and after_present is False:
-                # First add can lag before the favorites view reflects the change.
-                for verify_attempt in range(1, 4):
-                    delay_seconds = 0.5 * verify_attempt
-                    self._debug(
-                        f"mutate_favorite: add verification lag attempt={verify_attempt}/3 wait={delay_seconds:.1f}s"
-                    )
-                    time.sleep(delay_seconds)
-                    after_present = self._favorite_exists_in_view_with_retries(
-                        target_id,
-                        attempts=3,
-                        allow_unknown=True,
-                    )
-                    self._debug(f"mutate_favorite: add verification retry result={after_present}")
-                    if after_present in (True, None):
-                        break
-            if after_present is None:
-                self._debug("mutate_favorite: add verification deferred due to temporary rate limit")
-                return
-            if after_present != want_present:
-                action = "add" if want_present else "remove"
-                raise FlareSolverrError(
-                    f"Unable to {action} account favorite #{target_id}. "
-                    f"Latest server response: {last_body or 'empty response'}"
-                )
-            return
 
     @staticmethod
     def _extract_post_ids(html_text: str) -> list[int]:
