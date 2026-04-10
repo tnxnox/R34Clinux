@@ -22,6 +22,7 @@ def open_settings(window: MainWindow, initial: bool = False) -> None:
     window.store.save(window.settings)
     window.client = window._make_client(window.settings)
     window._configure_background_sync_timer()
+    window._configure_pending_sync_timer()
     window._refresh_collection_filter()
     just_enabled = (not previously_enabled) and bool(window.settings.flaresolverr_enabled)
     if window.settings.flaresolverr_enabled:

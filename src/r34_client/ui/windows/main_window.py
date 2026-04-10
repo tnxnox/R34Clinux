@@ -109,6 +109,7 @@ class MainWindow(QMainWindow):
         self._last_favorite_sync_error = ""
         self._last_favorite_sync_debug = ""
         self._pending_remote_add_ids: set[int] = set()
+        self._pending_remote_remove_ids: set[int] = set()
         self._sync_debug_log_path = self.local_favorites.database_path.parent / "sync-debug.log"
         self._is_long_strip_image = False
 
@@ -277,6 +278,9 @@ class MainWindow(QMainWindow):
         self.background_sync_timer = QTimer(self)
         self.background_sync_timer.timeout.connect(self._background_sync_tick)
 
+        self.pending_remote_sync_timer = QTimer(self)
+        self.pending_remote_sync_timer.timeout.connect(self._pending_remote_sync_tick)
+
         self.copy_button = QPushButton("Copy Link")
         self.copy_button.clicked.connect(self.copy_selected_link)
 
@@ -291,6 +295,7 @@ class MainWindow(QMainWindow):
         self._refresh_collection_filter()
         self._refresh_related_tags([])
         self._configure_background_sync_timer()
+        self._configure_pending_sync_timer()
         self._update_action_state()
         # Startup should never block on remote sync; load local cache first.
         self._refresh_local_favorites()
@@ -330,12 +335,22 @@ class MainWindow(QMainWindow):
         self.background_sync_timer.setInterval(interval_minutes * 60 * 1000)
         self.background_sync_timer.start()
 
+    def _configure_pending_sync_timer(self) -> None:
+        if not self._sync_enabled():
+            self.pending_remote_sync_timer.stop()
+            return
+        self.pending_remote_sync_timer.setInterval(8000)
+        self.pending_remote_sync_timer.start()
+
     def _background_sync_tick(self) -> None:
         if not self._sync_enabled():
             return
         if self._active_workers:
             return
         self._refresh_favorites()
+
+    def _pending_remote_sync_tick(self) -> None:
+        favorites_feature.process_pending_remote_mutations(self)
 
     def _selected_collection_name(self) -> str | None:
         selected = self.collection_filter.currentData()

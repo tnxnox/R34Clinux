@@ -23,6 +23,80 @@ def _wait_for_degraded_mode_window(window: MainWindow, *, max_wait_seconds: floa
     return not window._degraded_mode_active()
 
 
+def process_pending_remote_mutations(window: MainWindow) -> None:
+    if not window._sync_enabled():
+        return
+    if not window._pending_remote_add_ids and not window._pending_remote_remove_ids:
+        return
+    if window._active_workers:
+        return
+
+    worker = FunctionWorker(lambda: process_pending_remote_mutations_impl(window))
+    worker.signals.finished.connect(lambda result: pending_remote_mutations_finished(window, result))
+    worker.signals.failed.connect(lambda error_text: window._log_sync_debug("Pending sync worker failure", error_text))
+    window._start_worker(worker)
+
+
+def process_pending_remote_mutations_impl(window: MainWindow) -> dict[str, int]:
+    sync_client = window._make_sync_client(window.settings)
+    if sync_client is None:
+        return {
+            "remaining_add": len(window._pending_remote_add_ids),
+            "remaining_remove": len(window._pending_remote_remove_ids),
+        }
+
+    budget = 12
+    processed = 0
+
+    for post_id in sorted(list(window._pending_remote_add_ids)):
+        if processed >= budget or window._degraded_mode_active():
+            break
+        try:
+            sync_client.add_favorite(post_id)
+            window._pending_remote_add_ids.discard(post_id)
+            window._rate_limit.note_success()
+            processed += 1
+        except FlareSolverrError as exc:
+            message = str(exc)
+            window._mark_rate_limited_if_needed("pending_remote_add", message)
+            if is_rate_limited_error_message(message):
+                time.sleep(1.0)
+                break
+            processed += 1
+
+    for post_id in sorted(list(window._pending_remote_remove_ids)):
+        if processed >= budget or window._degraded_mode_active():
+            break
+        try:
+            sync_client.remove_favorite(post_id)
+            window._pending_remote_remove_ids.discard(post_id)
+            window._rate_limit.note_success()
+            processed += 1
+        except FlareSolverrError as exc:
+            message = str(exc)
+            window._mark_rate_limited_if_needed("pending_remote_remove", message)
+            if is_rate_limited_error_message(message):
+                time.sleep(1.0)
+                break
+            processed += 1
+
+    return {
+        "remaining_add": len(window._pending_remote_add_ids),
+        "remaining_remove": len(window._pending_remote_remove_ids),
+    }
+
+
+def pending_remote_mutations_finished(window: MainWindow, result: object) -> None:
+    if not isinstance(result, dict):
+        return
+    remaining_add = int(result.get("remaining_add", 0))
+    remaining_remove = int(result.get("remaining_remove", 0))
+    if remaining_add or remaining_remove:
+        window._set_right_status(f"Pending sync: {remaining_add} add, {remaining_remove} remove remaining.")
+    else:
+        window._set_right_status("Pending sync complete.")
+
+
 def add_multiple_favorites(window: MainWindow, posts: list[Post]) -> None:
     unique_posts = {post.id: post for post in posts}
     if not unique_posts:
@@ -55,6 +129,8 @@ def add_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dict[s
                     )
                     window.local_favorites.add_favorite(post)
                     added_ids.append(post.id)
+                    window._pending_remote_add_ids.add(post.id)
+                    window._pending_remote_remove_ids.discard(post.id)
                     continue
 
             attempts = 2
@@ -99,6 +175,7 @@ def add_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dict[s
 
         window.local_favorites.add_favorite(post)
         window._pending_remote_add_ids.discard(post.id)
+        window._pending_remote_remove_ids.discard(post.id)
         added_ids.append(post.id)
 
     if failed_ids:
@@ -199,6 +276,7 @@ def remove_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dic
                     f"#{post.id}: deferred remote remove (degraded mode active: {window._degraded_mode_remaining()}s remaining)"
                 )
                 window.local_favorites.remove_favorite(post.id)
+                window._pending_remote_remove_ids.add(post.id)
                 window._pending_remote_add_ids.discard(post.id)
                 removed_ids.append(post.id)
                 continue
@@ -210,6 +288,7 @@ def remove_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dic
             try:
                 sync_client.remove_favorite(post.id)
                 window._rate_limit.note_success()
+                window._pending_remote_remove_ids.discard(post.id)
                 window._pending_remote_add_ids.discard(post.id)
                 success = True
                 break
@@ -235,6 +314,7 @@ def remove_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dic
                 f"Reason: {last_error or 'rate limited'}\n\n{sync_client.debug_summary()}",
             )
             window.local_favorites.remove_favorite(post.id)
+            window._pending_remote_remove_ids.add(post.id)
             removed_ids.append(post.id)
             continue
 
@@ -398,6 +478,7 @@ def add_favorite_impl(window: MainWindow, post: Post) -> int:
         window._pending_remote_add_ids.add(post.id)
     else:
         window._pending_remote_add_ids.discard(post.id)
+    window._pending_remote_remove_ids.discard(post.id)
     return post.id
 
 
@@ -441,9 +522,14 @@ def remove_favorite_impl(window: MainWindow, post: Post) -> int:
                     break
 
             if not removed_remote:
+                if is_rate_limited_error_message(window._last_favorite_sync_error):
+                    window.local_favorites.remove_favorite(post.id)
+                    window._pending_remote_remove_ids.add(post.id)
+                    window._pending_remote_add_ids.discard(post.id)
                 return post.id
 
     window.local_favorites.remove_favorite(post.id)
+    window._pending_remote_remove_ids.discard(post.id)
     window._pending_remote_add_ids.discard(post.id)
     return post.id
 
