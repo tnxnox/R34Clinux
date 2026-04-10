@@ -323,7 +323,23 @@ class FlareSolverrFavoritesClient:
             if self._looks_logged_in(html_text):
                 self._debug(f"ensure_web_login: probe matched logged-in markers url={url}")
                 return True
+            if "page=favorites&s=view" in url and self._looks_favorites_view_authenticated(html_text):
+                self._debug("ensure_web_login: favorites view indicates authenticated session")
+                return True
         return False
+
+    @staticmethod
+    def _looks_favorites_view_authenticated(html_text: str) -> bool:
+        lowered = (html_text or "").lower()
+        if "page=account&s=login&code=00" in lowered:
+            return False
+        if "name=\"user\"" in lowered and "name=\"pass\"" in lowered:
+            return False
+        return (
+            "page=favorites&s=view" in lowered
+            or "id=\"post-list\"" in lowered
+            or "id=\"p" in lowered
+        )
 
     def _ensure_web_login(self) -> None:
         if self._web_session_authenticated:
