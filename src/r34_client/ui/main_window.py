@@ -59,20 +59,17 @@ from .post_helpers import (
     needs_hydration,
     probe_file_size,
 )
-from .favorites_sync import sync_remote_favorites
-from .context_menu_feature import (
-    open_favorites_context_menu,
-    open_results_context_menu,
-    selected_favorite_posts,
-    selected_results_posts,
-)
-from .navigation_feature import (
-    active_posts_list,
-    extend_selection,
-    invoke_global_navigation,
-    move_selection,
-    register_global_shortcuts,
-)
+from .features import autocomplete as autocomplete_feature
+from .features import context_menu as context_menu_feature
+from .features import dialogs as dialogs_feature
+from .features import downloads as downloads_feature
+from .features import favorites as favorites_feature
+from .features import media as media_feature
+from .features import navigation as navigation_feature
+from .features import preview as preview_feature
+from .features import search as search_feature
+from .features import settings as settings_feature
+from .features import status as status_feature
 from .settings_dialog import SettingsDialog
 from .widgets import ClickSeekSlider, ClickVideoSurface
 
@@ -469,890 +466,176 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
 
     def _register_global_shortcuts(self) -> None:
-        register_global_shortcuts(self)
+        navigation_feature.register_global_shortcuts(self)
 
     def _invoke_global_navigation(self, callback) -> None:
-        invoke_global_navigation(self, callback)
+        navigation_feature.invoke_global_navigation(self, callback)
 
     def _update_action_state(self) -> None:
-        has_selection = self._current_post() is not None
-        self.download_button.setEnabled(has_selection)
-        self.open_button.setEnabled(has_selection)
-        self.copy_button.setEnabled(has_selection)
-        self.volume_slider.setEnabled(self._vlc_player is not None)
-        self.seek_slider.setEnabled(self._vlc_player is not None and has_selection and self._current_post_is_video())
+        status_feature.update_action_state(self)
 
     def _set_left_status(self, message: str) -> None:
-        """Set status message on the left side (client info)."""
-        self.left_status_label.setText(message)
+        status_feature.set_left_status(self, message)
     
     def _set_right_status(self, message: str) -> None:
-        """Set status message on the right side (sync info)."""
-        self.right_status_label.setText(message)
+        status_feature.set_right_status(self, message)
     
     def _set_status(self, message: str) -> None:
-        """Deprecated: Use _set_left_status or _set_right_status instead."""
-        self._set_left_status(message)
+        status_feature.set_status(self, message)
 
     def _set_fit_mode(self, mode: FitMode) -> None:
-        self._fit_mode = mode
-        self._update_preview_scaling()
-        self._set_status(f"Image fit mode: {mode.value}")
+        status_feature.set_fit_mode(self, mode)
 
     def _cancel_current_operations(self) -> None:
-        # Workers keep running in background, but incrementing tokens prevents stale results from mutating UI state.
-        self._search_token += 1
-        self._preview_token += 1
-        self._favorites_token += 1
-        self._autocomplete_token += 1
-        self._mutation_token += 1
-        self._download_token += 1
-        self._hydrate_token += 1
-        self._set_status("Cancelled current operations.")
+        status_feature.cancel_current_operations(self)
 
     def _diagnostics_snapshot(self) -> DiagnosticsSnapshot:
-        remaining = self._rate_limit.remaining_seconds(time.monotonic())
-        selected = self._current_post()
-        return DiagnosticsSnapshot(
-            sync_enabled=self._sync_enabled(),
-            degraded_mode_active=remaining > 0,
-            degraded_mode_remaining_seconds=remaining,
-            fit_mode=self._fit_mode.value,
-            active_workers=len(self._active_workers),
-            current_query=self.current_query,
-            current_page=self.current_page,
-            current_results_count=len(self.current_posts),
-            current_favorites_count=len(self.favorite_posts),
-            selected_post_id=(selected.id if selected is not None else None),
-            last_sync_failed=self._last_favorite_sync_failed,
-            last_sync_error=self._last_favorite_sync_error,
-            sync_debug_log_path=str(self._sync_debug_log_path),
-        )
+        return dialogs_feature.diagnostics_snapshot(self)
 
     def _open_diagnostics(self) -> None:
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Diagnostics")
-        dialog.resize(860, 540)
-
-        layout = QVBoxLayout(dialog)
-        report = QPlainTextEdit(dialog)
-        report.setReadOnly(True)
-        report.setPlainText(format_diagnostics_report(self._diagnostics_snapshot()))
-        layout.addWidget(report, 1)
-
-        close_button = QPushButton("Close", dialog)
-        close_button.clicked.connect(dialog.accept)
-        layout.addWidget(close_button)
-
-        dialog.exec()
+        dialogs_feature.open_diagnostics(self)
 
     def _open_controls(self) -> None:
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Controls")
-        dialog.resize(760, 480)
-
-        layout = QVBoxLayout(dialog)
-        report = QPlainTextEdit(dialog)
-        report.setReadOnly(True)
-        report.setPlainText(
-            "R34 Linux Client Controls\n\n"
-            "Keyboard shortcuts\n"
-            "- Esc: cancel ongoing operations\n"
-            "- j: move to the next post\n"
-            "- k: move to the previous post\n"
-            "- f: toggle favorite on the selected post\n"
-            "- o: open the selected post in the browser\n"
-            "- d: download the selected post\n\n"
-            "Toolbar actions\n"
-            "- Search: run the current search query\n"
-            "- Settings: edit account and sync settings\n"
-            "- Refresh Favorites: reload the favorites tab\n"
-            "- Fit buttons: switch image fitting mode\n"
-            "- Cancel: stop applying stale results from running tasks\n"
-            "- Diagnostics: open the live diagnostics panel\n\n"
-            "Viewer hints\n"
-            "- Use the mouse wheel or zoom controls to change preview scale\n"
-            "- Click and drag on zoomed previews to pan around long images\n"
-        )
-        layout.addWidget(report, 1)
-
-        close_button = QPushButton("Close", dialog)
-        close_button.clicked.connect(dialog.accept)
-        layout.addWidget(close_button)
-
-        dialog.exec()
+        dialogs_feature.open_controls(self)
 
     def _mark_rate_limited_if_needed(self, context: str, error_message: str) -> None:
-        if not is_rate_limited_error_message(error_message):
-            return
-        backoff = self._rate_limit.mark_rate_limited(time.monotonic())
-        self._log_sync_debug(
-            f"Rate limit degraded mode ({context})",
-            f"Backoff seconds: {backoff}\nError: {error_message}",
-        )
+        status_feature.mark_rate_limited_if_needed(self, context, error_message)
 
     def _degraded_mode_remaining(self) -> int:
-        return self._rate_limit.remaining_seconds(time.monotonic())
+        return status_feature.degraded_mode_remaining(self)
 
     def _degraded_mode_active(self) -> bool:
-        return self._degraded_mode_remaining() > 0
+        return status_feature.degraded_mode_active(self)
 
     def _log_sync_debug(self, title: str, details: str) -> None:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self._sync_debug_log_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._sync_debug_log_path.open("a", encoding="utf-8") as handle:
-            handle.write(f"[{timestamp}] {title}\n")
-            handle.write((details or "(no details)").strip() + "\n\n")
+        status_feature.log_sync_debug(self, title, details)
 
     def search(self) -> None:
-        query = self.search_input.text().strip()
-        self.current_query = query
-        self.current_page = 0
-        self._run_search()
+        search_feature.search(self)
 
     def next_page(self) -> None:
-        if not self.current_query:
-            return
-        self.current_page += 1
-        self._run_search()
+        search_feature.next_page(self)
 
     def previous_page(self) -> None:
-        if self.current_page <= 0 or not self.current_query:
-            return
-        self.current_page -= 1
-        self._run_search()
+        search_feature.previous_page(self)
 
     def _run_search(self) -> None:
-        if not self.settings.has_credentials:
-            self.open_settings(initial=True)
-            return
-
-        self.page_label.setText(f"Page {self.current_page + 1}")
-        self.results_list.clear()
-        self.preview_label.setText("Loading results...")
-        self.meta_view.clear()
-        self.current_posts = []
-        self._update_action_state()
-        self._set_status("Searching...")
-
-        self._search_token += 1
-        token = self._search_token
-
-        worker = FunctionWorker(
-            lambda: self.client.search_posts(self.current_query, self.current_page, self.settings.page_size)
-        )
-        worker.signals.finished.connect(lambda result: self._search_finished(token, result))
-        worker.signals.failed.connect(self._operation_failed)
-        self._start_worker(worker)
+        search_feature.run_search(self)
 
     def _search_finished(self, token: int, result: object) -> None:
-        if token != self._search_token:
-            return
-        posts = list(result) if isinstance(result, list) else []
-        self.current_posts = posts
-        self.results_list.clear()
-
-        for post in posts:
-            item = QListWidgetItem(self._format_post_tile(post))
-            item.setData(Qt.ItemDataRole.UserRole, post)
-            self.results_list.addItem(item)
-
-        if posts:
-            self.results_list.setCurrentRow(0)
-            self._set_status(f"Loaded {len(posts)} posts.")
-        else:
-            self.preview_label.setText("No posts matched the search query.")
-            self.meta_view.setPlainText("No results.")
-            self._set_status("Search completed with no results.")
-
-        self._update_action_state()
+        search_feature.search_finished(self, token, result)
 
     def _refresh_favorites(self) -> None:
-        self._refresh_favorites_impl(local_only=False)
+        search_feature.refresh_favorites(self)
 
     def _refresh_local_favorites(self) -> None:
-        self._refresh_favorites_impl(local_only=True)
+        search_feature.refresh_local_favorites(self)
 
     def _refresh_favorites_impl(self, local_only: bool) -> None:
-        self._favorites_token += 1
-        token = self._favorites_token
-        if self._sync_enabled() and not local_only:
-            self._set_right_status("Syncing favorites via FlareSolverr...")
-            worker = FunctionWorker(self._sync_remote_favorites)
-        else:
-            self._set_right_status("Refreshing local favorites...")
-            worker = FunctionWorker(
-                lambda: self.local_favorites.list_favorites(collection_name=self._selected_collection_name())
-            )
-
-        worker.signals.finished.connect(lambda result: self._favorites_loaded(token, result))
-        worker.signals.failed.connect(lambda error_text: self._favorites_failed(token, error_text))
-        self._start_worker(worker)
+        search_feature.refresh_favorites_impl(self, local_only)
 
     def _sync_remote_favorites(self) -> tuple[list[Post], bool]:
-        if self._degraded_mode_active():
-            remaining = self._degraded_mode_remaining()
-            self._log_sync_debug(
-                "Favorites sync skipped (degraded mode)",
-                f"Remaining cooldown seconds: {remaining}",
-            )
-            return (self.local_favorites.list_favorites(), bool(self.local_favorites.list_favorites()))
-
-        return sync_remote_favorites(
-            settings=self.settings,
-            local_favorites=self.local_favorites,
-            make_sync_client=self._make_sync_client,
-            log_sync_debug=self._log_sync_debug,
-            on_sync_error=lambda message: self._mark_rate_limited_if_needed("favorites_sync", message),
-        )
+        return search_feature.sync_remote(self)
 
     def _favorites_loaded(self, token: int, result: object) -> None:
-        if token != self._favorites_token:
-            return
-
-        loaded_posts: list[Post]
-        if isinstance(result, tuple) and len(result) == 2 and isinstance(result[0], list):
-            loaded_posts = result[0]
-            self._favorites_sync_fallback_used = bool(result[1])
-        elif isinstance(result, list):
-            loaded_posts = result
-            self._favorites_sync_fallback_used = False
-        else:
-            return
-
-        selected_collection = self._selected_collection_name()
-        if selected_collection is not None:
-            loaded_posts = self.local_favorites.list_favorites(collection_name=selected_collection)
-
-        self.favorite_posts = [item for item in loaded_posts if isinstance(item, Post)]
-        self.favorite_ids = {post.id for post in self.favorite_posts}
-        self._refresh_collection_filter()
-
-        self.favorites_list.clear()
-        for post in self.favorite_posts:
-            item = QListWidgetItem(self._format_post_tile(post))
-            item.setData(Qt.ItemDataRole.UserRole, post)
-            self.favorites_list.addItem(item)
-
-        if self._sync_enabled():
-            if self._favorites_sync_fallback_used:
-                if self._degraded_mode_active():
-                    self._set_status(
-                        "Favorites sync temporarily degraded due to rate limiting; "
-                        f"showing local cache ({len(self.favorite_posts)} posts)."
-                    )
-                else:
-                    self._set_status(
-                        f"Favorites sync returned empty data; showing local cache ({len(self.favorite_posts)} posts)."
-                    )
-            else:
-                self._rate_limit.note_success()
-                self._set_right_status(f"Favorites synced ({len(self.favorite_posts)} posts).")
-        else:
-            self._set_right_status(f"Local favorites loaded ({len(self.favorite_posts)} posts).")
-        self._update_action_state()
+        search_feature.favorites_loaded(self, token, result)
 
     def _favorites_failed(self, token: int, error_text: str) -> None:
-        if token != self._favorites_token:
-            return
-        first_line = error_text.splitlines()[0] if error_text else "unknown error"
-        self._log_sync_debug("Favorites refresh failure", error_text)
-        if self._sync_enabled():
-            self._set_right_status(f"Favorites sync failed: {first_line} (see {self._sync_debug_log_path})")
-        else:
-            self._set_right_status(f"Local favorites refresh failed: {first_line}")
+        search_feature.favorites_failed(self, token, error_text)
 
     def _open_results_context_menu(self, position) -> None:
-        open_results_context_menu(self, position)
+        context_menu_feature.open_results_context_menu(self, position)
 
     def _selected_results_posts(self) -> list[Post]:
-        return selected_results_posts(self)
+        return context_menu_feature.selected_results_posts(self)
 
     def _add_multiple_favorites(self, posts: list[Post]) -> None:
-        unique_posts = {post.id: post for post in posts}
-        if not unique_posts:
-            return
-
-        self._set_status(f"Adding {len(unique_posts)} favorites...")
-        self._mutation_token += 1
-        token = self._mutation_token
-
-        worker = FunctionWorker(lambda: self._add_multiple_favorites_impl(list(unique_posts.values())))
-        worker.signals.finished.connect(lambda result: self._favorite_bulk_add_finished(token, result))
-        worker.signals.failed.connect(self._operation_failed)
-        self._start_worker(worker)
+        favorites_feature.add_multiple_favorites(self, posts)
 
     def _add_multiple_favorites_impl(self, posts: list[Post]) -> dict[str, object]:
-        added_ids: list[int] = []
-        failed_ids: list[int] = []
-        failed_errors: list[str] = []
-
-        sync_client = self._make_sync_client(self.settings)
-        for post in posts:
-            if sync_client is not None:
-                if self._degraded_mode_active():
-                    failed_ids.append(post.id)
-                    failed_errors.append(f"#{post.id}: degraded mode active ({self._degraded_mode_remaining()}s remaining)")
-                    continue
-
-                attempts = 3
-                remote_success = False
-                last_error = ""
-                for attempt in range(1, attempts + 1):
-                    try:
-                        sync_client.add_favorite(post.id)
-                        self._rate_limit.note_success()
-                        remote_success = True
-                        break
-                    except FlareSolverrError as exc:
-                        last_error = str(exc)
-                        self._mark_rate_limited_if_needed("favorite_bulk_add", last_error)
-                        if is_rate_limited_error_message(last_error) and attempt < attempts:
-                            time.sleep(0.35 * attempt)
-                            continue
-                        break
-
-                if not remote_success:
-                    failed_ids.append(post.id)
-                    failed_errors.append(f"#{post.id}: {last_error or 'unknown sync error'}")
-                    self._log_sync_debug(
-                        f"Bulk favorite add sync failure for #{post.id}",
-                        f"Error: {last_error or 'unknown sync error'}\n\n{sync_client.debug_summary()}",
-                    )
-                    continue
-
-            self.local_favorites.add_favorite(post)
-            added_ids.append(post.id)
-
-        if failed_ids:
-            self._last_favorite_sync_failed = True
-            self._last_favorite_sync_error = f"Bulk add failed for {len(failed_ids)} post(s)."
-            self._last_favorite_sync_debug = "\n".join(failed_errors)
-        else:
-            self._last_favorite_sync_failed = False
-            self._last_favorite_sync_error = ""
-            self._last_favorite_sync_debug = ""
-
-        return {
-            "added_ids": added_ids,
-            "failed_ids": failed_ids,
-            "failed_errors": failed_errors,
-        }
+        return favorites_feature.add_multiple_favorites_impl(self, posts)
 
     def _favorite_bulk_add_finished(self, token: int, result: object) -> None:
-        if token != self._mutation_token:
-            return
-
-        if isinstance(result, dict):
-            added_ids = [int(item) for item in result.get("added_ids", [])]
-            failed_ids = [int(item) for item in result.get("failed_ids", [])]
-            failed_errors = [str(item) for item in result.get("failed_errors", [])]
-        else:
-            added_ids = []
-            failed_ids = []
-            failed_errors = []
-
-        for post_id in added_ids:
-            self.favorite_ids.add(post_id)
-
-        if failed_ids:
-            self._set_status(
-                f"Added {len(added_ids)} favorites; {len(failed_ids)} failed due to sync limits."
-            )
-            only_rate_limited_failures = all(
-                is_rate_limited_error_message(message) or "degraded mode active" in message.lower()
-                for message in failed_errors
-            )
-            if not only_rate_limited_failures:
-                QMessageBox.warning(
-                    self,
-                    "Bulk Add Partial Failure",
-                    "Some favorites could not be added remotely.\n\n" + "\n".join(failed_errors[:12]),
-                )
-        else:
-            self._set_status(f"Added {len(added_ids)} favorites.")
-
-        # Fast path: when all remote mutations succeeded, refresh local cache only.
-        if self._sync_enabled() and failed_ids:
-            self._refresh_favorites()
-        else:
-            self._refresh_local_favorites()
+        favorites_feature.favorite_bulk_add_finished(self, token, result)
 
     def _open_favorites_context_menu(self, position) -> None:
-        open_favorites_context_menu(self, position)
+        context_menu_feature.open_favorites_context_menu(self, position)
 
     def _selected_favorite_posts(self) -> list[Post]:
-        return selected_favorite_posts(self)
+        return context_menu_feature.selected_favorite_posts(self)
 
     def _remove_multiple_favorites(self, posts: list[Post]) -> None:
-        unique_posts = {post.id: post for post in posts}
-        if not unique_posts:
-            return
-
-        self._set_status(f"Removing {len(unique_posts)} favorites...")
-        self._mutation_token += 1
-        token = self._mutation_token
-
-        worker = FunctionWorker(lambda: self._remove_multiple_favorites_impl(list(unique_posts.values())))
-        worker.signals.finished.connect(lambda result: self._favorite_bulk_mutation_finished(token, result))
-        worker.signals.failed.connect(self._operation_failed)
-        self._start_worker(worker)
+        favorites_feature.remove_multiple_favorites(self, posts)
 
     def _remove_multiple_favorites_impl(self, posts: list[Post]) -> dict[str, object]:
-        removed_ids: list[int] = []
-        failed_ids: list[int] = []
-        failed_errors: list[str] = []
-
-        sync_client = self._make_sync_client(self.settings)
-        for post in posts:
-            if sync_client is None:
-                self.local_favorites.remove_favorite(post.id)
-                removed_ids.append(post.id)
-                continue
-
-            if self._degraded_mode_active():
-                failed_ids.append(post.id)
-                failed_errors.append(f"#{post.id}: degraded mode active ({self._degraded_mode_remaining()}s remaining)")
-                continue
-
-            attempts = 3
-            success = False
-            last_error = ""
-            for attempt in range(1, attempts + 1):
-                try:
-                    sync_client.remove_favorite(post.id)
-                    self._rate_limit.note_success()
-                    success = True
-                    break
-                except FlareSolverrError as exc:
-                    last_error = str(exc)
-                    self._mark_rate_limited_if_needed("favorite_bulk_remove", last_error)
-                    if is_rate_limited_error_message(last_error) and attempt < attempts:
-                        time.sleep(0.35 * attempt)
-                        continue
-                    break
-
-            if success:
-                self.local_favorites.remove_favorite(post.id)
-                removed_ids.append(post.id)
-                continue
-
-            failed_ids.append(post.id)
-            failed_errors.append(f"#{post.id}: {last_error or 'unknown sync error'}")
-            self._log_sync_debug(
-                f"Bulk favorite remove sync failure for #{post.id}",
-                f"Error: {last_error or 'unknown sync error'}\n\n{sync_client.debug_summary()}",
-            )
-
-        if failed_ids:
-            self._last_favorite_sync_failed = True
-            self._last_favorite_sync_error = f"Bulk remove failed for {len(failed_ids)} post(s)."
-            self._last_favorite_sync_debug = "\n".join(failed_errors)
-        else:
-            self._last_favorite_sync_failed = False
-            self._last_favorite_sync_error = ""
-            self._last_favorite_sync_debug = ""
-
-        return {
-            "removed_ids": removed_ids,
-            "failed_ids": failed_ids,
-            "failed_errors": failed_errors,
-        }
+        return favorites_feature.remove_multiple_favorites_impl(self, posts)
 
     def _favorite_bulk_mutation_finished(self, token: int, result: object) -> None:
-        if token != self._mutation_token:
-            return
-        if isinstance(result, dict):
-            removed_ids = [int(item) for item in result.get("removed_ids", [])]
-            failed_ids = [int(item) for item in result.get("failed_ids", [])]
-            failed_errors = [str(item) for item in result.get("failed_errors", [])]
-        else:
-            removed_ids = []
-            failed_ids = []
-            failed_errors = []
-
-        for post_id in removed_ids:
-            self.favorite_ids.discard(post_id)
-
-        if failed_ids:
-            self._set_status(
-                f"Removed {len(removed_ids)} favorites; {len(failed_ids)} failed and were kept."
-            )
-            QMessageBox.warning(
-                self,
-                "Bulk Remove Partial Failure",
-                "Some favorites could not be removed remotely and were kept locally to avoid desync.\n\n"
-                + "\n".join(failed_errors[:12]),
-            )
-        else:
-            self._set_status(f"Removed {len(removed_ids)} favorites.")
-
-        # Fast path: when all remote mutations succeeded, refresh local cache only.
-        if self._sync_enabled() and failed_ids:
-            self._refresh_favorites()
-        else:
-            self._refresh_local_favorites()
+        favorites_feature.favorite_bulk_mutation_finished(self, token, result)
 
     def _assign_selection_to_new_collection(self, posts: list[Post]) -> None:
-        text, accepted = QInputDialog.getText(self, "New collection", "Collection name")
-        if not accepted:
-            return
-        self._assign_selection_to_collection(posts, text)
+        favorites_feature.assign_selection_to_new_collection(self, posts)
 
     def _assign_selection_to_collection(self, posts: list[Post], collection_name: str) -> None:
-        post_ids = [post.id for post in posts]
-        try:
-            assigned = self.local_favorites.assign_posts_to_collection(post_ids, collection_name)
-        except ValueError as exc:
-            QMessageBox.warning(self, "Collections", str(exc))
-            return
-        self._refresh_collection_filter()
-        self._set_status(f"Added {assigned} favorites to collection '{collection_name.strip()}'.")
+        favorites_feature.assign_selection_to_collection(self, posts, collection_name)
 
     def _remove_selection_from_collection(self, posts: list[Post], collection_name: str) -> None:
-        removed = self.local_favorites.remove_posts_from_collection([post.id for post in posts], collection_name)
-        self._set_status(f"Removed {removed} favorites from '{collection_name}'.")
-        self._refresh_local_favorites()
+        favorites_feature.remove_selection_from_collection(self, posts, collection_name)
 
     def _add_favorite(self, post: Post) -> None:
-        if self._sync_enabled():
-            self._set_right_status(f"Adding #{post.id} to account favorites via FlareSolverr...")
-        else:
-            self._set_right_status(f"Adding #{post.id} to local favorites...")
-
-        self._mutation_token += 1
-        token = self._mutation_token
-
-        worker = FunctionWorker(lambda: self._add_favorite_impl(post))
-        worker.signals.finished.connect(lambda _: self._favorite_mutation_finished(token, post.id, True))
-        worker.signals.failed.connect(self._operation_failed)
-        self._start_worker(worker)
+        favorites_feature.add_favorite(self, post)
 
     def _remove_favorite(self, post: Post) -> None:
-        if self._sync_enabled():
-            self._set_right_status(f"Removing #{post.id} from account favorites via FlareSolverr...")
-        else:
-            self._set_right_status(f"Removing #{post.id} from local favorites...")
-
-        self._mutation_token += 1
-        token = self._mutation_token
-
-        worker = FunctionWorker(lambda: self._remove_favorite_impl(post))
-        worker.signals.finished.connect(lambda _: self._favorite_mutation_finished(token, post.id, False))
-        worker.signals.failed.connect(self._operation_failed)
-        self._start_worker(worker)
+        favorites_feature.remove_favorite(self, post)
 
     def _add_favorite_impl(self, post: Post) -> int:
-        self._last_favorite_sync_failed = False
-        self._last_favorite_sync_error = ""
-        self._last_favorite_sync_debug = ""
-        sync_client = self._make_sync_client(self.settings)
-        if sync_client is not None:
-            if self._degraded_mode_active():
-                self._last_favorite_sync_failed = True
-                self._last_favorite_sync_error = (
-                    "Rate-limited degraded mode active; remote add skipped temporarily. "
-                    f"Retry in {self._degraded_mode_remaining()}s."
-                )
-                self._last_favorite_sync_debug = ""
-            else:
-                attempts = 3
-                for attempt in range(1, attempts + 1):
-                    try:
-                        sync_client.add_favorite(post.id)
-                        self._last_favorite_sync_failed = False
-                        self._last_favorite_sync_error = ""
-                        self._last_favorite_sync_debug = ""
-                        self._rate_limit.note_success()
-                        break
-                    except FlareSolverrError as exc:
-                        self._last_favorite_sync_failed = True
-                        self._last_favorite_sync_error = str(exc)
-                        self._last_favorite_sync_debug = sync_client.debug_summary()
-                        self._mark_rate_limited_if_needed("favorite_add", self._last_favorite_sync_error)
-                        if is_rate_limited_error_message(self._last_favorite_sync_error) and attempt < attempts:
-                            time.sleep(0.35 * attempt)
-                            continue
-                        self._log_sync_debug(
-                            f"Favorite add sync failure for #{post.id}",
-                            f"Error: {self._last_favorite_sync_error}\n\n{self._last_favorite_sync_debug}",
-                        )
-                        break
-        self.local_favorites.add_favorite(post)
-        return post.id
+        return favorites_feature.add_favorite_impl(self, post)
 
     def _remove_favorite_impl(self, post: Post) -> int:
-        self._last_favorite_sync_failed = False
-        self._last_favorite_sync_error = ""
-        self._last_favorite_sync_debug = ""
-        sync_client = self._make_sync_client(self.settings)
-        if sync_client is not None:
-            if self._degraded_mode_active():
-                self._last_favorite_sync_failed = True
-                self._last_favorite_sync_error = (
-                    "Rate-limited degraded mode active; remote remove skipped temporarily. "
-                    f"Retry in {self._degraded_mode_remaining()}s."
-                )
-                self._last_favorite_sync_debug = ""
-            else:
-                attempts = 3
-                removed_remote = False
-                for attempt in range(1, attempts + 1):
-                    try:
-                        sync_client.remove_favorite(post.id)
-                        self._last_favorite_sync_failed = False
-                        self._last_favorite_sync_error = ""
-                        self._last_favorite_sync_debug = ""
-                        self._rate_limit.note_success()
-                        removed_remote = True
-                        break
-                    except FlareSolverrError as exc:
-                        self._last_favorite_sync_failed = True
-                        self._last_favorite_sync_error = str(exc)
-                        self._last_favorite_sync_debug = sync_client.debug_summary()
-                        self._mark_rate_limited_if_needed("favorite_remove", self._last_favorite_sync_error)
-                        if is_rate_limited_error_message(self._last_favorite_sync_error) and attempt < attempts:
-                            time.sleep(0.35 * attempt)
-                            continue
-                        self._log_sync_debug(
-                            f"Favorite remove sync failure for #{post.id}",
-                            f"Error: {self._last_favorite_sync_error}\n\n{self._last_favorite_sync_debug}",
-                        )
-                        break
-
-                if not removed_remote:
-                    return post.id
-
-        self.local_favorites.remove_favorite(post.id)
-        return post.id
+        return favorites_feature.remove_favorite_impl(self, post)
 
     def _favorite_mutation_finished(self, token: int, post_id: int, favorited: bool) -> None:
-        if token != self._mutation_token:
-            return
-        if favorited:
-            self.favorite_ids.add(post_id)
-        else:
-            self.favorite_ids.discard(post_id)
-        if self._last_favorite_sync_failed:
-            if is_rate_limited_error_message(self._last_favorite_sync_error):
-                self._set_status(
-                    f"Rate-limited while syncing #{post_id}; local state saved and automatic sync will retry later."
-                )
-                self._refresh_local_favorites()
-                return
-            self._set_status(
-                f"Saved locally for #{post_id}; account sync unavailable. Debug log: {self._sync_debug_log_path}"
-            )
-            lines = [
-                f"Account sync failed for post #{post_id}.",
-                "",
-                f"Error: {self._last_favorite_sync_error}",
-                "",
-                f"Debug log file: {self._sync_debug_log_path}",
-            ]
-            if self._last_favorite_sync_debug:
-                lines.extend(["", "Last sync trace:", self._last_favorite_sync_debug])
-            QMessageBox.warning(self, "Favorites Sync Warning", "\n".join(lines))
-            self._refresh_local_favorites()
-        elif self._sync_enabled():
-            self._set_status(f"Favorite updated for post #{post_id}.")
-            self._refresh_local_favorites()
-        else:
-            self._set_status(f"Local favorite updated for post #{post_id}.")
-            self._refresh_local_favorites()
+        favorites_feature.favorite_mutation_finished(self, token, post_id, favorited)
 
     def _operation_failed(self, error_text: str) -> None:
-        self.preview_label.setText("Unable to load content.")
-        self.meta_view.setPlainText(error_text)
-        self._mark_rate_limited_if_needed("operation_failed", error_text)
-        self._set_status("Operation failed.")
-        QMessageBox.critical(self, "R34 Linux Client", error_text)
+        favorites_feature.operation_failed(self, error_text)
 
     def _handle_selection_change(self, current: QListWidgetItem | None, _: QListWidgetItem | None) -> None:
-        self._update_action_state()
-        if current is None:
-            return
-        post = current.data(Qt.ItemDataRole.UserRole)
-        if isinstance(post, Post):
-            self._show_post(post)
+        preview_feature.handle_selection_change(self, current, _)
 
     def _show_post(self, post: Post, allow_hydrate: bool = True) -> None:
-        if allow_hydrate and self._needs_hydration(post):
-            self.meta_view.setPlainText("Loading post details...")
-            self.preview_label.setText("Loading preview...")
-
-            self._hydrate_token += 1
-            token = self._hydrate_token
-
-            worker = FunctionWorker(lambda: self._hydrate_post(post))
-            worker.signals.finished.connect(lambda hydrated: self._show_hydrated_post(token, post, hydrated))
-            worker.signals.failed.connect(lambda error_text: self._show_hydration_failed(token, post, error_text))
-            self._start_worker(worker)
-            return
-
-        if self._is_video_post(post):
-            self._show_video_preview(post)
-            return
-
-        self.meta_view.setPlainText(self._format_post_metadata(post))
-        self.preview_label.setText("Loading preview...")
-
-        self._preview_token += 1
-        token = self._preview_token
-        if not post.best_preview_url:
-            self.preview_label.setText("This post does not expose a preview URL.")
-            return
-
-        def fetch_preview() -> bytes:
-            return fetch_preview_bytes(post, user_id=self.settings.user_id)
-
-        worker = FunctionWorker(fetch_preview)
-        worker.signals.finished.connect(lambda data: self._preview_loaded(token, data, post))
-        worker.signals.failed.connect(lambda error_text: self._preview_failed_with_context(post, error_text))
-        self._start_worker(worker)
+        preview_feature.show_post(self, post, allow_hydrate)
 
     @staticmethod
     def _is_video_post(post: Post) -> bool:
         return is_video_post(post)
 
     def _current_post_is_video(self) -> bool:
-        post = self._current_post()
-        return self._is_video_post(post) if post is not None else False
+        return preview_feature.current_post_is_video(self)
 
     def _show_video_preview(self, post: Post) -> None:
-        self._base_preview_pixmap = None
-        self._is_long_strip_image = False
-        self._image_zoom_percent = 100
-        self.meta_view.setPlainText(self._format_post_metadata(post))
-        source_url = post.file_url or post.sample_url or post.preview_url
-        if not source_url:
-            self._hide_video_view()
-            self.preview_label.setText("This video post does not expose a playable URL.")
-            self._set_status("Video post selected.")
-            return
-
-        if self._vlc_player is None or self._vlc_instance is None:
-            self._hide_video_view()
-            self.preview_label.setText("In-app video is unavailable on this build. Click 'Play Video' to open externally.")
-            self._set_status("In-app video backend unavailable; using external playback.")
-            return
-
-        self.preview_container.hide()
-        self.video_surface.show()
-
-        try:
-            media = self._vlc_instance.media_new(source_url)
-            self._vlc_player.set_media(media)
-            window_id = int(self.video_surface.winId())
-            if hasattr(self._vlc_player, "set_xwindow"):
-                self._vlc_player.set_xwindow(window_id)
-            elif hasattr(self._vlc_player, "set_hwnd"):
-                self._vlc_player.set_hwnd(window_id)
-            elif hasattr(self._vlc_player, "set_nsobject"):
-                self._vlc_player.set_nsobject(window_id)
-
-            result = self._vlc_player.play()
-            if result == -1:
-                raise RuntimeError("VLC could not start playback")
-            self._on_volume_changed(self.volume_slider.value())
-            self._set_status("Playing video preview in-app.")
-        except Exception as exc:
-            self._hide_video_view()
-            self.preview_label.setText("Unable to play this video in-app. Click 'Play Video' again to open externally.")
-            self._set_status(str(exc))
+        media_feature.show_video_preview(self, post)
 
     def _hide_video_view(self) -> None:
-        if self._vlc_player is not None:
-            try:
-                self._vlc_player.stop()
-            except Exception:
-                pass
-        self.seek_slider.blockSignals(True)
-        self.seek_slider.setRange(0, 0)
-        self.seek_slider.setValue(0)
-        self.seek_slider.blockSignals(False)
-        self.seek_time_label.setText("00:00 / 00:00")
-        self.video_surface.hide()
-        self.preview_container.show()
-        self._set_preview_cursor()
+        media_feature.hide_video_view(self)
 
     def toggle_video_playback(self) -> None:
-        post = self._current_post()
-        if post is None:
-            return
-        if not self._is_video_post(post):
-            self._set_status("Selected post is not a video.")
-            return
-
-        if self._vlc_player is not None and vlc is not None and self.video_surface.isVisible():
-            try:
-                state = self._vlc_player.get_state()
-                if state == vlc.State.Playing:
-                    self._vlc_player.pause()
-                    self._set_status("Video paused.")
-                    return
-                if state in (vlc.State.Paused, vlc.State.Stopped, vlc.State.Ended):
-                    self._vlc_player.play()
-                    self._set_status("Video playing.")
-                    return
-            except Exception:
-                pass
-
-        self._show_video_preview(post)
+        media_feature.toggle_video_playback(self)
 
     def _on_volume_changed(self, value: int) -> None:
-        if self._vlc_player is None:
-            return
-        try:
-            self._vlc_player.audio_set_volume(int(value))
-        except Exception:
-            return
+        media_feature.on_volume_changed(self, value)
 
     def _on_seek_slider_pressed(self) -> None:
-        self._seek_dragging = True
-        self._pending_seek_ms = self.seek_slider.value()
+        media_feature.on_seek_slider_pressed(self)
 
     def _on_seek_slider_moved(self, value: int) -> None:
-        self._pending_seek_ms = value
-        total_ms = max(self.seek_slider.maximum(), 0)
-        self.seek_time_label.setText(f"{self._format_millis(value)} / {self._format_millis(total_ms)}")
+        media_feature.on_seek_slider_moved(self, value)
 
     def _on_seek_slider_released(self) -> None:
-        self._seek_dragging = False
-        if self._vlc_player is None:
-            return
-        target = int(self._pending_seek_ms)
-        try:
-            self._vlc_player.set_time(target)
-        except Exception:
-            return
+        media_feature.on_seek_slider_released(self)
 
     def _refresh_playback_controls(self) -> None:
-        if self._vlc_player is None:
-            self.seek_slider.setEnabled(False)
-            return
-
-        post = self._current_post()
-        is_video = post is not None and self._is_video_post(post)
-        if not is_video:
-            self.seek_slider.setEnabled(False)
-            return
-
-        try:
-            total_ms = max(int(self._vlc_player.get_length()), 0)
-            current_ms = max(int(self._vlc_player.get_time()), 0)
-        except Exception:
-            self.seek_slider.setEnabled(False)
-            return
-
-        self.seek_slider.setEnabled(total_ms > 0)
-        self.seek_slider.blockSignals(True)
-        self.seek_slider.setRange(0, total_ms)
-        if not self._seek_dragging:
-            self.seek_slider.setValue(min(current_ms, total_ms))
-        self.seek_slider.blockSignals(False)
-        shown_ms = self.seek_slider.value() if self._seek_dragging else current_ms
-        self.seek_time_label.setText(f"{self._format_millis(shown_ms)} / {self._format_millis(total_ms)}")
+        media_feature.refresh_playback_controls(self)
 
     @staticmethod
     def _format_millis(value: int) -> str:
@@ -1362,283 +645,65 @@ class MainWindow(QMainWindow):
         return needs_hydration(post, self._metadata_hydrated_ids)
 
     def _hydrate_post(self, post: Post) -> Post:
-        candidates = self.client.search_posts(f"id:{post.id}", 0, 1)
-        if candidates:
-            hydrated = candidates[0]
-            if not hydrated.source:
-                hydrated.source = hydrated.page_url
-            if hydrated.file_size is None and hydrated.file_url:
-                probed = self._probe_file_size(hydrated.file_url, hydrated.page_url)
-                if probed is not None:
-                    hydrated.file_size = probed
-            return hydrated
-        return post
+        return preview_feature.hydrate_post(self, post)
 
     @staticmethod
     def _probe_file_size(url: str, referer: str) -> int | None:
         return probe_file_size(url, referer)
 
     def _show_hydrated_post(self, token: int, fallback: Post, hydrated: object) -> None:
-        if token != self._hydrate_token:
-            return
-        chosen = hydrated if isinstance(hydrated, Post) else fallback
-        if isinstance(chosen, Post):
-            self._metadata_hydrated_ids.add(chosen.id)
-            if self.left_tabs.currentWidget() is self.favorites_list:
-                current_item = self.favorites_list.currentItem()
-                if current_item is not None:
-                    current_item.setData(Qt.ItemDataRole.UserRole, chosen)
-                    current_item.setText(self._format_post_tile(chosen))
-                self.favorite_posts = [chosen if item.id == chosen.id else item for item in self.favorite_posts]
-                self.local_favorites.add_favorite(chosen)
-            else:
-                current_item = self.results_list.currentItem()
-                if current_item is not None:
-                    current_item.setData(Qt.ItemDataRole.UserRole, chosen)
-                    current_item.setText(self._format_post_tile(chosen))
-                self.current_posts = [chosen if item.id == chosen.id else item for item in self.current_posts]
-            self._update_action_state()
-        self._show_post(chosen, allow_hydrate=False)
+        preview_feature.show_hydrated_post(self, token, fallback, hydrated)
 
     def _show_hydration_failed(self, token: int, fallback: Post, error_text: str) -> None:
-        if token != self._hydrate_token:
-            return
-        first_line = error_text.splitlines()[-1] if error_text else "Unable to load post details"
-        self._set_status(first_line)
-        self._show_post(fallback, allow_hydrate=False)
+        preview_feature.show_hydration_failed(self, token, fallback, error_text)
 
     def _preview_failed(self, error_text: str) -> None:
-        first_line = error_text.splitlines()[-1] if error_text else "Preview unavailable"
-        self._base_preview_pixmap = None
-        self._is_long_strip_image = False
-        self._image_zoom_percent = 100
-        self._image_pan_active = False
-        self._hide_video_view()
-        self.preview_label.setText("Preview unavailable for this item.")
-        self._set_status(first_line)
+        preview_feature.preview_failed(self, error_text)
 
     def _preview_failed_with_context(self, post: Post, error_text: str) -> None:
-        if self.left_tabs.currentWidget() is self.favorites_list or post.id in self.favorite_ids:
-            self._log_sync_debug(
-                f"Favorites preview fetch failure for #{post.id}",
-                "\n".join(
-                    [
-                        f"Error: {error_text.splitlines()[-1] if error_text else 'unknown error'}",
-                        f"Post page: {post.page_url}",
-                        f"Sample URL: {post.sample_url or 'n/a'}",
-                        f"Preview URL: {post.preview_url or 'n/a'}",
-                        f"File URL: {post.file_url or 'n/a'}",
-                    ]
-                ),
-            )
-        self._preview_failed(error_text)
+        preview_feature.preview_failed_with_context(self, post, error_text)
 
     def _preview_loaded(self, token: int, data: object, post: Post) -> None:
-        if token != self._preview_token or not isinstance(data, (bytes, bytearray)):
-            return
-
-        image = QImage.fromData(bytes(data))
-        if image.isNull():
-            self.preview_label.setText("Preview image could not be decoded.")
-            return
-
-        pixmap = QPixmap.fromImage(image)
-        if pixmap.isNull():
-            self.preview_label.setText("Preview image could not be loaded.")
-            return
-
-        self._base_preview_pixmap = pixmap
-        self._is_long_strip_image = pixmap.height() >= (pixmap.width() * 2.2)
-        self._image_zoom_percent = 100
-        self._hide_video_view()
-        self.preview_label.setText("")
-        self._update_preview_scaling()
-        if self._is_long_strip_image:
-            self.preview_container.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
-            self.preview_container.verticalScrollBar().setValue(0)
-        else:
-            self.preview_container.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_label.setToolTip(post.file_name)
+        preview_feature.preview_loaded(self, token, data, post)
 
     def _update_preview_scaling(self) -> None:
-        if self._base_preview_pixmap is None:
-            self._set_preview_cursor()
-            return
-        viewport = self.preview_container.viewport()
-        target_size = viewport.size()
-        if target_size.width() <= 1 or target_size.height() <= 1:
-            self._set_preview_cursor()
-            return
-
-        source = self._base_preview_pixmap
-        if source.width() <= 0 or source.height() <= 0:
-            return
-
-        base_width, base_height = compute_base_render_size(
-            source_width=source.width(),
-            source_height=source.height(),
-            viewport_width=target_size.width(),
-            viewport_height=target_size.height(),
-            is_long_strip=self._is_long_strip_image,
-            fit_mode=self._fit_mode,
-        )
-
-        zoom_factor = max(self._image_zoom_percent, 25) / 100.0
-        render_width = max(1, round(base_width * zoom_factor))
-        render_height = max(1, round(base_height * zoom_factor))
-
-        scaled = source.scaled(
-            render_width,
-            render_height,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        self.preview_label.resize(scaled.size())
-        self.preview_label.setMinimumSize(scaled.size())
-        self.preview_label.setPixmap(scaled)
-        self._set_preview_cursor()
+        preview_feature.update_preview_scaling(self)
 
     def _set_image_zoom(self, value: int) -> None:
-        self._image_zoom_percent = max(25, min(300, int(value)))
-        self._update_preview_scaling()
+        preview_feature.set_image_zoom(self, value)
 
     def _can_pan_image(self) -> bool:
-        if self._base_preview_pixmap is None or self.video_surface.isVisible():
-            return False
-        horizontal = self.preview_container.horizontalScrollBar()
-        vertical = self.preview_container.verticalScrollBar()
-        return horizontal.maximum() > 0 or vertical.maximum() > 0
+        return preview_feature.can_pan_image(self)
 
     def _set_preview_cursor(self) -> None:
-        viewport = self.preview_container.viewport()
-        if self._image_pan_active:
-            viewport.setCursor(Qt.CursorShape.ClosedHandCursor)
-            return
-        if self._can_pan_image():
-            viewport.setCursor(Qt.CursorShape.OpenHandCursor)
-            return
-        viewport.unsetCursor()
+        preview_feature.set_preview_cursor(self)
 
     def _schedule_autocomplete(self, *_: object) -> None:
-        self.autocomplete_timer.start()
+        autocomplete_feature.schedule_autocomplete(self)
 
     def _current_token_context(self) -> tuple[int, int, str]:
-        text = self.search_input.text()
-        cursor = self.search_input.cursorPosition()
-        start = cursor
-        while start > 0 and not text[start - 1].isspace():
-            start -= 1
-
-        end = cursor
-        while end < len(text) and not text[end].isspace():
-            end += 1
-
-        return (start, end, text[start:cursor])
+        return autocomplete_feature.current_token_context(self)
 
     def _refresh_autocomplete(self) -> None:
-        start, end, prefix = self._current_token_context()
-        self._autocomplete_token_start = start
-        self._autocomplete_token_end = end
-        self._autocomplete_query_snapshot = self.search_input.text()
-
-        if len(prefix) < 2:
-            self.completer_model.clear()
-            self.completer.popup().hide()
-            return
-
-        cached = self._cached_suggestions(prefix)
-        if cached:
-            self._apply_autocomplete(prefix, cached)
-
-        if prefix == self._last_autocomplete_prefix:
-            return
-
-        self._last_autocomplete_prefix = prefix
-
-        self._autocomplete_token += 1
-        token = self._autocomplete_token
-
-        worker = FunctionWorker(lambda: self.client.autocomplete_tags(prefix))
-        worker.signals.finished.connect(lambda result: self._autocomplete_finished(token, prefix, result))
-        worker.signals.failed.connect(lambda error_text: self._autocomplete_failed(token, error_text))
-        self._start_worker(worker)
+        autocomplete_feature.refresh_autocomplete(self)
 
     def _autocomplete_finished(self, token: int, prefix: str, result: object) -> None:
-        if token != self._autocomplete_token or not isinstance(result, list):
-            return
-
-        suggestions = [item for item in result if isinstance(item, TagSuggestion)]
-        self._autocomplete_cache[prefix] = suggestions
-        self._apply_autocomplete(prefix, suggestions)
+        autocomplete_feature.autocomplete_finished(self, token, prefix, result)
 
     def _autocomplete_failed(self, token: int, error_text: str) -> None:
-        if token != self._autocomplete_token:
-            return
-        self._set_status(f"Autocomplete unavailable: {error_text.splitlines()[0]}")
+        autocomplete_feature.autocomplete_failed(self, token, error_text)
 
     def _cached_suggestions(self, prefix: str) -> list[TagSuggestion]:
-        if prefix in self._autocomplete_cache:
-            return self._autocomplete_cache[prefix]
-
-        matching_prefixes = [key for key in self._autocomplete_cache if prefix.startswith(key)]
-        if not matching_prefixes:
-            return []
-
-        nearest_prefix = max(matching_prefixes, key=len)
-        return [item for item in self._autocomplete_cache[nearest_prefix] if item.value.startswith(prefix)]
+        return autocomplete_feature.cached_suggestions(self, prefix)
 
     def _apply_autocomplete(self, prefix: str, suggestions: list[TagSuggestion]) -> None:
-        start, end, active_prefix = self._current_token_context()
-        if active_prefix != prefix:
-            return
-
-        self._autocomplete_token_start = start
-        self._autocomplete_token_end = end
-        self._autocomplete_query_snapshot = self.search_input.text()
-
-        self.completer_model.clear()
-        for suggestion in suggestions:
-            item = QStandardItem(suggestion.display_text)
-            item.setData(suggestion.value, Qt.ItemDataRole.UserRole)
-            self.completer_model.appendRow(item)
-
-        if self.completer_model.rowCount() <= 0:
-            self.completer.popup().hide()
-            return
-
-        self.completer.setCompletionPrefix(prefix)
-        self.completer.complete()
+        autocomplete_feature.apply_autocomplete(self, prefix, suggestions)
 
     def _insert_completion(self, completion: str) -> None:
-        value = completion.strip()
-        if not value:
-            return
-
-        snapshot = self._autocomplete_query_snapshot or self.search_input.text()
-        start = self._autocomplete_token_start
-        end = self._autocomplete_token_end
-        QTimer.singleShot(0, lambda: self._apply_completion_to_token(value, snapshot, start, end))
+        autocomplete_feature.insert_completion(self, completion)
 
     def _apply_completion_to_token(self, value: str, snapshot: str, start: int, end: int) -> None:
-        text = snapshot
-        if start < 0 or end < start or end > len(text):
-            live_text = self.search_input.text()
-            start, end, _ = self._current_token_context()
-            text = live_text
-            if start < 0 or end < start or end > len(text):
-                return
-
-        new_text = f"{text[:start]}{value}{text[end:]}"
-        cursor_pos = start + len(value)
-
-        if cursor_pos >= len(new_text):
-            new_text = f"{new_text} "
-            cursor_pos = len(new_text)
-
-        self.search_input.setText(new_text)
-        self.search_input.setCursorPosition(cursor_pos)
-        self.completer.popup().hide()
-        self._schedule_autocomplete()
+        autocomplete_feature.apply_completion_to_token(self, value, snapshot, start, end)
 
     def _format_post_metadata(self, post: Post) -> str:
         return format_post_metadata(post)
@@ -1658,180 +723,56 @@ class MainWindow(QMainWindow):
         return post if isinstance(post, Post) else None
 
     def _active_posts_list(self) -> QListWidget:
-        return active_posts_list(self)
+        return navigation_feature.active_posts_list(self)
 
     def _move_selection(self, delta: int) -> None:
-        move_selection(self, delta)
+        navigation_feature.move_selection(self, delta)
 
     def _extend_selection(self, delta: int) -> None:
-        extend_selection(self, delta)
+        navigation_feature.extend_selection(self, delta)
 
     def _toggle_current_favorite(self) -> None:
-        post = self._current_post()
-        if post is None:
-            return
-        if post.id in self.favorite_ids:
-            self._remove_favorite(post)
-        else:
-            self._add_favorite(post)
+        favorites_feature.toggle_current_favorite(self)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # type: ignore[override]
         super().keyPressEvent(event)
 
     def open_selected_post(self) -> None:
-        post = self._current_post()
-        if post is None:
-            return
-        QDesktopServices.openUrl(QUrl(post.page_url))
+        downloads_feature.open_selected_post(self)
 
     def _open_multiple_posts(self, posts: list[Post]) -> None:
-        unique_posts = {post.id: post for post in posts}
-        if not unique_posts:
-            return
-        for post in unique_posts.values():
-            QDesktopServices.openUrl(QUrl(post.page_url))
-        self._set_status(f"Opened {len(unique_posts)} posts in browser.")
+        downloads_feature.open_multiple_posts(self, posts)
 
     def copy_selected_link(self) -> None:
-        post = self._current_post()
-        if post is None:
-            return
-        QApplication.clipboard().setText(post.page_url)
-        self._set_status("Post link copied to clipboard.")
+        downloads_feature.copy_selected_link(self)
 
     def download_selected_post(self) -> None:
-        post = self._current_post()
-        if post is None:
-            return
-
-        target_directory = self.settings.download_directory or self.store.default_download_directory()
-        if not target_directory:
-            target_directory = QFileDialog.getExistingDirectory(self, "Choose download folder")
-        if not target_directory:
-            return
-
-        self._set_status(f"Downloading {post.file_name}...")
-
-        def download() -> Path:
-            return self._download_post_to_directory(post, target_directory)
-
-        self._download_token += 1
-        token = self._download_token
-
-        worker = FunctionWorker(download)
-        worker.signals.finished.connect(lambda result: self._download_finished(token, result))
-        worker.signals.failed.connect(self._operation_failed)
-        self._start_worker(worker)
+        downloads_feature.download_selected_post(self)
 
     def _download_multiple_posts(self, posts: list[Post]) -> None:
-        unique_posts = list({post.id: post for post in posts}.values())
-        if not unique_posts:
-            return
-
-        target_directory = self.settings.download_directory or self.store.default_download_directory()
-        if not target_directory:
-            target_directory = QFileDialog.getExistingDirectory(self, "Choose download folder")
-        if not target_directory:
-            return
-
-        self._set_status(f"Downloading {len(unique_posts)} selected favorites...")
-
-        def download_many() -> list[Path]:
-            output: list[Path] = []
-            for post in unique_posts:
-                output.append(self._download_post_to_directory(post, target_directory))
-            return output
-
-        self._download_token += 1
-        token = self._download_token
-
-        worker = FunctionWorker(download_many)
-        worker.signals.finished.connect(lambda result: self._download_many_finished(token, result))
-        worker.signals.failed.connect(self._operation_failed)
-        self._start_worker(worker)
+        downloads_feature.download_multiple_posts(self, posts)
 
     def _download_post_to_directory(self, post: Post, target_directory: str) -> Path:
-        resolved = self._resolve_download_post(post)
-        url = resolved.download_url
-        if not url:
-            raise RuntimeError("This post does not expose a downloadable file URL.")
-
-        destination = Path(target_directory) / resolved.file_name
-        if destination.exists():
-            destination = destination.with_name(f"{destination.stem}-{resolved.id}{destination.suffix}")
-
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (X11; Linux x86_64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            ),
-            "Referer": resolved.page_url,
-            "Accept": "*/*",
-        }
-        response = requests.get(url, timeout=60, stream=True, headers=headers)
-        response.raise_for_status()
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        with destination.open("wb") as file_handle:
-            for chunk in response.iter_content(chunk_size=1024 * 64):
-                if chunk:
-                    file_handle.write(chunk)
-        return destination
+        return downloads_feature.download_post_to_directory(self, post, target_directory)
 
     @staticmethod
     def _download_url_needs_hydration(url: str) -> bool:
         return download_url_needs_hydration(url)
 
     def _resolve_download_post(self, post: Post) -> Post:
-        if not self._download_url_needs_hydration(post.download_url):
-            return post
-        candidates = self.client.search_posts(f"id:{post.id}", 0, 1)
-        if not candidates:
-            return post
-        hydrated = candidates[0]
-        if self._download_url_needs_hydration(hydrated.download_url):
-            return post
-        return hydrated
+        return downloads_feature.resolve_download_post(self, post)
 
     def _start_worker(self, worker: FunctionWorker) -> None:
-        self._active_workers.add(worker)
-
-        def release_worker(*_: object) -> None:
-            self._active_workers.discard(worker)
-
-        worker.signals.finished.connect(release_worker)
-        worker.signals.failed.connect(release_worker)
-        self.pool.start(worker)
+        downloads_feature.start_worker(self, worker)
 
     def _download_finished(self, token: int, result: object) -> None:
-        if token != self._download_token:
-            return
-        if isinstance(result, Path):
-            self._set_status(f"Saved to {result}")
+        downloads_feature.download_finished(self, token, result)
 
     def _download_many_finished(self, token: int, result: object) -> None:
-        if token != self._download_token:
-            return
-        paths = [item for item in result if isinstance(item, Path)] if isinstance(result, list) else []
-        self._set_status(f"Saved {len(paths)} files.")
+        downloads_feature.download_many_finished(self, token, result)
 
     def open_settings(self, initial: bool = False) -> None:
-        dialog = SettingsDialog(self.settings, self.store, self)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            if initial and not self.settings.has_credentials:
-                self._set_status("Credentials are required to search.")
-            return
-
-        self.settings = dialog.current_settings()
-        self.store.save(self.settings)
-        self.client = self._make_client(self.settings)
-        self._configure_background_sync_timer()
-        self._refresh_collection_filter()
-        if self.settings.flaresolverr_enabled:
-            self._set_status("Settings saved. FlareSolverr sync is enabled.")
-        else:
-            self._set_status("Settings saved.")
-        self._refresh_favorites()
+        settings_feature.open_settings(self, initial)
 
     def resizeEvent(self, event):  # type: ignore[override]
         super().resizeEvent(event)

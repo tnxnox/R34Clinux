@@ -8,7 +8,7 @@ from PySide6.QtGui import QShortcut
 from PySide6.QtWidgets import QLineEdit, QListWidget
 
 if TYPE_CHECKING:
-    from .main_window import MainWindow
+    from ..main_window import MainWindow
 
 
 def register_global_shortcuts(window: MainWindow) -> None:
