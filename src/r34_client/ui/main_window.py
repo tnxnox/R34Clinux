@@ -9,7 +9,9 @@ from PySide6.QtCore import QEvent, QThreadPool, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QImage, QKeyEvent, QPixmap, QShortcut
 from PySide6.QtGui import QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
+    QComboBox,
     QDialog,
     QFileDialog,
     QHBoxLayout,
@@ -21,6 +23,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QInputDialog,
     QPushButton,
     QPlainTextEdit,
     QScrollArea,
@@ -133,9 +136,17 @@ class MainWindow(QMainWindow):
         self.results_list.customContextMenuRequested.connect(self._open_results_context_menu)
 
         self.favorites_list = QListWidget()
+        self.favorites_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.favorites_list.currentItemChanged.connect(self._handle_selection_change)
         self.favorites_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.favorites_list.customContextMenuRequested.connect(self._open_favorites_context_menu)
+
+        self.collection_filter = QComboBox()
+        self.collection_filter.addItem("All Favorites", None)
+        self.collection_filter.currentIndexChanged.connect(self._on_collection_filter_changed)
+
+        self.manage_collections_button = QPushButton("Collections")
+        self.manage_collections_button.clicked.connect(self._open_collection_manager)
 
         self.left_tabs = QTabWidget()
         self.left_tabs.addTab(self.results_list, "Search Results")
@@ -210,6 +221,9 @@ class MainWindow(QMainWindow):
         self.playback_timer.timeout.connect(self._refresh_playback_controls)
         self.playback_timer.start()
 
+        self.background_sync_timer = QTimer(self)
+        self.background_sync_timer.timeout.connect(self._background_sync_tick)
+
         self.copy_button = QPushButton("Copy Link")
         self.copy_button.clicked.connect(self.copy_selected_link)
 
@@ -218,6 +232,8 @@ class MainWindow(QMainWindow):
         self._build_layout()
         self._build_toolbar()
         self._register_global_shortcuts()
+        self._refresh_collection_filter()
+        self._configure_background_sync_timer()
         self._update_action_state()
         self._refresh_favorites()
 
@@ -246,6 +262,58 @@ class MainWindow(QMainWindow):
     def _sync_enabled(self) -> bool:
         return self._make_sync_client(self.settings) is not None
 
+    def _configure_background_sync_timer(self) -> None:
+        interval_minutes = max(0, int(self.settings.background_sync_interval_minutes))
+        if interval_minutes <= 0 or not self._sync_enabled():
+            self.background_sync_timer.stop()
+            return
+        self.background_sync_timer.setInterval(interval_minutes * 60 * 1000)
+        self.background_sync_timer.start()
+
+    def _background_sync_tick(self) -> None:
+        if not self._sync_enabled():
+            return
+        if self._active_workers:
+            return
+        self._refresh_favorites()
+
+    def _selected_collection_name(self) -> str | None:
+        selected = self.collection_filter.currentData()
+        if not selected:
+            return None
+        return str(selected)
+
+    def _refresh_collection_filter(self) -> None:
+        selected = self._selected_collection_name()
+        collections = self.local_favorites.list_collections()
+        self.collection_filter.blockSignals(True)
+        self.collection_filter.clear()
+        self.collection_filter.addItem("All Favorites", None)
+        for collection in collections:
+            self.collection_filter.addItem(collection, collection)
+        if selected:
+            index = self.collection_filter.findData(selected)
+            if index >= 0:
+                self.collection_filter.setCurrentIndex(index)
+        self.collection_filter.blockSignals(False)
+
+    def _on_collection_filter_changed(self, _: int) -> None:
+        self._refresh_favorites()
+
+    def _open_collection_manager(self) -> None:
+        text, accepted = QInputDialog.getText(self, "New collection", "Collection name")
+        if not accepted:
+            return
+        try:
+            name = self.local_favorites.create_collection(text)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Collections", str(exc))
+            return
+        self._refresh_collection_filter()
+        index = self.collection_filter.findData(name)
+        if index >= 0:
+            self.collection_filter.setCurrentIndex(index)
+
     def _build_layout(self) -> None:
         root = QWidget()
         layout = QVBoxLayout(root)
@@ -263,6 +331,13 @@ class MainWindow(QMainWindow):
 
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
+
+        collection_row = QHBoxLayout()
+        collection_row.addWidget(QLabel("Collection"))
+        collection_row.addWidget(self.collection_filter, 1)
+        collection_row.addWidget(self.manage_collections_button)
+        left_layout.addLayout(collection_row)
+
         left_layout.addWidget(self.left_tabs)
 
         right_panel = QWidget()
@@ -592,7 +667,9 @@ class MainWindow(QMainWindow):
             worker = FunctionWorker(self._sync_remote_favorites)
         else:
             self._set_status("Refreshing local favorites...")
-            worker = FunctionWorker(lambda: self.local_favorites.list_favorites())
+            worker = FunctionWorker(
+                lambda: self.local_favorites.list_favorites(collection_name=self._selected_collection_name())
+            )
 
         worker.signals.finished.connect(lambda result: self._favorites_loaded(token, result))
         worker.signals.failed.connect(lambda error_text: self._favorites_failed(token, error_text))
@@ -629,8 +706,13 @@ class MainWindow(QMainWindow):
         else:
             return
 
+        selected_collection = self._selected_collection_name()
+        if selected_collection is not None:
+            loaded_posts = self.local_favorites.list_favorites(collection_name=selected_collection)
+
         self.favorite_posts = [item for item in loaded_posts if isinstance(item, Post)]
         self.favorite_ids = {post.id for post in self.favorite_posts}
+        self._refresh_collection_filter()
 
         self.favorites_list.clear()
         for post in self.favorite_posts:
@@ -687,14 +769,114 @@ class MainWindow(QMainWindow):
         item = self.favorites_list.itemAt(position)
         if item is None:
             return
-        post = item.data(Qt.ItemDataRole.UserRole)
-        if not isinstance(post, Post):
+        if item not in self.favorites_list.selectedItems():
+            self.favorites_list.setCurrentItem(item)
+            item.setSelected(True)
+
+        selected_posts = self._selected_favorite_posts()
+        if not selected_posts:
             return
 
         menu = QMenu(self)
-        action = menu.addAction("Remove from favorites")
-        action.triggered.connect(lambda: self._remove_favorite(post))
+
+        if len(selected_posts) > 1:
+            remove_action = menu.addAction(f"Remove {len(selected_posts)} selected from favorites")
+            remove_action.triggered.connect(lambda: self._remove_multiple_favorites(selected_posts))
+
+            download_action = menu.addAction(f"Download {len(selected_posts)} selected")
+            download_action.triggered.connect(lambda: self._download_multiple_posts(selected_posts))
+
+            open_action = menu.addAction(f"Open {len(selected_posts)} selected in browser")
+            open_action.triggered.connect(lambda: self._open_multiple_posts(selected_posts))
+        else:
+            remove_action = menu.addAction("Remove from favorites")
+            remove_action.triggered.connect(lambda: self._remove_favorite(selected_posts[0]))
+
+        menu.addSeparator()
+        assign_submenu = menu.addMenu("Add selected to collection")
+        new_collection_action = assign_submenu.addAction("New collection...")
+        new_collection_action.triggered.connect(lambda: self._assign_selection_to_new_collection(selected_posts))
+
+        for collection in self.local_favorites.list_collections():
+            action = assign_submenu.addAction(collection)
+            action.triggered.connect(
+                lambda _checked=False, c=collection: self._assign_selection_to_collection(selected_posts, c)
+            )
+
+        current_collection = self._selected_collection_name()
+        if current_collection:
+            remove_collection_action = menu.addAction(f"Remove selected from '{current_collection}'")
+            remove_collection_action.triggered.connect(
+                lambda: self._remove_selection_from_collection(selected_posts, current_collection)
+            )
+
         menu.exec(self.favorites_list.viewport().mapToGlobal(position))
+
+    def _selected_favorite_posts(self) -> list[Post]:
+        posts: list[Post] = []
+        selected_items = self.favorites_list.selectedItems()
+        for item in selected_items:
+            post = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(post, Post):
+                posts.append(post)
+        if posts:
+            return posts
+        current = self._current_post()
+        return [current] if current is not None else []
+
+    def _remove_multiple_favorites(self, posts: list[Post]) -> None:
+        unique_posts = {post.id: post for post in posts}
+        if not unique_posts:
+            return
+
+        self._set_status(f"Removing {len(unique_posts)} favorites...")
+        self._mutation_token += 1
+        token = self._mutation_token
+
+        worker = FunctionWorker(lambda: self._remove_multiple_favorites_impl(list(unique_posts.values())))
+        worker.signals.finished.connect(lambda result: self._favorite_bulk_mutation_finished(token, result))
+        worker.signals.failed.connect(self._operation_failed)
+        self._start_worker(worker)
+
+    def _remove_multiple_favorites_impl(self, posts: list[Post]) -> list[int]:
+        removed_ids: list[int] = []
+        for post in posts:
+            self._remove_favorite_impl(post)
+            removed_ids.append(post.id)
+        return removed_ids
+
+    def _favorite_bulk_mutation_finished(self, token: int, result: object) -> None:
+        if token != self._mutation_token:
+            return
+        removed_ids = [int(item) for item in result] if isinstance(result, list) else []
+        for post_id in removed_ids:
+            self.favorite_ids.discard(post_id)
+        self._set_status(f"Removed {len(removed_ids)} favorites.")
+        if self._sync_enabled() and not self._last_favorite_sync_failed:
+            self._refresh_favorites()
+        else:
+            self._refresh_local_favorites()
+
+    def _assign_selection_to_new_collection(self, posts: list[Post]) -> None:
+        text, accepted = QInputDialog.getText(self, "New collection", "Collection name")
+        if not accepted:
+            return
+        self._assign_selection_to_collection(posts, text)
+
+    def _assign_selection_to_collection(self, posts: list[Post], collection_name: str) -> None:
+        post_ids = [post.id for post in posts]
+        try:
+            assigned = self.local_favorites.assign_posts_to_collection(post_ids, collection_name)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Collections", str(exc))
+            return
+        self._refresh_collection_filter()
+        self._set_status(f"Added {assigned} favorites to collection '{collection_name.strip()}'.")
+
+    def _remove_selection_from_collection(self, posts: list[Post], collection_name: str) -> None:
+        removed = self.local_favorites.remove_posts_from_collection([post.id for post in posts], collection_name)
+        self._set_status(f"Removed {removed} favorites from '{collection_name}'.")
+        self._refresh_favorites()
 
     def _add_favorite(self, post: Post) -> None:
         if self._sync_enabled():
@@ -1340,6 +1522,14 @@ class MainWindow(QMainWindow):
             return
         QDesktopServices.openUrl(QUrl(post.page_url))
 
+    def _open_multiple_posts(self, posts: list[Post]) -> None:
+        unique_posts = {post.id: post for post in posts}
+        if not unique_posts:
+            return
+        for post in unique_posts.values():
+            QDesktopServices.openUrl(QUrl(post.page_url))
+        self._set_status(f"Opened {len(unique_posts)} posts in browser.")
+
     def copy_selected_link(self) -> None:
         post = self._current_post()
         if post is None:
@@ -1361,32 +1551,7 @@ class MainWindow(QMainWindow):
         self._set_status(f"Downloading {post.file_name}...")
 
         def download() -> Path:
-            resolved = self._resolve_download_post(post)
-            url = resolved.download_url
-            if not url:
-                raise RuntimeError("This post does not expose a downloadable file URL.")
-
-            destination = Path(target_directory) / resolved.file_name
-            if destination.exists():
-                destination = destination.with_name(f"{destination.stem}-{resolved.id}{destination.suffix}")
-
-            headers = {
-                "User-Agent": (
-                    "Mozilla/5.0 (X11; Linux x86_64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
-                ),
-                "Referer": resolved.page_url,
-                "Accept": "*/*",
-            }
-            response = requests.get(url, timeout=60, stream=True, headers=headers)
-            response.raise_for_status()
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            with destination.open("wb") as file_handle:
-                for chunk in response.iter_content(chunk_size=1024 * 64):
-                    if chunk:
-                        file_handle.write(chunk)
-            return destination
+            return self._download_post_to_directory(post, target_directory)
 
         self._download_token += 1
         token = self._download_token
@@ -1395,6 +1560,61 @@ class MainWindow(QMainWindow):
         worker.signals.finished.connect(lambda result: self._download_finished(token, result))
         worker.signals.failed.connect(self._operation_failed)
         self._start_worker(worker)
+
+    def _download_multiple_posts(self, posts: list[Post]) -> None:
+        unique_posts = list({post.id: post for post in posts}.values())
+        if not unique_posts:
+            return
+
+        target_directory = self.settings.download_directory or self.store.default_download_directory()
+        if not target_directory:
+            target_directory = QFileDialog.getExistingDirectory(self, "Choose download folder")
+        if not target_directory:
+            return
+
+        self._set_status(f"Downloading {len(unique_posts)} selected favorites...")
+
+        def download_many() -> list[Path]:
+            output: list[Path] = []
+            for post in unique_posts:
+                output.append(self._download_post_to_directory(post, target_directory))
+            return output
+
+        self._download_token += 1
+        token = self._download_token
+
+        worker = FunctionWorker(download_many)
+        worker.signals.finished.connect(lambda result: self._download_many_finished(token, result))
+        worker.signals.failed.connect(self._operation_failed)
+        self._start_worker(worker)
+
+    def _download_post_to_directory(self, post: Post, target_directory: str) -> Path:
+        resolved = self._resolve_download_post(post)
+        url = resolved.download_url
+        if not url:
+            raise RuntimeError("This post does not expose a downloadable file URL.")
+
+        destination = Path(target_directory) / resolved.file_name
+        if destination.exists():
+            destination = destination.with_name(f"{destination.stem}-{resolved.id}{destination.suffix}")
+
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Referer": resolved.page_url,
+            "Accept": "*/*",
+        }
+        response = requests.get(url, timeout=60, stream=True, headers=headers)
+        response.raise_for_status()
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with destination.open("wb") as file_handle:
+            for chunk in response.iter_content(chunk_size=1024 * 64):
+                if chunk:
+                    file_handle.write(chunk)
+        return destination
 
     @staticmethod
     def _download_url_needs_hydration(url: str) -> bool:
@@ -1427,6 +1647,12 @@ class MainWindow(QMainWindow):
         if isinstance(result, Path):
             self._set_status(f"Saved to {result}")
 
+    def _download_many_finished(self, token: int, result: object) -> None:
+        if token != self._download_token:
+            return
+        paths = [item for item in result if isinstance(item, Path)] if isinstance(result, list) else []
+        self._set_status(f"Saved {len(paths)} files.")
+
     def open_settings(self, initial: bool = False) -> None:
         dialog = SettingsDialog(self.settings, self.store, self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -1437,6 +1663,8 @@ class MainWindow(QMainWindow):
         self.settings = dialog.current_settings()
         self.store.save(self.settings)
         self.client = self._make_client(self.settings)
+        self._configure_background_sync_timer()
+        self._refresh_collection_filter()
         if self.settings.flaresolverr_enabled:
             self._set_status("Settings saved. FlareSolverr sync is enabled.")
         else:

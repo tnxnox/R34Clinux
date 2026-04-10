@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -49,6 +50,21 @@ class SettingsDialog(QDialog):
         self.flaresolverr_url_edit.setEnabled(settings.flaresolverr_enabled)
         self.flaresolverr_enabled_check.toggled.connect(self.flaresolverr_url_edit.setEnabled)
 
+        self.conflict_strategy_combo = QComboBox()
+        self.conflict_strategy_combo.addItem("Merge local + remote", "merge")
+        self.conflict_strategy_combo.addItem("Prefer local cache", "local_wins")
+        self.conflict_strategy_combo.addItem("Prefer remote account", "remote_wins")
+        selected_strategy = settings.sync_conflict_strategy or "merge"
+        for index in range(self.conflict_strategy_combo.count()):
+            if self.conflict_strategy_combo.itemData(index) == selected_strategy:
+                self.conflict_strategy_combo.setCurrentIndex(index)
+                break
+
+        self.background_sync_interval_spin = QSpinBox()
+        self.background_sync_interval_spin.setRange(0, 240)
+        self.background_sync_interval_spin.setValue(max(0, int(settings.background_sync_interval_minutes)))
+        self.background_sync_interval_spin.setSpecialValueText("Disabled")
+
         form = QFormLayout()
         form.addRow("User ID", self.user_id_edit)
         form.addRow("API key", self.api_key_edit)
@@ -62,6 +78,8 @@ class SettingsDialog(QDialog):
         form.addRow("Results per page", self.page_size_spin)
         form.addRow(self.flaresolverr_enabled_check)
         form.addRow("FlareSolverr URL", self.flaresolverr_url_edit)
+        form.addRow("Sync conflict strategy", self.conflict_strategy_combo)
+        form.addRow("Background sync interval (minutes)", self.background_sync_interval_spin)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
@@ -88,4 +106,6 @@ class SettingsDialog(QDialog):
             page_size=self.page_size_spin.value(),
             flaresolverr_enabled=self.flaresolverr_enabled_check.isChecked(),
             flaresolverr_url=self.flaresolverr_url_edit.text().strip() or "http://127.0.0.1:8191",
+            sync_conflict_strategy=str(self.conflict_strategy_combo.currentData() or "merge"),
+            background_sync_interval_minutes=self.background_sync_interval_spin.value(),
         )

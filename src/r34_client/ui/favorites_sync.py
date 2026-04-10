@@ -53,6 +53,18 @@ def sync_remote_favorites(
         )
         return (local_posts, bool(local_posts))
 
+    strategy = (settings.sync_conflict_strategy or "merge").strip().lower()
+    if strategy == "local_wins":
+        log_sync_debug(
+            "Favorites sync strategy local_wins",
+            "Keeping local favorites cache as source of truth for this sync cycle.",
+        )
+        return (local_posts, bool(local_posts))
+
+    if strategy == "remote_wins":
+        local_favorites.replace_all(remote_posts)
+        return (local_favorites.list_favorites(), False)
+
     merged_posts: list[Post] = []
     for remote in remote_posts:
         local = local_by_id.get(remote.id)

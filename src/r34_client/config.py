@@ -16,6 +16,8 @@ class AppSettings:
     page_size: int = 50
     flaresolverr_enabled: bool = False
     flaresolverr_url: str = "http://127.0.0.1:8191"
+    sync_conflict_strategy: str = "merge"
+    background_sync_interval_minutes: int = 0
 
     @property
     def has_credentials(self) -> bool:
@@ -36,6 +38,8 @@ class SettingsStore:
             page_size=self._settings.value("ui/page_size", 50, int),
             flaresolverr_enabled=self._settings.value("sync/flaresolverr_enabled", False, bool),
             flaresolverr_url=self._settings.value("sync/flaresolverr_url", "http://127.0.0.1:8191", str),
+            sync_conflict_strategy=self._settings.value("sync/conflict_strategy", "merge", str),
+            background_sync_interval_minutes=self._settings.value("sync/background_interval_minutes", 0, int),
         )
 
     def save(self, settings: AppSettings) -> None:
@@ -47,6 +51,8 @@ class SettingsStore:
         self._settings.setValue("ui/page_size", settings.page_size)
         self._settings.setValue("sync/flaresolverr_enabled", settings.flaresolverr_enabled)
         self._settings.setValue("sync/flaresolverr_url", settings.flaresolverr_url)
+        self._settings.setValue("sync/conflict_strategy", settings.sync_conflict_strategy)
+        self._settings.setValue("sync/background_interval_minutes", settings.background_sync_interval_minutes)
         self._settings.sync()
 
     @staticmethod

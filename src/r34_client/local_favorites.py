@@ -59,18 +59,50 @@ class LocalFavoritesStore:
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_favorites_favorited_at ON favorites (favorited_at DESC)"
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS favorite_collections (
+                    name TEXT PRIMARY KEY
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS favorite_collection_items (
+                    collection_name TEXT NOT NULL,
+                    post_id INTEGER NOT NULL,
+                    PRIMARY KEY (collection_name, post_id)
+                )
+                """
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_favorite_collection_items_post_id "
+                "ON favorite_collection_items (post_id)"
+            )
             connection.commit()
 
-    def list_favorites(self, limit: int | None = None) -> list[Post]:
-        query = (
-            "SELECT id, tags, rating, score, width, height, file_size, source, md5, "
-            "preview_url, sample_url, file_url, created_at "
-            "FROM favorites ORDER BY favorited_at DESC"
-        )
-        params: tuple[object, ...] = ()
+    def list_favorites(self, limit: int | None = None, collection_name: str | None = None) -> list[Post]:
+        if collection_name:
+            query = (
+                "SELECT f.id, f.tags, f.rating, f.score, f.width, f.height, f.file_size, f.source, f.md5, "
+                "f.preview_url, f.sample_url, f.file_url, f.created_at "
+                "FROM favorites f "
+                "INNER JOIN favorite_collection_items ci ON ci.post_id = f.id "
+                "WHERE ci.collection_name = ? "
+                "ORDER BY f.favorited_at DESC"
+            )
+            params: tuple[object, ...] = (collection_name,)
+        else:
+            query = (
+                "SELECT id, tags, rating, score, width, height, file_size, source, md5, "
+                "preview_url, sample_url, file_url, created_at "
+                "FROM favorites ORDER BY favorited_at DESC"
+            )
+            params = ()
+
         if limit is not None:
             query = f"{query} LIMIT ?"
-            params = (limit,)
+            params = (*params, limit)
 
         with self._connect() as connection:
             rows = connection.execute(query, params).fetchall()
@@ -102,15 +134,100 @@ class LocalFavoritesStore:
 
     def replace_all(self, posts: list[Post]) -> None:
         with self._connect() as connection:
-            connection.execute("DELETE FROM favorites")
+            keep_ids = {int(post.id) for post in posts}
+            if keep_ids:
+                placeholders = ", ".join("?" for _ in keep_ids)
+                connection.execute(
+                    f"DELETE FROM favorites WHERE id NOT IN ({placeholders})",
+                    tuple(sorted(keep_ids)),
+                )
+                connection.execute(
+                    f"DELETE FROM favorite_collection_items WHERE post_id NOT IN ({placeholders})",
+                    tuple(sorted(keep_ids)),
+                )
+            else:
+                connection.execute("DELETE FROM favorites")
+                connection.execute("DELETE FROM favorite_collection_items")
+
             for post in posts:
                 self._upsert(connection, post)
             connection.commit()
 
     def remove_favorite(self, post_id: int) -> None:
         with self._connect() as connection:
+            connection.execute("DELETE FROM favorite_collection_items WHERE post_id = ?", (post_id,))
             connection.execute("DELETE FROM favorites WHERE id = ?", (post_id,))
             connection.commit()
+
+    def list_collections(self) -> list[str]:
+        with self._connect() as connection:
+            rows = connection.execute("SELECT name FROM favorite_collections ORDER BY lower(name)").fetchall()
+        return [str(row["name"]) for row in rows if row["name"]]
+
+    def create_collection(self, name: str) -> str:
+        normalized = name.strip()
+        if not normalized:
+            raise ValueError("Collection name cannot be empty.")
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT OR IGNORE INTO favorite_collections (name) VALUES (?)",
+                (normalized,),
+            )
+            connection.commit()
+        return normalized
+
+    def delete_collection(self, name: str) -> None:
+        normalized = name.strip()
+        if not normalized:
+            return
+        with self._connect() as connection:
+            connection.execute("DELETE FROM favorite_collection_items WHERE collection_name = ?", (normalized,))
+            connection.execute("DELETE FROM favorite_collections WHERE name = ?", (normalized,))
+            connection.commit()
+
+    def assign_posts_to_collection(self, post_ids: list[int], collection_name: str) -> int:
+        normalized = collection_name.strip()
+        if not normalized:
+            raise ValueError("Collection name cannot be empty.")
+        unique_ids = sorted({int(post_id) for post_id in post_ids})
+        if not unique_ids:
+            return 0
+
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT OR IGNORE INTO favorite_collections (name) VALUES (?)",
+                (normalized,),
+            )
+
+            existing_rows = connection.execute(
+                f"SELECT id FROM favorites WHERE id IN ({', '.join('?' for _ in unique_ids)})",
+                tuple(unique_ids),
+            ).fetchall()
+            existing_ids = {int(row["id"]) for row in existing_rows}
+
+            for post_id in sorted(existing_ids):
+                connection.execute(
+                    "INSERT OR IGNORE INTO favorite_collection_items (collection_name, post_id) VALUES (?, ?)",
+                    (normalized, post_id),
+                )
+            connection.commit()
+        return len(existing_ids)
+
+    def remove_posts_from_collection(self, post_ids: list[int], collection_name: str) -> int:
+        normalized = collection_name.strip()
+        unique_ids = sorted({int(post_id) for post_id in post_ids})
+        if not normalized or not unique_ids:
+            return 0
+
+        with self._connect() as connection:
+            before = connection.total_changes
+            connection.execute(
+                f"DELETE FROM favorite_collection_items WHERE collection_name = ? "
+                f"AND post_id IN ({', '.join('?' for _ in unique_ids)})",
+                (normalized, *unique_ids),
+            )
+            connection.commit()
+            return connection.total_changes - before
 
     def _upsert(self, connection: sqlite3.Connection, post: Post) -> None:
         connection.execute(
