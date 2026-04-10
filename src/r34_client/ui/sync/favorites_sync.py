@@ -24,18 +24,19 @@ def sync_remote_favorites(
 
     sync_attempt_notes: list[str] = []
     remote_posts: list[Post] = []
+    remote_fetch_succeeded = False
     for attempt in range(1, 3):
         try:
             remote_posts = sync_client.list_favorites(limit=max(settings.page_size, 200))
             sync_attempt_notes.append(f"attempt={attempt} remote_count={len(remote_posts)}")
-            if remote_posts:
-                break
+            remote_fetch_succeeded = True
+            break
         except FlareSolverrError as exc:
             sync_attempt_notes.append(f"attempt={attempt} error={exc}")
             if on_sync_error is not None:
                 on_sync_error(str(exc))
 
-    if not remote_posts:
+    if not remote_fetch_succeeded:
         # Some favorite endpoints can respond with an empty payload despite valid mutations.
         # Keep cached local favorites instead of wiping the tab.
         log_sync_debug(
@@ -52,6 +53,21 @@ def sync_remote_favorites(
             ),
         )
         return (local_posts, bool(local_posts))
+
+    if not remote_posts:
+        # Empty remote favorites is a valid account state, not a sync failure.
+        # Keep local cache visible until an explicit remote mutation occurs.
+        log_sync_debug(
+            "Favorites sync remote empty",
+            "\n".join(
+                [
+                    "Outcome: remote favorites list is empty.",
+                    f"Local cache count: {len(local_posts)}",
+                    *sync_attempt_notes,
+                ]
+            ),
+        )
+        return (local_posts, False)
 
     strategy = (settings.sync_conflict_strategy or "merge").strip().lower()
     if strategy == "local_wins":
