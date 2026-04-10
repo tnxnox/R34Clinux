@@ -131,6 +131,7 @@ class MainWindow(QMainWindow):
         self.page_label = QLabel("Page 1")
 
         self.results_list = QListWidget()
+        self.results_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.results_list.currentItemChanged.connect(self._handle_selection_change)
         self.results_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.results_list.customContextMenuRequested.connect(self._open_results_context_menu)
@@ -752,18 +753,156 @@ class MainWindow(QMainWindow):
         item = self.results_list.itemAt(position)
         if item is None:
             return
-        post = item.data(Qt.ItemDataRole.UserRole)
-        if not isinstance(post, Post):
+        if item not in self.results_list.selectedItems():
+            self.results_list.setCurrentItem(item)
+            item.setSelected(True)
+
+        selected_posts = self._selected_results_posts()
+        if not selected_posts:
             return
 
         menu = QMenu(self)
-        if post.id in self.favorite_ids:
-            action = menu.addAction("Remove from favorites")
-            action.triggered.connect(lambda: self._remove_favorite(post))
+
+        selected_not_favorited = [post for post in selected_posts if post.id not in self.favorite_ids]
+        selected_favorited = [post for post in selected_posts if post.id in self.favorite_ids]
+
+        if len(selected_posts) > 1:
+            if selected_not_favorited:
+                add_action = menu.addAction(f"Add {len(selected_not_favorited)} selected to favorites")
+                add_action.triggered.connect(lambda: self._add_multiple_favorites(selected_not_favorited))
+            if selected_favorited:
+                remove_action = menu.addAction(f"Remove {len(selected_favorited)} selected from favorites")
+                remove_action.triggered.connect(lambda: self._remove_multiple_favorites(selected_favorited))
         else:
-            action = menu.addAction("Add to favorites")
-            action.triggered.connect(lambda: self._add_favorite(post))
+            post = selected_posts[0]
+            if post.id in self.favorite_ids:
+                action = menu.addAction("Remove from favorites")
+                action.triggered.connect(lambda: self._remove_favorite(post))
+            else:
+                action = menu.addAction("Add to favorites")
+                action.triggered.connect(lambda: self._add_favorite(post))
         menu.exec(self.results_list.viewport().mapToGlobal(position))
+
+    def _selected_results_posts(self) -> list[Post]:
+        posts: list[Post] = []
+        selected_items = self.results_list.selectedItems()
+        for item in selected_items:
+            post = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(post, Post):
+                posts.append(post)
+        if posts:
+            return posts
+        current = self._current_post()
+        return [current] if current is not None else []
+
+    def _add_multiple_favorites(self, posts: list[Post]) -> None:
+        unique_posts = {post.id: post for post in posts}
+        if not unique_posts:
+            return
+
+        self._set_status(f"Adding {len(unique_posts)} favorites...")
+        self._mutation_token += 1
+        token = self._mutation_token
+
+        worker = FunctionWorker(lambda: self._add_multiple_favorites_impl(list(unique_posts.values())))
+        worker.signals.finished.connect(lambda result: self._favorite_bulk_add_finished(token, result))
+        worker.signals.failed.connect(self._operation_failed)
+        self._start_worker(worker)
+
+    def _add_multiple_favorites_impl(self, posts: list[Post]) -> dict[str, object]:
+        added_ids: list[int] = []
+        failed_ids: list[int] = []
+        failed_errors: list[str] = []
+
+        sync_client = self._make_sync_client(self.settings)
+        for post in posts:
+            if sync_client is not None:
+                if self._degraded_mode_active():
+                    failed_ids.append(post.id)
+                    failed_errors.append(f"#{post.id}: degraded mode active ({self._degraded_mode_remaining()}s remaining)")
+                    continue
+
+                attempts = 3
+                remote_success = False
+                last_error = ""
+                for attempt in range(1, attempts + 1):
+                    try:
+                        sync_client.add_favorite(post.id)
+                        self._rate_limit.note_success()
+                        remote_success = True
+                        break
+                    except FlareSolverrError as exc:
+                        last_error = str(exc)
+                        self._mark_rate_limited_if_needed("favorite_bulk_add", last_error)
+                        if is_rate_limited_error_message(last_error) and attempt < attempts:
+                            time.sleep(0.35 * attempt)
+                            continue
+                        break
+
+                if not remote_success:
+                    failed_ids.append(post.id)
+                    failed_errors.append(f"#{post.id}: {last_error or 'unknown sync error'}")
+                    self._log_sync_debug(
+                        f"Bulk favorite add sync failure for #{post.id}",
+                        f"Error: {last_error or 'unknown sync error'}\n\n{sync_client.debug_summary()}",
+                    )
+                    continue
+
+            self.local_favorites.add_favorite(post)
+            added_ids.append(post.id)
+
+        if failed_ids:
+            self._last_favorite_sync_failed = True
+            self._last_favorite_sync_error = f"Bulk add failed for {len(failed_ids)} post(s)."
+            self._last_favorite_sync_debug = "\n".join(failed_errors)
+        else:
+            self._last_favorite_sync_failed = False
+            self._last_favorite_sync_error = ""
+            self._last_favorite_sync_debug = ""
+
+        return {
+            "added_ids": added_ids,
+            "failed_ids": failed_ids,
+            "failed_errors": failed_errors,
+        }
+
+    def _favorite_bulk_add_finished(self, token: int, result: object) -> None:
+        if token != self._mutation_token:
+            return
+
+        if isinstance(result, dict):
+            added_ids = [int(item) for item in result.get("added_ids", [])]
+            failed_ids = [int(item) for item in result.get("failed_ids", [])]
+            failed_errors = [str(item) for item in result.get("failed_errors", [])]
+        else:
+            added_ids = []
+            failed_ids = []
+            failed_errors = []
+
+        for post_id in added_ids:
+            self.favorite_ids.add(post_id)
+
+        if failed_ids:
+            self._set_status(
+                f"Added {len(added_ids)} favorites; {len(failed_ids)} failed due to sync limits."
+            )
+            only_rate_limited_failures = all(
+                is_rate_limited_error_message(message) or "degraded mode active" in message.lower()
+                for message in failed_errors
+            )
+            if not only_rate_limited_failures:
+                QMessageBox.warning(
+                    self,
+                    "Bulk Add Partial Failure",
+                    "Some favorites could not be added remotely.\n\n" + "\n".join(failed_errors[:12]),
+                )
+        else:
+            self._set_status(f"Added {len(added_ids)} favorites.")
+
+        if self._sync_enabled():
+            self._refresh_favorites()
+        else:
+            self._refresh_local_favorites()
 
     def _open_favorites_context_menu(self, position) -> None:
         item = self.favorites_list.itemAt(position)
@@ -995,19 +1134,28 @@ class MainWindow(QMainWindow):
                 )
                 self._last_favorite_sync_debug = ""
             else:
-                try:
-                    sync_client.add_favorite(post.id)
-                    self._rate_limit.note_success()
-                except FlareSolverrError as exc:
-                    self._last_favorite_sync_failed = True
-                    self._last_favorite_sync_error = str(exc)
-                    self._last_favorite_sync_debug = sync_client.debug_summary()
-                    self._mark_rate_limited_if_needed("favorite_add", self._last_favorite_sync_error)
-                    self._log_sync_debug(
-                        f"Favorite add sync failure for #{post.id}",
-                        f"Error: {self._last_favorite_sync_error}\n\n{self._last_favorite_sync_debug}",
-                    )
-
+                attempts = 3
+                for attempt in range(1, attempts + 1):
+                    try:
+                        sync_client.add_favorite(post.id)
+                        self._last_favorite_sync_failed = False
+                        self._last_favorite_sync_error = ""
+                        self._last_favorite_sync_debug = ""
+                        self._rate_limit.note_success()
+                        break
+                    except FlareSolverrError as exc:
+                        self._last_favorite_sync_failed = True
+                        self._last_favorite_sync_error = str(exc)
+                        self._last_favorite_sync_debug = sync_client.debug_summary()
+                        self._mark_rate_limited_if_needed("favorite_add", self._last_favorite_sync_error)
+                        if is_rate_limited_error_message(self._last_favorite_sync_error) and attempt < attempts:
+                            time.sleep(0.35 * attempt)
+                            continue
+                        self._log_sync_debug(
+                            f"Favorite add sync failure for #{post.id}",
+                            f"Error: {self._last_favorite_sync_error}\n\n{self._last_favorite_sync_debug}",
+                        )
+                        break
         self.local_favorites.add_favorite(post)
         return post.id
 
@@ -1025,18 +1173,33 @@ class MainWindow(QMainWindow):
                 )
                 self._last_favorite_sync_debug = ""
             else:
-                try:
-                    sync_client.remove_favorite(post.id)
-                    self._rate_limit.note_success()
-                except FlareSolverrError as exc:
-                    self._last_favorite_sync_failed = True
-                    self._last_favorite_sync_error = str(exc)
-                    self._last_favorite_sync_debug = sync_client.debug_summary()
-                    self._mark_rate_limited_if_needed("favorite_remove", self._last_favorite_sync_error)
-                    self._log_sync_debug(
-                        f"Favorite remove sync failure for #{post.id}",
-                        f"Error: {self._last_favorite_sync_error}\n\n{self._last_favorite_sync_debug}",
-                    )
+                attempts = 3
+                removed_remote = False
+                for attempt in range(1, attempts + 1):
+                    try:
+                        sync_client.remove_favorite(post.id)
+                        self._last_favorite_sync_failed = False
+                        self._last_favorite_sync_error = ""
+                        self._last_favorite_sync_debug = ""
+                        self._rate_limit.note_success()
+                        removed_remote = True
+                        break
+                    except FlareSolverrError as exc:
+                        self._last_favorite_sync_failed = True
+                        self._last_favorite_sync_error = str(exc)
+                        self._last_favorite_sync_debug = sync_client.debug_summary()
+                        self._mark_rate_limited_if_needed("favorite_remove", self._last_favorite_sync_error)
+                        if is_rate_limited_error_message(self._last_favorite_sync_error) and attempt < attempts:
+                            time.sleep(0.35 * attempt)
+                            continue
+                        self._log_sync_debug(
+                            f"Favorite remove sync failure for #{post.id}",
+                            f"Error: {self._last_favorite_sync_error}\n\n{self._last_favorite_sync_debug}",
+                        )
+                        break
+
+                if not removed_remote:
+                    return post.id
 
         self.local_favorites.remove_favorite(post.id)
         return post.id
@@ -1049,6 +1212,12 @@ class MainWindow(QMainWindow):
         else:
             self.favorite_ids.discard(post_id)
         if self._last_favorite_sync_failed:
+            if is_rate_limited_error_message(self._last_favorite_sync_error):
+                self._set_status(
+                    f"Rate-limited while syncing #{post_id}; local state saved and automatic sync will retry later."
+                )
+                self._refresh_local_favorites()
+                return
             self._set_status(
                 f"Saved locally for #{post_id}; account sync unavailable. Debug log: {self._sync_debug_log_path}"
             )
