@@ -1,0 +1,24 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual envs
+.venv/
+venv/
+
+# Local credentials/secrets
+id.txt
+apikey.txt
+
+# Build/package artifacts
+*.egg-info/
+build/
+dist/
+
+# IDE
+.vscode/
+
+# Logs and local runtime files
+*.log
