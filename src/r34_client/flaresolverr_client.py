@@ -563,7 +563,7 @@ class FlareSolverrFavoritesClient:
                     f"Latest server response: {last_body or 'empty response'}"
                 )
 
-        for auth_attempt in range(1, 3):
+        for auth_attempt in range(1, 5):
             last_body = ""
             needs_reauth = False
             for url in urls:
@@ -580,6 +580,17 @@ class FlareSolverrFavoritesClient:
                     self._debug("mutate_favorite: add endpoint reported not logged in, forcing re-login")
                     self._web_session_authenticated = False
                     self._ensure_web_login()
+                    continue
+                if auth_attempt < 4:
+                    delay_seconds = 0.4 * auth_attempt
+                    self._debug(
+                        f"mutate_favorite: add endpoint still not logged in attempt={auth_attempt}/4 wait={delay_seconds:.1f}s"
+                    )
+                    time.sleep(delay_seconds)
+                    if auth_attempt == 3:
+                        self._debug("mutate_favorite: forcing one more re-login before final add attempt")
+                        self._web_session_authenticated = False
+                        self._ensure_web_login()
                     continue
                 raise FlareSolverrError(
                     "Favorites mutation requires a logged rule34 web session in FlareSolverr (server replied not logged in)."
