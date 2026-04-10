@@ -288,8 +288,6 @@ def refresh_playback_controls(window: MainWindow) -> None:
                 window._vlc_player.set_position(
                     max(0.0, min(1.0, window._pending_seek_target_ms / total_ms))
                 )
-                if window._seek_was_playing:
-                    window._vlc_player.play()
             except Exception:
                 pass
             window._pending_seek_retries += 1
