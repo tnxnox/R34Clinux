@@ -497,10 +497,6 @@ class MainWindow(QMainWindow):
         toolbar = QToolBar("Main")
         toolbar.setMovable(False)
 
-        search_action = QAction("Search", self)
-        search_action.triggered.connect(self.search)
-        toolbar.addAction(search_action)
-
         settings_action = QAction("Settings", self)
         settings_action.triggered.connect(self.open_settings)
         toolbar.addAction(settings_action)
