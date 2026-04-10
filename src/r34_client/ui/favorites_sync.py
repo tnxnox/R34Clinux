@@ -13,6 +13,7 @@ def sync_remote_favorites(
     local_favorites: LocalFavoritesStore,
     make_sync_client: Callable[[AppSettings], FlareSolverrFavoritesClient | None],
     log_sync_debug: Callable[[str, str], None],
+    on_sync_error: Callable[[str], None] | None = None,
 ) -> tuple[list[Post], bool]:
     sync_client = make_sync_client(settings)
     if sync_client is None:
@@ -31,6 +32,8 @@ def sync_remote_favorites(
                 break
         except FlareSolverrError as exc:
             sync_attempt_notes.append(f"attempt={attempt} error={exc}")
+            if on_sync_error is not None:
+                on_sync_error(str(exc))
 
     if not remote_posts:
         # Some favorite endpoints can respond with an empty payload despite valid mutations.

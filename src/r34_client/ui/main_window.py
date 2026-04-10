@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+import time
 
 import requests
 from PySide6.QtCore import QEvent, QThreadPool, Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QDesktopServices, QImage, QPixmap
+from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QImage, QKeyEvent, QPixmap
 from PySide6.QtGui import QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QApplication,
@@ -43,6 +44,9 @@ from ..config import AppSettings, SettingsStore
 from ..flaresolverr_client import FlareSolverrError, FlareSolverrFavoritesClient
 from ..local_favorites import LocalFavoritesStore
 from ..models import Post, TagSuggestion
+from ..rate_limit import DegradedModeController, is_rate_limited_error_message
+from .diagnostics import DiagnosticsSnapshot, format_diagnostics_report
+from .image_fit import FitMode, compute_base_render_size
 from .preview_fetcher import fetch_preview_bytes
 from .post_helpers import (
     download_url_needs_hydration,
@@ -75,6 +79,7 @@ class MainWindow(QMainWindow):
         self.favorite_ids: set[int] = set()
         self.current_page = 0
         self.current_query = ""
+        self._search_token = 0
         self._preview_token = 0
         self._favorites_token = 0
         self._autocomplete_token = 0
@@ -163,9 +168,14 @@ class MainWindow(QMainWindow):
 
         self._base_preview_pixmap: QPixmap | None = None
         self._image_zoom_percent = 100
+        self._fit_mode = FitMode.SMART
         self._image_pan_active = False
         self._image_pan_start_pos: tuple[int, int] = (0, 0)
         self._image_pan_start_scroll: tuple[int, int] = (0, 0)
+        self._mutation_token = 0
+        self._download_token = 0
+        self._hydrate_token = 0
+        self._rate_limit = DegradedModeController()
 
         self.meta_view = QPlainTextEdit()
         self.meta_view.setReadOnly(True)
@@ -313,6 +323,47 @@ class MainWindow(QMainWindow):
         refresh_favorites_action.triggered.connect(self._refresh_favorites)
         toolbar.addAction(refresh_favorites_action)
 
+        toolbar.addSeparator()
+
+        fit_group = QActionGroup(self)
+        fit_group.setExclusive(True)
+
+        fit_smart_action = QAction("Fit: Smart", self)
+        fit_smart_action.setCheckable(True)
+        fit_smart_action.setChecked(True)
+        fit_smart_action.triggered.connect(lambda: self._set_fit_mode(FitMode.SMART))
+        fit_group.addAction(fit_smart_action)
+        toolbar.addAction(fit_smart_action)
+
+        fit_width_action = QAction("Fit: Width", self)
+        fit_width_action.setCheckable(True)
+        fit_width_action.triggered.connect(lambda: self._set_fit_mode(FitMode.FIT_WIDTH))
+        fit_group.addAction(fit_width_action)
+        toolbar.addAction(fit_width_action)
+
+        fit_height_action = QAction("Fit: Height", self)
+        fit_height_action.setCheckable(True)
+        fit_height_action.triggered.connect(lambda: self._set_fit_mode(FitMode.FIT_HEIGHT))
+        fit_group.addAction(fit_height_action)
+        toolbar.addAction(fit_height_action)
+
+        fit_original_action = QAction("Fit: 1:1", self)
+        fit_original_action.setCheckable(True)
+        fit_original_action.triggered.connect(lambda: self._set_fit_mode(FitMode.ORIGINAL))
+        fit_group.addAction(fit_original_action)
+        toolbar.addAction(fit_original_action)
+
+        toolbar.addSeparator()
+
+        cancel_action = QAction("Cancel", self)
+        cancel_action.setShortcut("Esc")
+        cancel_action.triggered.connect(self._cancel_current_operations)
+        toolbar.addAction(cancel_action)
+
+        diagnostics_action = QAction("Diagnostics", self)
+        diagnostics_action.triggered.connect(self._open_diagnostics)
+        toolbar.addAction(diagnostics_action)
+
         self.addToolBar(toolbar)
 
     def _update_action_state(self) -> None:
@@ -325,6 +376,73 @@ class MainWindow(QMainWindow):
 
     def _set_status(self, message: str) -> None:
         self.statusBar().showMessage(message)
+
+    def _set_fit_mode(self, mode: FitMode) -> None:
+        self._fit_mode = mode
+        self._update_preview_scaling()
+        self._set_status(f"Image fit mode: {mode.value}")
+
+    def _cancel_current_operations(self) -> None:
+        # Workers keep running in background, but incrementing tokens prevents stale results from mutating UI state.
+        self._search_token += 1
+        self._preview_token += 1
+        self._favorites_token += 1
+        self._autocomplete_token += 1
+        self._mutation_token += 1
+        self._download_token += 1
+        self._hydrate_token += 1
+        self._set_status("Cancelled current operations.")
+
+    def _diagnostics_snapshot(self) -> DiagnosticsSnapshot:
+        remaining = self._rate_limit.remaining_seconds(time.monotonic())
+        selected = self._current_post()
+        return DiagnosticsSnapshot(
+            sync_enabled=self._sync_enabled(),
+            degraded_mode_active=remaining > 0,
+            degraded_mode_remaining_seconds=remaining,
+            fit_mode=self._fit_mode.value,
+            active_workers=len(self._active_workers),
+            current_query=self.current_query,
+            current_page=self.current_page,
+            current_results_count=len(self.current_posts),
+            current_favorites_count=len(self.favorite_posts),
+            selected_post_id=(selected.id if selected is not None else None),
+            last_sync_failed=self._last_favorite_sync_failed,
+            last_sync_error=self._last_favorite_sync_error,
+            sync_debug_log_path=str(self._sync_debug_log_path),
+        )
+
+    def _open_diagnostics(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Diagnostics")
+        dialog.resize(860, 540)
+
+        layout = QVBoxLayout(dialog)
+        report = QPlainTextEdit(dialog)
+        report.setReadOnly(True)
+        report.setPlainText(format_diagnostics_report(self._diagnostics_snapshot()))
+        layout.addWidget(report, 1)
+
+        close_button = QPushButton("Close", dialog)
+        close_button.clicked.connect(dialog.accept)
+        layout.addWidget(close_button)
+
+        dialog.exec()
+
+    def _mark_rate_limited_if_needed(self, context: str, error_message: str) -> None:
+        if not is_rate_limited_error_message(error_message):
+            return
+        backoff = self._rate_limit.mark_rate_limited(time.monotonic())
+        self._log_sync_debug(
+            f"Rate limit degraded mode ({context})",
+            f"Backoff seconds: {backoff}\nError: {error_message}",
+        )
+
+    def _degraded_mode_remaining(self) -> int:
+        return self._rate_limit.remaining_seconds(time.monotonic())
+
+    def _degraded_mode_active(self) -> bool:
+        return self._degraded_mode_remaining() > 0
 
     def _log_sync_debug(self, title: str, details: str) -> None:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -364,14 +482,19 @@ class MainWindow(QMainWindow):
         self._update_action_state()
         self._set_status("Searching...")
 
+        self._search_token += 1
+        token = self._search_token
+
         worker = FunctionWorker(
             lambda: self.client.search_posts(self.current_query, self.current_page, self.settings.page_size)
         )
-        worker.signals.finished.connect(self._search_finished)
+        worker.signals.finished.connect(lambda result: self._search_finished(token, result))
         worker.signals.failed.connect(self._operation_failed)
         self._start_worker(worker)
 
-    def _search_finished(self, result: object) -> None:
+    def _search_finished(self, token: int, result: object) -> None:
+        if token != self._search_token:
+            return
         posts = list(result) if isinstance(result, list) else []
         self.current_posts = posts
         self.results_list.clear()
@@ -412,11 +535,20 @@ class MainWindow(QMainWindow):
         self._start_worker(worker)
 
     def _sync_remote_favorites(self) -> tuple[list[Post], bool]:
+        if self._degraded_mode_active():
+            remaining = self._degraded_mode_remaining()
+            self._log_sync_debug(
+                "Favorites sync skipped (degraded mode)",
+                f"Remaining cooldown seconds: {remaining}",
+            )
+            return (self.local_favorites.list_favorites(), bool(self.local_favorites.list_favorites()))
+
         return sync_remote_favorites(
             settings=self.settings,
             local_favorites=self.local_favorites,
             make_sync_client=self._make_sync_client,
             log_sync_debug=self._log_sync_debug,
+            on_sync_error=lambda message: self._mark_rate_limited_if_needed("favorites_sync", message),
         )
 
     def _favorites_loaded(self, token: int, result: object) -> None:
@@ -444,10 +576,17 @@ class MainWindow(QMainWindow):
 
         if self._sync_enabled():
             if self._favorites_sync_fallback_used:
-                self._set_status(
-                    f"Favorites sync returned empty data; showing local cache ({len(self.favorite_posts)} posts)."
-                )
+                if self._degraded_mode_active():
+                    self._set_status(
+                        "Favorites sync temporarily degraded due to rate limiting; "
+                        f"showing local cache ({len(self.favorite_posts)} posts)."
+                    )
+                else:
+                    self._set_status(
+                        f"Favorites sync returned empty data; showing local cache ({len(self.favorite_posts)} posts)."
+                    )
             else:
+                self._rate_limit.note_success()
                 self._set_status(f"Favorites synced ({len(self.favorite_posts)} posts).")
         else:
             self._set_status(f"Local favorites loaded ({len(self.favorite_posts)} posts).")
@@ -499,8 +638,11 @@ class MainWindow(QMainWindow):
         else:
             self._set_status(f"Adding #{post.id} to local favorites...")
 
+        self._mutation_token += 1
+        token = self._mutation_token
+
         worker = FunctionWorker(lambda: self._add_favorite_impl(post))
-        worker.signals.finished.connect(lambda _: self._favorite_mutation_finished(post.id, True))
+        worker.signals.finished.connect(lambda _: self._favorite_mutation_finished(token, post.id, True))
         worker.signals.failed.connect(self._operation_failed)
         self._start_worker(worker)
 
@@ -510,8 +652,11 @@ class MainWindow(QMainWindow):
         else:
             self._set_status(f"Removing #{post.id} from local favorites...")
 
+        self._mutation_token += 1
+        token = self._mutation_token
+
         worker = FunctionWorker(lambda: self._remove_favorite_impl(post))
-        worker.signals.finished.connect(lambda _: self._favorite_mutation_finished(post.id, False))
+        worker.signals.finished.connect(lambda _: self._favorite_mutation_finished(token, post.id, False))
         worker.signals.failed.connect(self._operation_failed)
         self._start_worker(worker)
 
@@ -521,16 +666,26 @@ class MainWindow(QMainWindow):
         self._last_favorite_sync_debug = ""
         sync_client = self._make_sync_client(self.settings)
         if sync_client is not None:
-            try:
-                sync_client.add_favorite(post.id)
-            except FlareSolverrError as exc:
+            if self._degraded_mode_active():
                 self._last_favorite_sync_failed = True
-                self._last_favorite_sync_error = str(exc)
-                self._last_favorite_sync_debug = sync_client.debug_summary()
-                self._log_sync_debug(
-                    f"Favorite add sync failure for #{post.id}",
-                    f"Error: {self._last_favorite_sync_error}\n\n{self._last_favorite_sync_debug}",
+                self._last_favorite_sync_error = (
+                    "Rate-limited degraded mode active; remote add skipped temporarily. "
+                    f"Retry in {self._degraded_mode_remaining()}s."
                 )
+                self._last_favorite_sync_debug = ""
+            else:
+                try:
+                    sync_client.add_favorite(post.id)
+                    self._rate_limit.note_success()
+                except FlareSolverrError as exc:
+                    self._last_favorite_sync_failed = True
+                    self._last_favorite_sync_error = str(exc)
+                    self._last_favorite_sync_debug = sync_client.debug_summary()
+                    self._mark_rate_limited_if_needed("favorite_add", self._last_favorite_sync_error)
+                    self._log_sync_debug(
+                        f"Favorite add sync failure for #{post.id}",
+                        f"Error: {self._last_favorite_sync_error}\n\n{self._last_favorite_sync_debug}",
+                    )
 
         self.local_favorites.add_favorite(post)
         return post.id
@@ -541,21 +696,33 @@ class MainWindow(QMainWindow):
         self._last_favorite_sync_debug = ""
         sync_client = self._make_sync_client(self.settings)
         if sync_client is not None:
-            try:
-                sync_client.remove_favorite(post.id)
-            except FlareSolverrError as exc:
+            if self._degraded_mode_active():
                 self._last_favorite_sync_failed = True
-                self._last_favorite_sync_error = str(exc)
-                self._last_favorite_sync_debug = sync_client.debug_summary()
-                self._log_sync_debug(
-                    f"Favorite remove sync failure for #{post.id}",
-                    f"Error: {self._last_favorite_sync_error}\n\n{self._last_favorite_sync_debug}",
+                self._last_favorite_sync_error = (
+                    "Rate-limited degraded mode active; remote remove skipped temporarily. "
+                    f"Retry in {self._degraded_mode_remaining()}s."
                 )
+                self._last_favorite_sync_debug = ""
+            else:
+                try:
+                    sync_client.remove_favorite(post.id)
+                    self._rate_limit.note_success()
+                except FlareSolverrError as exc:
+                    self._last_favorite_sync_failed = True
+                    self._last_favorite_sync_error = str(exc)
+                    self._last_favorite_sync_debug = sync_client.debug_summary()
+                    self._mark_rate_limited_if_needed("favorite_remove", self._last_favorite_sync_error)
+                    self._log_sync_debug(
+                        f"Favorite remove sync failure for #{post.id}",
+                        f"Error: {self._last_favorite_sync_error}\n\n{self._last_favorite_sync_debug}",
+                    )
 
         self.local_favorites.remove_favorite(post.id)
         return post.id
 
-    def _favorite_mutation_finished(self, post_id: int, favorited: bool) -> None:
+    def _favorite_mutation_finished(self, token: int, post_id: int, favorited: bool) -> None:
+        if token != self._mutation_token:
+            return
         if favorited:
             self.favorite_ids.add(post_id)
         else:
@@ -585,6 +752,7 @@ class MainWindow(QMainWindow):
     def _operation_failed(self, error_text: str) -> None:
         self.preview_label.setText("Unable to load content.")
         self.meta_view.setPlainText(error_text)
+        self._mark_rate_limited_if_needed("operation_failed", error_text)
         self._set_status("Operation failed.")
         QMessageBox.critical(self, "R34 Linux Client", error_text)
 
@@ -601,9 +769,12 @@ class MainWindow(QMainWindow):
             self.meta_view.setPlainText("Loading post details...")
             self.preview_label.setText("Loading preview...")
 
+            self._hydrate_token += 1
+            token = self._hydrate_token
+
             worker = FunctionWorker(lambda: self._hydrate_post(post))
-            worker.signals.finished.connect(lambda hydrated: self._show_hydrated_post(post, hydrated))
-            worker.signals.failed.connect(lambda error_text: self._show_hydration_failed(post, error_text))
+            worker.signals.finished.connect(lambda hydrated: self._show_hydrated_post(token, post, hydrated))
+            worker.signals.failed.connect(lambda error_text: self._show_hydration_failed(token, post, error_text))
             self._start_worker(worker)
             return
 
@@ -795,7 +966,9 @@ class MainWindow(QMainWindow):
     def _probe_file_size(url: str, referer: str) -> int | None:
         return probe_file_size(url, referer)
 
-    def _show_hydrated_post(self, fallback: Post, hydrated: object) -> None:
+    def _show_hydrated_post(self, token: int, fallback: Post, hydrated: object) -> None:
+        if token != self._hydrate_token:
+            return
         chosen = hydrated if isinstance(hydrated, Post) else fallback
         if isinstance(chosen, Post):
             self._metadata_hydrated_ids.add(chosen.id)
@@ -815,7 +988,9 @@ class MainWindow(QMainWindow):
             self._update_action_state()
         self._show_post(chosen, allow_hydrate=False)
 
-    def _show_hydration_failed(self, fallback: Post, error_text: str) -> None:
+    def _show_hydration_failed(self, token: int, fallback: Post, error_text: str) -> None:
+        if token != self._hydrate_token:
+            return
         first_line = error_text.splitlines()[-1] if error_text else "Unable to load post details"
         self._set_status(first_line)
         self._show_post(fallback, allow_hydrate=False)
@@ -887,13 +1062,14 @@ class MainWindow(QMainWindow):
         if source.width() <= 0 or source.height() <= 0:
             return
 
-        if self._is_long_strip_image:
-            base_width = max(1, target_size.width())
-            base_height = max(1, round((source.height() * base_width) / source.width()))
-        else:
-            fit_ratio = min(target_size.width() / source.width(), target_size.height() / source.height())
-            base_width = max(1, round(source.width() * fit_ratio))
-            base_height = max(1, round(source.height() * fit_ratio))
+        base_width, base_height = compute_base_render_size(
+            source_width=source.width(),
+            source_height=source.height(),
+            viewport_width=target_size.width(),
+            viewport_height=target_size.height(),
+            is_long_strip=self._is_long_strip_image,
+            fit_mode=self._fit_mode,
+        )
 
         zoom_factor = max(self._image_zoom_percent, 25) / 100.0
         render_width = max(1, round(base_width * zoom_factor))
@@ -1069,6 +1245,56 @@ class MainWindow(QMainWindow):
         post = item.data(Qt.ItemDataRole.UserRole)
         return post if isinstance(post, Post) else None
 
+    def _active_posts_list(self) -> QListWidget:
+        return self.favorites_list if self.left_tabs.currentWidget() is self.favorites_list else self.results_list
+
+    def _move_selection(self, delta: int) -> None:
+        target_list = self._active_posts_list()
+        if target_list.count() <= 0:
+            return
+        current_row = target_list.currentRow()
+        if current_row < 0:
+            current_row = 0
+        new_row = max(0, min(target_list.count() - 1, current_row + delta))
+        target_list.setCurrentRow(new_row)
+
+    def _toggle_current_favorite(self) -> None:
+        post = self._current_post()
+        if post is None:
+            return
+        if post.id in self.favorite_ids:
+            self._remove_favorite(post)
+        else:
+            self._add_favorite(post)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # type: ignore[override]
+        focus = self.focusWidget()
+        if isinstance(focus, QLineEdit):
+            super().keyPressEvent(event)
+            return
+
+        key = event.key()
+        if key == Qt.Key.Key_Escape:
+            self._cancel_current_operations()
+            return
+        if key == Qt.Key.Key_J:
+            self._move_selection(+1)
+            return
+        if key == Qt.Key.Key_K:
+            self._move_selection(-1)
+            return
+        if key == Qt.Key.Key_F:
+            self._toggle_current_favorite()
+            return
+        if key == Qt.Key.Key_O:
+            self.open_selected_post()
+            return
+        if key == Qt.Key.Key_D:
+            self.download_selected_post()
+            return
+
+        super().keyPressEvent(event)
+
     def open_selected_post(self) -> None:
         post = self._current_post()
         if post is None:
@@ -1123,8 +1349,11 @@ class MainWindow(QMainWindow):
                         file_handle.write(chunk)
             return destination
 
+        self._download_token += 1
+        token = self._download_token
+
         worker = FunctionWorker(download)
-        worker.signals.finished.connect(self._download_finished)
+        worker.signals.finished.connect(lambda result: self._download_finished(token, result))
         worker.signals.failed.connect(self._operation_failed)
         self._start_worker(worker)
 
@@ -1153,7 +1382,9 @@ class MainWindow(QMainWindow):
         worker.signals.failed.connect(release_worker)
         self.pool.start(worker)
 
-    def _download_finished(self, result: object) -> None:
+    def _download_finished(self, token: int, result: object) -> None:
+        if token != self._download_token:
+            return
         if isinstance(result, Path):
             self._set_status(f"Saved to {result}")
             QMessageBox.information(self, "R34 Linux Client", f"Downloaded to:\n{result}")
