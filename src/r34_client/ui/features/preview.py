@@ -15,6 +15,17 @@ if TYPE_CHECKING:
     from ..windows.main_window import MainWindow
 
 
+def _find_item_by_post_id(list_widget, post_id: int):
+    for row in range(list_widget.count()):
+        item = list_widget.item(row)
+        if item is None:
+            continue
+        candidate = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(candidate, Post) and candidate.id == post_id:
+            return item
+    return None
+
+
 def handle_selection_change(window: MainWindow, current, _previous) -> None:
     window._update_action_state()
     if current is None:
@@ -86,20 +97,22 @@ def show_hydrated_post(window: MainWindow, token: int, fallback: Post, hydrated:
     if isinstance(chosen, Post):
         window._metadata_hydrated_ids.add(chosen.id)
         if window.left_tabs.currentWidget() is window.favorites_list:
-            current_item = window.favorites_list.currentItem()
-            if current_item is not None:
-                current_item.setData(Qt.ItemDataRole.UserRole, chosen)
-                current_item.setText(window._format_post_tile(chosen))
+            target_item = _find_item_by_post_id(window.favorites_list, fallback.id)
+            if target_item is not None:
+                target_item.setData(Qt.ItemDataRole.UserRole, chosen)
+                target_item.setText(window._format_post_tile(chosen))
             window.favorite_posts = [chosen if item.id == chosen.id else item for item in window.favorite_posts]
             window.local_favorites.add_favorite(chosen)
         else:
-            current_item = window.results_list.currentItem()
-            if current_item is not None:
-                current_item.setData(Qt.ItemDataRole.UserRole, chosen)
-                current_item.setText(window._format_post_tile(chosen))
+            target_item = _find_item_by_post_id(window.results_list, fallback.id)
+            if target_item is not None:
+                target_item.setData(Qt.ItemDataRole.UserRole, chosen)
+                target_item.setText(window._format_post_tile(chosen))
             window.current_posts = [chosen if item.id == chosen.id else item for item in window.current_posts]
         window._update_action_state()
-    show_post(window, chosen, allow_hydrate=False)
+    active_post = window._current_post()
+    if active_post is not None and active_post.id == chosen.id:
+        show_post(window, chosen, allow_hydrate=False)
 
 
 def show_hydration_failed(window: MainWindow, token: int, fallback: Post, error_text: str) -> None:
