@@ -286,7 +286,8 @@ class MainWindow(QMainWindow):
         self._refresh_related_tags([])
         self._configure_background_sync_timer()
         self._update_action_state()
-        self._refresh_favorites()
+        # Startup should never block on remote sync; load local cache first.
+        self._refresh_local_favorites()
 
         if not self.settings.has_credentials:
             self._set_left_status("Enter API credentials in Settings before searching.")

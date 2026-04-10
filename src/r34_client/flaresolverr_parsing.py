@@ -8,6 +8,12 @@ from urllib.parse import parse_qs, urlparse
 from xml.etree import ElementTree as ET
 
 
+def _normalize_html_text(value: str) -> str:
+    normalized = html.unescape(value or "")
+    # Some responses include serialized HTML fragments (escaped quotes/slashes).
+    return normalized.replace('\\"', '"').replace("\\'", "'").replace("\\/", "/")
+
+
 def decode_payload(text: str) -> Any:
     stripped = text.strip()
     if not stripped:
@@ -55,7 +61,7 @@ def looks_logged_in(html_text: str) -> bool:
 
 
 def extract_post_ids(html_text: str) -> list[int]:
-    normalized = html.unescape(html_text or "")
+    normalized = _normalize_html_text(html_text)
     seen: set[int] = set()
     ids: list[int] = []
 
@@ -91,7 +97,7 @@ def extract_post_ids(html_text: str) -> list[int]:
 
 
 def extract_items(html_text: str) -> list[tuple[int, str]]:
-    normalized = html.unescape(html_text or "")
+    normalized = _normalize_html_text(html_text)
 
     tile_matches = re.findall(
         r"<a[^>]+id=['\"]p(\d+)['\"][^>]*>\s*<img[^>]+src=['\"]([^'\"]+)['\"]",
