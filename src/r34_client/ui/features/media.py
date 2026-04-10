@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -21,7 +22,7 @@ def _configure_vlc_backend(window: MainWindow, *, fallback: bool) -> bool:
 
     args = ["--no-video-title-show", "--network-caching=300"]
     if fallback:
-        # Fallback profile avoids problematic GPU decode/output paths on some Linux systems.
+        # Compatibility profile avoids problematic GPU decode/output paths on some Linux systems.
         args.extend(["--avcodec-hw=none", "--vout=xcb_x11"])
 
     try:
@@ -41,6 +42,8 @@ def _start_embedded_playback(window: MainWindow, source_url: str) -> None:
         raise RuntimeError("In-app VLC backend unavailable")
 
     media = window._vlc_instance.media_new(source_url)
+    media.add_option(":avcodec-hw=none")
+    media.add_option(":network-caching=900")
     window._vlc_player.set_media(media)
     window_id = int(window.video_surface.winId())
     if hasattr(window._vlc_player, "set_xwindow"):
@@ -55,12 +58,41 @@ def _start_embedded_playback(window: MainWindow, source_url: str) -> None:
         raise RuntimeError("VLC could not start playback")
 
 
+def _media_source_url(post: Post) -> str:
+    return post.file_url or post.sample_url or post.preview_url
+
+
+def _restart_playback_at(window: MainWindow, post: Post, target_ms: int) -> None:
+    if window._vlc_player is None or window._vlc_instance is None:
+        return
+    source_url = _media_source_url(post)
+    if not source_url:
+        return
+
+    start_seconds = max(0.0, target_ms / 1000.0)
+    media = window._vlc_instance.media_new(source_url)
+    media.add_option(f":start-time={start_seconds:.3f}")
+    media.add_option(":avcodec-hw=none")
+    media.add_option(":network-caching=900")
+    window._vlc_player.set_media(media)
+    window_id = int(window.video_surface.winId())
+    if hasattr(window._vlc_player, "set_xwindow"):
+        window._vlc_player.set_xwindow(window_id)
+    elif hasattr(window._vlc_player, "set_hwnd"):
+        window._vlc_player.set_hwnd(window_id)
+    elif hasattr(window._vlc_player, "set_nsobject"):
+        window._vlc_player.set_nsobject(window_id)
+    result = window._vlc_player.play()
+    if result == -1:
+        raise RuntimeError("VLC restart seek failed")
+
+
 def show_video_preview(window: MainWindow, post: Post) -> None:
     window._base_preview_pixmap = None
     window._is_long_strip_image = False
     window._image_zoom_percent = 100
     window.meta_view.setPlainText(window._format_post_metadata(post))
-    source_url = post.file_url or post.sample_url or post.preview_url
+    source_url = _media_source_url(post)
     if not source_url:
         hide_video_view(window)
         window.preview_label.setText("This video post does not expose a playable URL.")
@@ -81,16 +113,16 @@ def show_video_preview(window: MainWindow, post: Post) -> None:
         _start_embedded_playback(window, source_url)
         on_volume_changed(window, window.volume_slider.value())
         if window._vlc_fallback_active:
-            window._set_status("Playing video preview in-app (VLC safe fallback backend).")
+            window._set_status("Playing video preview in-app (VLC compatibility backend).")
         else:
             window._set_status("Playing video preview in-app.")
     except Exception as exc:
         playback_error = str(exc)
-        if not window._vlc_fallback_active and _configure_vlc_backend(window, fallback=True):
+        if _configure_vlc_backend(window, fallback=True):
             try:
                 _start_embedded_playback(window, source_url)
                 on_volume_changed(window, window.volume_slider.value())
-                window._set_status("Playing video preview in-app (VLC safe fallback backend).")
+                window._set_status("Playing video preview in-app (VLC compatibility backend).")
                 return
             except Exception as fallback_exc:
                 playback_error = str(fallback_exc)
@@ -153,6 +185,12 @@ def on_volume_changed(window: MainWindow, value: int) -> None:
 def on_seek_slider_pressed(window: MainWindow) -> None:
     window._seek_dragging = True
     window._pending_seek_ms = window.seek_slider.value()
+    window._seek_was_playing = False
+    if window._vlc_player is not None and vlc is not None:
+        try:
+            window._seek_was_playing = window._vlc_player.get_state() == vlc.State.Playing
+        except Exception:
+            window._seek_was_playing = False
 
 
 def on_seek_slider_moved(window: MainWindow, value: int) -> None:
@@ -165,11 +203,45 @@ def on_seek_slider_released(window: MainWindow) -> None:
     window._seek_dragging = False
     if window._vlc_player is None:
         return
+    post = window._current_post()
     target = int(window._pending_seek_ms)
+    total_ms = max(window.seek_slider.maximum(), 0)
+
+    if post is not None:
+        source_url = _media_source_url(post)
+        if source_url.startswith("http://") or source_url.startswith("https://"):
+            try:
+                _restart_playback_at(window, post, target)
+                on_volume_changed(window, window.volume_slider.value())
+                window._pending_seek_target_ms = target
+                window._pending_seek_deadline = time.monotonic() + 2.0
+                window._pending_seek_retries = 0
+                return
+            except Exception:
+                # Fall back to direct seek methods below.
+                pass
+
     try:
         window._vlc_player.set_time(target)
     except Exception:
-        return
+        pass
+
+    # Fallback path for streams where set_time is unreliable.
+    if total_ms > 0:
+        try:
+            window._vlc_player.set_position(max(0.0, min(1.0, target / total_ms)))
+        except Exception:
+            pass
+
+    if window._seek_was_playing:
+        try:
+            window._vlc_player.play()
+        except Exception:
+            pass
+
+    window._pending_seek_target_ms = target
+    window._pending_seek_deadline = time.monotonic() + 2.0
+    window._pending_seek_retries = 0
 
 
 def refresh_playback_controls(window: MainWindow) -> None:
@@ -189,6 +261,29 @@ def refresh_playback_controls(window: MainWindow) -> None:
     except Exception:
         window.seek_slider.setEnabled(False)
         return
+
+    if (
+        window._pending_seek_target_ms is not None
+        and not window._seek_dragging
+        and total_ms > 0
+    ):
+        delta = abs(current_ms - window._pending_seek_target_ms)
+        if delta <= 1500:
+            window._pending_seek_target_ms = None
+            window._pending_seek_retries = 0
+        elif time.monotonic() <= window._pending_seek_deadline and window._pending_seek_retries < 3:
+            try:
+                window._vlc_player.set_position(
+                    max(0.0, min(1.0, window._pending_seek_target_ms / total_ms))
+                )
+                if window._seek_was_playing:
+                    window._vlc_player.play()
+            except Exception:
+                pass
+            window._pending_seek_retries += 1
+        else:
+            window._pending_seek_target_ms = None
+            window._pending_seek_retries = 0
 
     window.seek_slider.setEnabled(total_ms > 0)
     window.seek_slider.blockSignals(True)
