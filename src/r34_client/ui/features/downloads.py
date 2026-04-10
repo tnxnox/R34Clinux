@@ -9,11 +9,11 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QApplication, QFileDialog
 
 from ...concurrency import FunctionWorker
-from ..post_helpers import download_url_needs_hydration
+from ..rendering.post_helpers import download_url_needs_hydration
 
 if TYPE_CHECKING:
     from ...models import Post
-    from ..main_window import MainWindow
+    from ..windows.main_window import MainWindow
 
 
 def open_selected_post(window: MainWindow) -> None:

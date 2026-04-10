@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from .config import SettingsStore
-from .ui.main_window import MainWindow
+from .ui.windows.main_window import MainWindow
 
 
 def main() -> int:

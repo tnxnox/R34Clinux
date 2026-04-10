@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from ..config import AppSettings
-from ..flaresolverr_client import FlareSolverrError, FlareSolverrFavoritesClient
-from ..local_favorites import LocalFavoritesStore
-from ..models import Post
+from ...config import AppSettings
+from ...flaresolverr_client import FlareSolverrError, FlareSolverrFavoritesClient
+from ...local_favorites import LocalFavoritesStore
+from ...models import Post
 
 
 def sync_remote_favorites(

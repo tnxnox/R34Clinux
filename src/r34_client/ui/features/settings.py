@@ -4,10 +4,10 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QDialog
 
-from ..settings_dialog import SettingsDialog
+from ..dialogs.settings_dialog import SettingsDialog
 
 if TYPE_CHECKING:
-    from ..main_window import MainWindow
+    from ..windows.main_window import MainWindow
 
 
 def open_settings(window: MainWindow, initial: bool = False) -> None:

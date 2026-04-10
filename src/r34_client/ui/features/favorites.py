@@ -11,7 +11,7 @@ from ...models import Post
 from ...rate_limit import is_rate_limited_error_message
 
 if TYPE_CHECKING:
-    from ..main_window import MainWindow
+    from ..windows.main_window import MainWindow
 
 
 def add_multiple_favorites(window: MainWindow, posts: list[Post]) -> None:

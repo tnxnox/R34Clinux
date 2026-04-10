@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 from ...rate_limit import is_rate_limited_error_message
 
 if TYPE_CHECKING:
-    from ...ui.image_fit import FitMode
-    from ..main_window import MainWindow
+    from ..rendering.image_fit import FitMode
+    from ..windows.main_window import MainWindow
 
 
 def update_action_state(window: MainWindow) -> None:

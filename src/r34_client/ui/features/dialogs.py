@@ -5,10 +5,10 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QDialog, QPlainTextEdit, QPushButton, QVBoxLayout
 
-from ..diagnostics import DiagnosticsSnapshot, format_diagnostics_report
+from ..debug.diagnostics import DiagnosticsSnapshot, format_diagnostics_report
 
 if TYPE_CHECKING:
-    from ..main_window import MainWindow
+    from ..windows.main_window import MainWindow
 
 
 def diagnostics_snapshot(window: MainWindow) -> DiagnosticsSnapshot:

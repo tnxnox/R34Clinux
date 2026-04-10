@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ...models import Post
-    from ..main_window import MainWindow
+    from ..windows.main_window import MainWindow
 
 try:
     import vlc  # type: ignore

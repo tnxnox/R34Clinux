@@ -1,19 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
-import time
-
-import requests
-from PySide6.QtCore import QEvent, QThreadPool, Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QImage, QKeyEvent, QPixmap, QShortcut
-from PySide6.QtGui import QStandardItem, QStandardItemModel
+from PySide6.QtCore import QEvent, QThreadPool, Qt, QTimer
+from PySide6.QtGui import QAction, QActionGroup, QKeyEvent, QPixmap, QShortcut
+from PySide6.QtGui import QStandardItemModel
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QApplication,
     QComboBox,
-    QDialog,
-    QFileDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -40,38 +33,34 @@ try:
 except ImportError:  # pragma: no cover - optional runtime dependency
     vlc = None
 
-from ..api import Rule34Client
-from ..concurrency import FunctionWorker
-from ..config import AppSettings, SettingsStore
-from ..flaresolverr_client import FlareSolverrError, FlareSolverrFavoritesClient
-from ..local_favorites import LocalFavoritesStore
-from ..models import Post, TagSuggestion
-from ..rate_limit import DegradedModeController, is_rate_limited_error_message
-from .diagnostics import DiagnosticsSnapshot, format_diagnostics_report
-from .image_fit import FitMode, compute_base_render_size
-from .preview_fetcher import fetch_preview_bytes
-from .post_helpers import (
+from ...api import Rule34Client
+from ...concurrency import FunctionWorker
+from ...config import AppSettings, SettingsStore
+from ...flaresolverr_client import FlareSolverrFavoritesClient
+from ...local_favorites import LocalFavoritesStore
+from ...models import Post, TagSuggestion
+from ...rate_limit import DegradedModeController
+from ..debug.diagnostics import DiagnosticsSnapshot
+from ..rendering.image_fit import FitMode
+from ..rendering.post_helpers import (
     download_url_needs_hydration,
     format_millis,
     format_post_metadata,
     format_post_tile,
     is_video_post,
-    needs_hydration,
-    probe_file_size,
 )
-from .features import autocomplete as autocomplete_feature
-from .features import context_menu as context_menu_feature
-from .features import dialogs as dialogs_feature
-from .features import downloads as downloads_feature
-from .features import favorites as favorites_feature
-from .features import media as media_feature
-from .features import navigation as navigation_feature
-from .features import preview as preview_feature
-from .features import search as search_feature
-from .features import settings as settings_feature
-from .features import status as status_feature
-from .settings_dialog import SettingsDialog
-from .widgets import ClickSeekSlider, ClickVideoSurface
+from ..features import autocomplete as autocomplete_feature
+from ..features import context_menu as context_menu_feature
+from ..features import dialogs as dialogs_feature
+from ..features import downloads as downloads_feature
+from ..features import favorites as favorites_feature
+from ..features import media as media_feature
+from ..features import navigation as navigation_feature
+from ..features import preview as preview_feature
+from ..features import search as search_feature
+from ..features import settings as settings_feature
+from ..features import status as status_feature
+from ..components.widgets import ClickSeekSlider, ClickVideoSurface
 
 
 class MainWindow(QMainWindow):

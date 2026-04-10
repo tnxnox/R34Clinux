@@ -9,7 +9,7 @@ from ...concurrency import FunctionWorker
 from ...models import TagSuggestion
 
 if TYPE_CHECKING:
-    from ..main_window import MainWindow
+    from ..windows.main_window import MainWindow
 
 
 def schedule_autocomplete(window: MainWindow, *_: object) -> None:

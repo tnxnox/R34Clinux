@@ -7,12 +7,12 @@ from PySide6.QtGui import QImage, QPixmap
 
 from ...concurrency import FunctionWorker
 from ...models import Post
-from ..image_fit import compute_base_render_size
-from ..post_helpers import is_video_post, needs_hydration, probe_file_size
-from ..preview_fetcher import fetch_preview_bytes
+from ..rendering.image_fit import compute_base_render_size
+from ..rendering.post_helpers import is_video_post, needs_hydration, probe_file_size
+from ..rendering.preview_fetcher import fetch_preview_bytes
 
 if TYPE_CHECKING:
-    from ..main_window import MainWindow
+    from ..windows.main_window import MainWindow
 
 
 def handle_selection_change(window: MainWindow, current, _previous) -> None:

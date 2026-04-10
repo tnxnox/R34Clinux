@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QMenu
 from ...models import Post
 
 if TYPE_CHECKING:
-    from ..main_window import MainWindow
+    from ..windows.main_window import MainWindow
 
 
 def selected_results_posts(window: MainWindow) -> list[Post]:

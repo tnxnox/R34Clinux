@@ -7,10 +7,10 @@ from PySide6.QtWidgets import QListWidgetItem
 
 from ...concurrency import FunctionWorker
 from ...models import Post
-from ..favorites_sync import sync_remote_favorites
+from ..sync.favorites_sync import sync_remote_favorites
 
 if TYPE_CHECKING:
-    from ..main_window import MainWindow
+    from ..windows.main_window import MainWindow
 
 
 def search(window: MainWindow) -> None:

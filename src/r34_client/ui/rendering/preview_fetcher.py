@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 
 import requests
 
-from ..models import Post
+from ...models import Post
 
 
 def normalize_media_url(url: str) -> str:
