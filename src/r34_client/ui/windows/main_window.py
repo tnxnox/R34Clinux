@@ -76,11 +76,23 @@ class MainWindow(QMainWindow):
         self.settings = store.load()
         self.client = self._make_client(self.settings)
         self.local_favorites = LocalFavoritesStore()
-        self.pool = QThreadPool.globalInstance()
         cpu_count = max(1, os.cpu_count() or 1)
-        target_threads = max(8, min(24, cpu_count * 3))
-        if self.pool.maxThreadCount() < target_threads:
-            self.pool.setMaxThreadCount(target_threads)
+        self._worker_pools: dict[str, QThreadPool] = {
+            "general": QThreadPool.globalInstance(),
+            "search": QThreadPool(),
+            "preview": QThreadPool(),
+            "sync": QThreadPool(),
+            "mutation": QThreadPool(),
+            "autocomplete": QThreadPool(),
+            "download": QThreadPool(),
+        }
+        self._worker_pools["general"].setMaxThreadCount(max(8, min(24, cpu_count * 3)))
+        self._worker_pools["search"].setMaxThreadCount(max(2, min(6, cpu_count)))
+        self._worker_pools["preview"].setMaxThreadCount(max(2, min(8, cpu_count * 2)))
+        self._worker_pools["sync"].setMaxThreadCount(max(1, min(4, cpu_count)))
+        self._worker_pools["mutation"].setMaxThreadCount(max(2, min(6, cpu_count)))
+        self._worker_pools["autocomplete"].setMaxThreadCount(max(1, min(3, cpu_count)))
+        self._worker_pools["download"].setMaxThreadCount(max(2, min(6, cpu_count)))
 
         self.current_posts: list[Post] = []
         self.favorite_posts: list[Post] = []
@@ -885,8 +897,11 @@ class MainWindow(QMainWindow):
     def _resolve_download_post(self, post: Post) -> Post:
         return downloads_feature.resolve_download_post(self, post)
 
-    def _start_worker(self, worker: FunctionWorker) -> None:
-        downloads_feature.start_worker(self, worker)
+    def _pool_for_workload(self, workload: str) -> QThreadPool:
+        return self._worker_pools.get(workload, self._worker_pools["general"])
+
+    def _start_worker(self, worker: FunctionWorker, workload: str = "general") -> None:
+        downloads_feature.start_worker(self, worker, workload=workload)
 
     def _download_finished(self, token: int, result: object) -> None:
         downloads_feature.download_finished(self, token, result)

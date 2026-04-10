@@ -56,7 +56,7 @@ def refresh_autocomplete(window: MainWindow) -> None:
     worker = FunctionWorker(lambda: window.client.autocomplete_tags(prefix))
     worker.signals.finished.connect(lambda result: autocomplete_finished(window, token, prefix, result))
     worker.signals.failed.connect(lambda error_text: autocomplete_failed(window, token, error_text))
-    window._start_worker(worker)
+    window._start_worker(worker, workload="autocomplete")
 
 
 def autocomplete_finished(window: MainWindow, token: int, prefix: str, result: object) -> None:

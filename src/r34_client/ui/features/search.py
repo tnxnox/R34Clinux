@@ -69,7 +69,7 @@ def run_search(window: MainWindow) -> None:
     )
     worker.signals.finished.connect(lambda result: search_finished(window, token, result))
     worker.signals.failed.connect(window._operation_failed)
-    window._start_worker(worker)
+    window._start_worker(worker, workload="search")
 
 
 def search_finished(window: MainWindow, token: int, result: object) -> None:
@@ -118,7 +118,7 @@ def refresh_favorites_impl(window: MainWindow, local_only: bool) -> None:
 
     worker.signals.finished.connect(lambda result: favorites_loaded(window, token, result))
     worker.signals.failed.connect(lambda error_text: favorites_failed(window, token, error_text))
-    window._start_worker(worker)
+    window._start_worker(worker, workload="sync")
 
 
 def sync_remote(window: MainWindow) -> tuple[list[Post], bool]:

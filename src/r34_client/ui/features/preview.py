@@ -46,7 +46,7 @@ def show_post(window: MainWindow, post: Post, allow_hydrate: bool = True) -> Non
         worker = FunctionWorker(lambda: hydrate_post(window, post))
         worker.signals.finished.connect(lambda hydrated: show_hydrated_post(window, token, post, hydrated))
         worker.signals.failed.connect(lambda error_text: show_hydration_failed(window, token, post, error_text))
-        window._start_worker(worker)
+        window._start_worker(worker, workload="preview")
         return
 
     if is_video_post(post):
@@ -68,7 +68,7 @@ def show_post(window: MainWindow, post: Post, allow_hydrate: bool = True) -> Non
     worker = FunctionWorker(fetch_preview)
     worker.signals.finished.connect(lambda data: preview_loaded(window, token, data, post))
     worker.signals.failed.connect(lambda error_text: preview_failed_with_context(window, post, error_text))
-    window._start_worker(worker)
+    window._start_worker(worker, workload="preview")
 
 
 def current_post_is_video(window: MainWindow) -> bool:

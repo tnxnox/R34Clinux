@@ -34,7 +34,7 @@ def process_pending_remote_mutations(window: MainWindow) -> None:
     worker = FunctionWorker(lambda: process_pending_remote_mutations_impl(window))
     worker.signals.finished.connect(lambda result: pending_remote_mutations_finished(window, result))
     worker.signals.failed.connect(lambda error_text: window._log_sync_debug("Pending sync worker failure", error_text))
-    window._start_worker(worker)
+    window._start_worker(worker, workload="sync")
 
 
 def process_pending_remote_mutations_impl(window: MainWindow) -> dict[str, int]:
@@ -109,7 +109,7 @@ def add_multiple_favorites(window: MainWindow, posts: list[Post]) -> None:
     worker = FunctionWorker(lambda: add_multiple_favorites_impl(window, list(unique_posts.values())))
     worker.signals.finished.connect(lambda result: favorite_bulk_add_finished(window, token, result))
     worker.signals.failed.connect(window._operation_failed)
-    window._start_worker(worker)
+    window._start_worker(worker, workload="mutation")
 
 
 def add_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dict[str, object]:
@@ -253,7 +253,7 @@ def remove_multiple_favorites(window: MainWindow, posts: list[Post]) -> None:
     worker = FunctionWorker(lambda: remove_multiple_favorites_impl(window, list(unique_posts.values())))
     worker.signals.finished.connect(lambda result: favorite_bulk_mutation_finished(window, token, result))
     worker.signals.failed.connect(window._operation_failed)
-    window._start_worker(worker)
+    window._start_worker(worker, workload="mutation")
 
 
 def remove_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dict[str, object]:
@@ -419,7 +419,7 @@ def add_favorite(window: MainWindow, post: Post) -> None:
     worker = FunctionWorker(lambda: add_favorite_impl(window, post))
     worker.signals.finished.connect(lambda _: favorite_mutation_finished(window, token, post.id, True))
     worker.signals.failed.connect(window._operation_failed)
-    window._start_worker(worker)
+    window._start_worker(worker, workload="mutation")
 
 
 def remove_favorite(window: MainWindow, post: Post) -> None:
@@ -434,7 +434,7 @@ def remove_favorite(window: MainWindow, post: Post) -> None:
     worker = FunctionWorker(lambda: remove_favorite_impl(window, post))
     worker.signals.finished.connect(lambda _: favorite_mutation_finished(window, token, post.id, False))
     worker.signals.failed.connect(window._operation_failed)
-    window._start_worker(worker)
+    window._start_worker(worker, workload="mutation")
 
 
 def add_favorite_impl(window: MainWindow, post: Post) -> int:

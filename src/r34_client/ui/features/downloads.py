@@ -62,7 +62,7 @@ def download_selected_post(window: MainWindow) -> None:
     worker = FunctionWorker(download)
     worker.signals.finished.connect(lambda result: download_finished(window, token, result))
     worker.signals.failed.connect(window._operation_failed)
-    window._start_worker(worker)
+    window._start_worker(worker, workload="download")
 
 
 def download_multiple_posts(window: MainWindow, posts: list[Post]) -> None:
@@ -90,7 +90,7 @@ def download_multiple_posts(window: MainWindow, posts: list[Post]) -> None:
     worker = FunctionWorker(download_many)
     worker.signals.finished.connect(lambda result: download_many_finished(window, token, result))
     worker.signals.failed.connect(window._operation_failed)
-    window._start_worker(worker)
+    window._start_worker(worker, workload="download")
 
 
 def download_post_to_directory(window: MainWindow, post: Post, target_directory: str) -> Path:
@@ -134,7 +134,7 @@ def resolve_download_post(window: MainWindow, post: Post) -> Post:
     return hydrated
 
 
-def start_worker(window: MainWindow, worker: FunctionWorker) -> None:
+def start_worker(window: MainWindow, worker: FunctionWorker, workload: str = "general") -> None:
     window._active_workers.add(worker)
 
     def release_worker(*_: object) -> None:
@@ -142,7 +142,7 @@ def start_worker(window: MainWindow, worker: FunctionWorker) -> None:
 
     worker.signals.finished.connect(release_worker)
     worker.signals.failed.connect(release_worker)
-    window.pool.start(worker)
+    window._pool_for_workload(workload).start(worker)
 
 
 def download_finished(window: MainWindow, token: int, result: object) -> None:
