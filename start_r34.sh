@@ -47,6 +47,20 @@ has_command() {
   command -v "$1" >/dev/null 2>&1
 }
 
+select_python_bin() {
+  if has_command python3; then
+    PYTHON_BIN="python3"
+    return 0
+  fi
+
+  if has_command python; then
+    PYTHON_BIN="python"
+    return 0
+  fi
+
+  return 1
+}
+
 require_linux() {
   if [[ "${OSTYPE:-}" != linux* ]]; then
     log "This launcher currently supports Linux only."
@@ -54,23 +68,27 @@ require_linux() {
   fi
 }
 
+docker_accessible() {
+  if docker info >/dev/null 2>&1; then
+    DOCKER_USE_SUDO=0
+    return 0
+  fi
+
+  if has_command sudo && run_with_sudo docker info >/dev/null 2>&1; then
+    DOCKER_USE_SUDO=1
+    return 0
+  fi
+
+  return 1
+}
+
 require_python_version() {
-  if has_command python3; then
-    PYTHON_BIN="python3"
-  elif has_command python; then
-    PYTHON_BIN="python"
-  else
+  if ! select_python_bin; then
     log "python3 was not found, attempting Python installation..."
     install_feature python
   fi
 
-  if has_command python3; then
-    PYTHON_BIN="python3"
-  elif has_command python; then
-    PYTHON_BIN="python"
-  fi
-
-  if ! has_command "$PYTHON_BIN"; then
+  if ! select_python_bin; then
     log "A Python 3.11+ interpreter is required but was not found."
     exit 1
   fi
@@ -229,19 +247,12 @@ ensure_system_dependencies() {
 }
 
 ensure_docker_running() {
-  local accessible=0
-
   if ! has_command docker; then
     log "docker command is still missing after dependency install."
     exit 1
   fi
 
-  if docker info >/dev/null 2>&1; then
-    return 0
-  fi
-
-  if has_command sudo && run_with_sudo docker info >/dev/null 2>&1; then
-    DOCKER_USE_SUDO=1
+  if docker_accessible; then
     return 0
   fi
 
@@ -266,14 +277,7 @@ ensure_docker_running() {
     sleep 2
   fi
 
-  if docker info >/dev/null 2>&1; then
-    accessible=1
-  elif has_command sudo && run_with_sudo docker info >/dev/null 2>&1; then
-    DOCKER_USE_SUDO=1
-    accessible=1
-  fi
-
-  if [[ "$accessible" -ne 1 ]]; then
+  if ! docker_accessible; then
     log "Docker daemon is unavailable after automatic recovery."
     if has_command systemctl; then
       log "Run: sudo systemctl status docker.service --no-pager -l"
