@@ -360,6 +360,10 @@ class MainWindow(QMainWindow):
         cancel_action.triggered.connect(self._cancel_current_operations)
         toolbar.addAction(cancel_action)
 
+        controls_action = QAction("Controls", self)
+        controls_action.triggered.connect(self._open_controls)
+        toolbar.addAction(controls_action)
+
         diagnostics_action = QAction("Diagnostics", self)
         diagnostics_action.triggered.connect(self._open_diagnostics)
         toolbar.addAction(diagnostics_action)
@@ -421,6 +425,42 @@ class MainWindow(QMainWindow):
         report = QPlainTextEdit(dialog)
         report.setReadOnly(True)
         report.setPlainText(format_diagnostics_report(self._diagnostics_snapshot()))
+        layout.addWidget(report, 1)
+
+        close_button = QPushButton("Close", dialog)
+        close_button.clicked.connect(dialog.accept)
+        layout.addWidget(close_button)
+
+        dialog.exec()
+
+    def _open_controls(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Controls")
+        dialog.resize(760, 480)
+
+        layout = QVBoxLayout(dialog)
+        report = QPlainTextEdit(dialog)
+        report.setReadOnly(True)
+        report.setPlainText(
+            "R34 Linux Client Controls\n\n"
+            "Keyboard shortcuts\n"
+            "- Esc: cancel ongoing operations\n"
+            "- j: move to the next post\n"
+            "- k: move to the previous post\n"
+            "- f: toggle favorite on the selected post\n"
+            "- o: open the selected post in the browser\n"
+            "- d: download the selected post\n\n"
+            "Toolbar actions\n"
+            "- Search: run the current search query\n"
+            "- Settings: edit account and sync settings\n"
+            "- Refresh Favorites: reload the favorites tab\n"
+            "- Fit buttons: switch image fitting mode\n"
+            "- Cancel: stop applying stale results from running tasks\n"
+            "- Diagnostics: open the live diagnostics panel\n\n"
+            "Viewer hints\n"
+            "- Use the mouse wheel or zoom controls to change preview scale\n"
+            "- Click and drag on zoomed previews to pan around long images\n"
+        )
         layout.addWidget(report, 1)
 
         close_button = QPushButton("Close", dialog)
