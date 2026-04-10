@@ -566,11 +566,32 @@ class FlareSolverrFavoritesClient:
         for auth_attempt in range(1, 5):
             last_body = ""
             needs_reauth = False
+            favorites_view_url = f"https://rule34.xxx/index.php?page=favorites&s=view&id={self.user_id.strip()}"
+            post_page_url = f"https://rule34.xxx/index.php?page=post&s=view&id={target_id}"
+
             for url in urls:
                 raw = self._request_via_solver(url, headers=None)
                 body = self._extract_body_text(raw)
                 last_body = body
                 self._debug(f"mutate_favorite: endpoint={url} body={body[:120]}")
+                if body == "2" and want_present and auth_attempt >= 2:
+                    # Some sessions require a post-style referer or alternate add endpoint semantics.
+                    post_body = self._post_via_solver(
+                        url,
+                        urlencode({"id": str(target_id)}),
+                        referer=post_page_url,
+                    )
+                    body = self._extract_body_text(post_body)
+                    last_body = body
+                    self._debug(f"mutate_favorite: endpoint={url} method=post body={body[:120]}")
+
+                if body == "2" and want_present and auth_attempt >= 2:
+                    alt_url = f"https://rule34.xxx/index.php?page=favorites&s=add&id={target_id}"
+                    alt_raw = self._request_via_solver(alt_url, headers={"Referer": favorites_view_url})
+                    body = self._extract_body_text(alt_raw)
+                    last_body = body
+                    self._debug(f"mutate_favorite: endpoint={alt_url} body={body[:120]}")
+
                 if body == "2":
                     needs_reauth = True
                     break
