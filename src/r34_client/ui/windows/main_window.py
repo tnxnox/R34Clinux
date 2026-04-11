@@ -90,7 +90,8 @@ class MainWindow(QMainWindow):
         self._worker_pools["search"].setMaxThreadCount(max(2, min(6, cpu_count)))
         self._worker_pools["preview"].setMaxThreadCount(max(2, min(8, cpu_count * 2)))
         self._worker_pools["sync"].setMaxThreadCount(max(1, min(4, cpu_count)))
-        self._worker_pools["mutation"].setMaxThreadCount(max(2, min(6, cpu_count)))
+        # Keep remote mutations serialized per account to reduce auth/rate-limit contention.
+        self._worker_pools["mutation"].setMaxThreadCount(1)
         self._worker_pools["autocomplete"].setMaxThreadCount(max(1, min(3, cpu_count)))
         self._worker_pools["download"].setMaxThreadCount(max(2, min(6, cpu_count)))
 
@@ -122,6 +123,7 @@ class MainWindow(QMainWindow):
         self._last_favorite_sync_debug = ""
         self._pending_remote_add_ids: set[int] = set()
         self._pending_remote_remove_ids: set[int] = set()
+        self._pending_sync_worker_active = False
         self._sync_debug_log_path = self.local_favorites.database_path.parent / "sync-debug.log"
         self._is_long_strip_image = False
 
@@ -300,6 +302,7 @@ class MainWindow(QMainWindow):
 
         self._build_layout()
         self._build_toolbar()
+        favorites_feature.restore_pending_remote_mutations(self)
         self._register_global_shortcuts()
         self._refresh_search_history()
         self._refresh_saved_searches()

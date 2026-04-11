@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import random
+import re
 import time
 from typing import TYPE_CHECKING
 
@@ -23,21 +26,194 @@ def _wait_for_degraded_mode_window(window: MainWindow, *, max_wait_seconds: floa
     return not window._degraded_mode_active()
 
 
+def _pending_state_path(window: MainWindow):
+    return window._sync_debug_log_path.parent / "pending-mutations.json"
+
+
+def _ensure_pending_state_loaded(window: MainWindow) -> None:
+    if getattr(window, "_pending_state_loaded", False):
+        return
+
+    window._pending_state_loaded = True
+    window._pending_remote_add_meta = {}
+    window._pending_remote_remove_meta = {}
+    window._pending_endpoint_streaks = {"add": 0, "remove": 0}
+
+    path = _pending_state_path(window)
+    if not path.exists():
+        return
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+
+    for entry in payload.get("add", []):
+        try:
+            post_id = int(entry.get("id"))
+        except Exception:
+            continue
+        window._pending_remote_add_ids.add(post_id)
+        window._pending_remote_add_meta[post_id] = {
+            "attempts": int(entry.get("attempts", 0)),
+            "first_queued_at": float(entry.get("first_queued_at", time.time())),
+            "next_attempt_at": float(entry.get("next_attempt_at", 0.0)),
+            "last_error": str(entry.get("last_error", "")),
+        }
+
+    for entry in payload.get("remove", []):
+        try:
+            post_id = int(entry.get("id"))
+        except Exception:
+            continue
+        window._pending_remote_remove_ids.add(post_id)
+        window._pending_remote_remove_meta[post_id] = {
+            "attempts": int(entry.get("attempts", 0)),
+            "first_queued_at": float(entry.get("first_queued_at", time.time())),
+            "next_attempt_at": float(entry.get("next_attempt_at", 0.0)),
+            "last_error": str(entry.get("last_error", "")),
+        }
+
+
+def restore_pending_remote_mutations(window: MainWindow) -> None:
+    _ensure_pending_state_loaded(window)
+
+
+def _save_pending_state(window: MainWindow) -> None:
+    _ensure_pending_state_loaded(window)
+    path = _pending_state_path(window)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    add_entries = []
+    for post_id in sorted(window._pending_remote_add_ids):
+        meta = window._pending_remote_add_meta.get(post_id, {})
+        add_entries.append(
+            {
+                "id": post_id,
+                "attempts": int(meta.get("attempts", 0)),
+                "first_queued_at": float(meta.get("first_queued_at", time.time())),
+                "next_attempt_at": float(meta.get("next_attempt_at", 0.0)),
+                "last_error": str(meta.get("last_error", "")),
+            }
+        )
+
+    remove_entries = []
+    for post_id in sorted(window._pending_remote_remove_ids):
+        meta = window._pending_remote_remove_meta.get(post_id, {})
+        remove_entries.append(
+            {
+                "id": post_id,
+                "attempts": int(meta.get("attempts", 0)),
+                "first_queued_at": float(meta.get("first_queued_at", time.time())),
+                "next_attempt_at": float(meta.get("next_attempt_at", 0.0)),
+                "last_error": str(meta.get("last_error", "")),
+            }
+        )
+
+    path.write_text(json.dumps({"add": add_entries, "remove": remove_entries}, indent=2), encoding="utf-8")
+
+
+def _queue_pending_add(window: MainWindow, post_id: int, reason: str) -> None:
+    _ensure_pending_state_loaded(window)
+    target = int(post_id)
+    window._pending_remote_remove_ids.discard(target)
+    window._pending_remote_remove_meta.pop(target, None)
+
+    meta = window._pending_remote_add_meta.get(target)
+    if meta is None:
+        meta = {
+            "attempts": 0,
+            "first_queued_at": time.time(),
+            "next_attempt_at": 0.0,
+            "last_error": "",
+        }
+    meta["last_error"] = reason
+    window._pending_remote_add_ids.add(target)
+    window._pending_remote_add_meta[target] = meta
+    _save_pending_state(window)
+
+
+def _queue_pending_remove(window: MainWindow, post_id: int, reason: str) -> None:
+    _ensure_pending_state_loaded(window)
+    target = int(post_id)
+    window._pending_remote_add_ids.discard(target)
+    window._pending_remote_add_meta.pop(target, None)
+
+    meta = window._pending_remote_remove_meta.get(target)
+    if meta is None:
+        meta = {
+            "attempts": 0,
+            "first_queued_at": time.time(),
+            "next_attempt_at": 0.0,
+            "last_error": "",
+        }
+    meta["last_error"] = reason
+    window._pending_remote_remove_ids.add(target)
+    window._pending_remote_remove_meta[target] = meta
+    _save_pending_state(window)
+
+
+def _clear_pending_add(window: MainWindow, post_id: int) -> None:
+    _ensure_pending_state_loaded(window)
+    target = int(post_id)
+    window._pending_remote_add_ids.discard(target)
+    window._pending_remote_add_meta.pop(target, None)
+    _save_pending_state(window)
+
+
+def _clear_pending_remove(window: MainWindow, post_id: int) -> None:
+    _ensure_pending_state_loaded(window)
+    target = int(post_id)
+    window._pending_remote_remove_ids.discard(target)
+    window._pending_remote_remove_meta.pop(target, None)
+    _save_pending_state(window)
+
+
+def _extract_retry_after_seconds(message: str) -> int | None:
+    match = re.search(r"retry[-_ ]?after[^0-9]*(\d+)", message or "", flags=re.IGNORECASE)
+    if not match:
+        return None
+    return max(0, int(match.group(1)))
+
+
+def _compute_backoff_seconds(window: MainWindow, endpoint: str, attempts: int, message: str) -> float:
+    _ensure_pending_state_loaded(window)
+    retry_after = _extract_retry_after_seconds(message)
+    streaks = window._pending_endpoint_streaks
+    current_streak = int(streaks.get(endpoint, 0)) + 1
+    streaks[endpoint] = current_streak
+
+    base_delay = min(120.0, 1.25 * (2 ** min(current_streak, 6)))
+    if retry_after is not None:
+        base_delay = max(base_delay, float(retry_after))
+
+    jitter = random.uniform(0.2, max(0.4, base_delay * 0.35))
+    return base_delay + jitter
+
+
+def _note_endpoint_success(window: MainWindow, endpoint: str) -> None:
+    _ensure_pending_state_loaded(window)
+    window._pending_endpoint_streaks[endpoint] = 0
+
+
 def process_pending_remote_mutations(window: MainWindow) -> None:
+    _ensure_pending_state_loaded(window)
     if not window._sync_enabled():
         return
     if not window._pending_remote_add_ids and not window._pending_remote_remove_ids:
         return
-    if window._active_workers:
+    if window._pending_sync_worker_active:
         return
 
+    window._pending_sync_worker_active = True
     worker = FunctionWorker(lambda: process_pending_remote_mutations_impl(window))
     worker.signals.finished.connect(lambda result: pending_remote_mutations_finished(window, result))
-    worker.signals.failed.connect(lambda error_text: window._log_sync_debug("Pending sync worker failure", error_text))
-    window._start_worker(worker, workload="sync")
+    worker.signals.failed.connect(lambda error_text: pending_remote_mutations_failed(window, error_text))
+    window._start_worker(worker, workload="mutation")
 
 
 def process_pending_remote_mutations_impl(window: MainWindow) -> dict[str, int]:
+    _ensure_pending_state_loaded(window)
     sync_client = window._make_sync_client(window.settings)
     if sync_client is None:
         return {
@@ -48,37 +224,73 @@ def process_pending_remote_mutations_impl(window: MainWindow) -> dict[str, int]:
     budget = 12
     processed = 0
 
+    now_ts = time.time()
+
     for post_id in sorted(list(window._pending_remote_add_ids)):
         if processed >= budget or window._degraded_mode_active():
             break
+        meta = window._pending_remote_add_meta.get(post_id, {})
+        if float(meta.get("next_attempt_at", 0.0)) > now_ts:
+            continue
         try:
             sync_client.add_favorite(post_id)
             window._pending_remote_add_ids.discard(post_id)
+            window._pending_remote_add_meta.pop(post_id, None)
             window._rate_limit.note_success()
+            _note_endpoint_success(window, "add")
             processed += 1
         except FlareSolverrError as exc:
             message = str(exc)
             window._mark_rate_limited_if_needed("pending_remote_add", message)
+            attempts = int(meta.get("attempts", 0)) + 1
+            delay = _compute_backoff_seconds(window, "add", attempts, message)
+            meta.update(
+                {
+                    "attempts": attempts,
+                    "next_attempt_at": time.time() + delay,
+                    "last_error": message,
+                    "first_queued_at": float(meta.get("first_queued_at", time.time())),
+                }
+            )
+            window._pending_remote_add_meta[post_id] = meta
             if is_rate_limited_error_message(message):
-                time.sleep(1.0)
                 break
             processed += 1
+
+    now_ts = time.time()
 
     for post_id in sorted(list(window._pending_remote_remove_ids)):
         if processed >= budget or window._degraded_mode_active():
             break
+        meta = window._pending_remote_remove_meta.get(post_id, {})
+        if float(meta.get("next_attempt_at", 0.0)) > now_ts:
+            continue
         try:
             sync_client.remove_favorite(post_id)
             window._pending_remote_remove_ids.discard(post_id)
+            window._pending_remote_remove_meta.pop(post_id, None)
             window._rate_limit.note_success()
+            _note_endpoint_success(window, "remove")
             processed += 1
         except FlareSolverrError as exc:
             message = str(exc)
             window._mark_rate_limited_if_needed("pending_remote_remove", message)
+            attempts = int(meta.get("attempts", 0)) + 1
+            delay = _compute_backoff_seconds(window, "remove", attempts, message)
+            meta.update(
+                {
+                    "attempts": attempts,
+                    "next_attempt_at": time.time() + delay,
+                    "last_error": message,
+                    "first_queued_at": float(meta.get("first_queued_at", time.time())),
+                }
+            )
+            window._pending_remote_remove_meta[post_id] = meta
             if is_rate_limited_error_message(message):
-                time.sleep(1.0)
                 break
             processed += 1
+
+    _save_pending_state(window)
 
     return {
         "remaining_add": len(window._pending_remote_add_ids),
@@ -87,14 +299,28 @@ def process_pending_remote_mutations_impl(window: MainWindow) -> dict[str, int]:
 
 
 def pending_remote_mutations_finished(window: MainWindow, result: object) -> None:
+    window._pending_sync_worker_active = False
     if not isinstance(result, dict):
         return
     remaining_add = int(result.get("remaining_add", 0))
     remaining_remove = int(result.get("remaining_remove", 0))
+    oldest_age = 0
+    now_ts = time.time()
+    for meta in getattr(window, "_pending_remote_add_meta", {}).values():
+        oldest_age = max(oldest_age, int(max(0.0, now_ts - float(meta.get("first_queued_at", now_ts)))))
+    for meta in getattr(window, "_pending_remote_remove_meta", {}).values():
+        oldest_age = max(oldest_age, int(max(0.0, now_ts - float(meta.get("first_queued_at", now_ts)))))
     if remaining_add or remaining_remove:
-        window._set_right_status(f"Pending sync: {remaining_add} add, {remaining_remove} remove remaining.")
+        window._set_right_status(
+            f"Pending sync: {remaining_add} add, {remaining_remove} remove remaining (oldest {oldest_age}s)."
+        )
     else:
         window._set_right_status("Pending sync complete.")
+
+
+def pending_remote_mutations_failed(window: MainWindow, error_text: str) -> None:
+    window._pending_sync_worker_active = False
+    window._log_sync_debug("Pending sync worker failure", error_text)
 
 
 def add_multiple_favorites(window: MainWindow, posts: list[Post]) -> None:
@@ -129,8 +355,11 @@ def add_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dict[s
                     )
                     window.local_favorites.add_favorite(post)
                     added_ids.append(post.id)
-                    window._pending_remote_add_ids.add(post.id)
-                    window._pending_remote_remove_ids.discard(post.id)
+                    _queue_pending_add(
+                        window,
+                        post.id,
+                        f"degraded mode active: {window._degraded_mode_remaining()}s remaining",
+                    )
                     continue
 
             attempts = 2
@@ -140,7 +369,8 @@ def add_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dict[s
                 try:
                     sync_client.add_favorite(post.id)
                     window._rate_limit.note_success()
-                    window._pending_remote_add_ids.discard(post.id)
+                    _clear_pending_add(window, post.id)
+                    _clear_pending_remove(window, post.id)
                     remote_success = True
                     break
                 except FlareSolverrError as exc:
@@ -161,7 +391,7 @@ def add_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dict[s
                         f"Reason: {last_error or 'rate limited'}\n\n{sync_client.debug_summary()}",
                     )
                     window.local_favorites.add_favorite(post)
-                    window._pending_remote_add_ids.add(post.id)
+                    _queue_pending_add(window, post.id, last_error or "rate limited")
                     added_ids.append(post.id)
                     continue
 
@@ -174,8 +404,8 @@ def add_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dict[s
                 continue
 
         window.local_favorites.add_favorite(post)
-        window._pending_remote_add_ids.discard(post.id)
-        window._pending_remote_remove_ids.discard(post.id)
+        _clear_pending_add(window, post.id)
+        _clear_pending_remove(window, post.id)
         added_ids.append(post.id)
 
     if failed_ids:
@@ -276,8 +506,11 @@ def remove_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dic
                     f"#{post.id}: deferred remote remove (degraded mode active: {window._degraded_mode_remaining()}s remaining)"
                 )
                 window.local_favorites.remove_favorite(post.id)
-                window._pending_remote_remove_ids.add(post.id)
-                window._pending_remote_add_ids.discard(post.id)
+                _queue_pending_remove(
+                    window,
+                    post.id,
+                    f"degraded mode active: {window._degraded_mode_remaining()}s remaining",
+                )
                 removed_ids.append(post.id)
                 continue
 
@@ -288,8 +521,8 @@ def remove_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dic
             try:
                 sync_client.remove_favorite(post.id)
                 window._rate_limit.note_success()
-                window._pending_remote_remove_ids.discard(post.id)
-                window._pending_remote_add_ids.discard(post.id)
+                _clear_pending_remove(window, post.id)
+                _clear_pending_add(window, post.id)
                 success = True
                 break
             except FlareSolverrError as exc:
@@ -302,7 +535,8 @@ def remove_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dic
 
         if success:
             window.local_favorites.remove_favorite(post.id)
-            window._pending_remote_add_ids.discard(post.id)
+            _clear_pending_remove(window, post.id)
+            _clear_pending_add(window, post.id)
             removed_ids.append(post.id)
             continue
 
@@ -314,7 +548,7 @@ def remove_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dic
                 f"Reason: {last_error or 'rate limited'}\n\n{sync_client.debug_summary()}",
             )
             window.local_favorites.remove_favorite(post.id)
-            window._pending_remote_remove_ids.add(post.id)
+            _queue_pending_remove(window, post.id, last_error or "rate limited")
             removed_ids.append(post.id)
             continue
 
@@ -475,10 +709,10 @@ def add_favorite_impl(window: MainWindow, post: Post) -> int:
                     break
     window.local_favorites.add_favorite(post)
     if window._last_favorite_sync_failed and is_rate_limited_error_message(window._last_favorite_sync_error):
-        window._pending_remote_add_ids.add(post.id)
+        _queue_pending_add(window, post.id, window._last_favorite_sync_error)
     else:
-        window._pending_remote_add_ids.discard(post.id)
-    window._pending_remote_remove_ids.discard(post.id)
+        _clear_pending_add(window, post.id)
+    _clear_pending_remove(window, post.id)
     return post.id
 
 
@@ -524,13 +758,12 @@ def remove_favorite_impl(window: MainWindow, post: Post) -> int:
             if not removed_remote:
                 if is_rate_limited_error_message(window._last_favorite_sync_error):
                     window.local_favorites.remove_favorite(post.id)
-                    window._pending_remote_remove_ids.add(post.id)
-                    window._pending_remote_add_ids.discard(post.id)
+                    _queue_pending_remove(window, post.id, window._last_favorite_sync_error)
                 return post.id
 
     window.local_favorites.remove_favorite(post.id)
-    window._pending_remote_remove_ids.discard(post.id)
-    window._pending_remote_add_ids.discard(post.id)
+    _clear_pending_remove(window, post.id)
+    _clear_pending_add(window, post.id)
     return post.id
 
 
