@@ -4,7 +4,8 @@ set -euo pipefail
 # Avoid entering an interactive REPL if PYTHONINSPECT is set in the shell environment.
 unset PYTHONINSPECT PYTHONSTARTUP
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 VENV_DIR="$PROJECT_DIR/.venv"
 LOG_DIR="$PROJECT_DIR/logs"
 LOG_FILE="$LOG_DIR/r34-launcher.log"
