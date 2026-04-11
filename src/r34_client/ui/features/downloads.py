@@ -8,11 +8,11 @@ from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QApplication, QFileDialog
 
-from ...concurrency import FunctionWorker
+from ...execution.concurrency import FunctionWorker
 from ..rendering.post_helpers import download_url_needs_hydration
 
 if TYPE_CHECKING:
-    from ...models import Post
+    from ...core.models import Post
     from ..windows.main_window import MainWindow
 
 

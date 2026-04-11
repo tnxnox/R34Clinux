@@ -4,7 +4,7 @@ import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ...models import Post
+    from ...core.models import Post
     from ..windows.main_window import MainWindow
 
 try:

@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ...config import AppSettings, SettingsStore
+from ...core.settings import AppSettings, SettingsStore
 
 
 class SettingsDialog(QDialog):

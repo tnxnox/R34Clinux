@@ -4,7 +4,8 @@ from urllib.parse import urlparse
 
 import requests
 
-from ...models import Post
+from ...core.models import Post
+from ...core.urls import RULE34_IMG_HOST, RULE34_WEB_BASE_URL, RULE34_WIMG_HOST, favorites_view_url
 
 
 def normalize_media_url(url: str) -> str:
@@ -32,10 +33,10 @@ def preview_candidate_urls(post: Post) -> list[str]:
         expanded.append(candidate)
         parsed = urlparse(candidate)
         host = parsed.netloc.lower()
-        if host == "wimg.rule34.xxx":
-            expanded.append(candidate.replace("https://wimg.rule34.xxx", "https://img.rule34.xxx", 1))
-        elif host == "img.rule34.xxx":
-            expanded.append(candidate.replace("https://img.rule34.xxx", "https://wimg.rule34.xxx", 1))
+        if host == RULE34_WIMG_HOST:
+            expanded.append(candidate.replace(f"https://{RULE34_WIMG_HOST}", f"https://{RULE34_IMG_HOST}", 1))
+        elif host == RULE34_IMG_HOST:
+            expanded.append(candidate.replace(f"https://{RULE34_IMG_HOST}", f"https://{RULE34_WIMG_HOST}", 1))
 
     seen: set[str] = set()
     ordered: list[str] = []
@@ -48,9 +49,9 @@ def preview_candidate_urls(post: Post) -> list[str]:
 
 
 def preview_referers(post: Post, user_id: str = "") -> list[str]:
-    referers = [post.page_url, "https://rule34.xxx/"]
+    referers = [post.page_url, f"{RULE34_WEB_BASE_URL}/"]
     if user_id.strip():
-        referers.insert(1, f"https://rule34.xxx/index.php?page=favorites&s=view&id={user_id.strip()}")
+        referers.insert(1, favorites_view_url(user_id))
     return referers
 
 

@@ -6,7 +6,7 @@ import sys
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
-from .config import SettingsStore
+from .core.settings import SettingsStore
 from .ui.windows.main_window import MainWindow
 
 

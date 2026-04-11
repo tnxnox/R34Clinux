@@ -5,8 +5,8 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
 
-from ...concurrency import FunctionWorker
-from ...models import Post
+from ...execution.concurrency import FunctionWorker
+from ...core.models import Post
 from ..rendering.image_fit import compute_base_render_size
 from ..rendering.post_helpers import is_video_post, needs_hydration, probe_file_size
 from ..rendering.preview_fetcher import fetch_preview_bytes

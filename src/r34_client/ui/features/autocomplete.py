@@ -5,8 +5,8 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QStandardItem
 
-from ...concurrency import FunctionWorker
-from ...models import TagSuggestion
+from ...execution.concurrency import FunctionWorker
+from ...core.models import TagSuggestion
 
 if TYPE_CHECKING:
     from ..windows.main_window import MainWindow

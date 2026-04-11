@@ -22,3 +22,15 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff.lint]
+extend-select = ["N"]
+
+[tool.ruff.lint.pep8-naming]
+ignore-names = [
+  "mousePressEvent",
+  "keyPressEvent",
+  "resizeEvent",
+  "eventFilter",
+  "closeEvent",
+]

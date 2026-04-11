@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMenu
 
-from ...models import Post
+from ...core.models import Post
 
 if TYPE_CHECKING:
     from ..windows.main_window import MainWindow

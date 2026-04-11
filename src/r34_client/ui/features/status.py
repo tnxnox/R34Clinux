@@ -4,7 +4,7 @@ from datetime import datetime
 import time
 from typing import TYPE_CHECKING
 
-from ...rate_limit import is_rate_limited_error_message
+from ...core.rate_limit import is_rate_limited_error_message
 
 if TYPE_CHECKING:
     from ..rendering.image_fit import FitMode

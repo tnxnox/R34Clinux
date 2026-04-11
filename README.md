@@ -52,8 +52,8 @@ system with `bash`, a package manager, and Docker.
 Recommended on Linux if you want the app to bootstrap itself:
 
 ```bash
-chmod +x start_r34.sh
-./start_r34.sh
+chmod +x src/scripts/start_r34.sh
+./src/scripts/start_r34.sh
 ```
 
 Manual setup:
@@ -98,7 +98,7 @@ python -m r34_client
 - If the app cannot search, verify your API credentials in Settings.
 - If FlareSolverr sync is failing, confirm the local FlareSolverr container or service is reachable at `http://127.0.0.1:8191` or your configured URL.
 - If video playback is unstable on Linux, install VLC and keep software OpenGL enabled as the launcher configures.
-- If the launcher reports missing dependencies, rerun `./start_r34.sh` and let it install the required packages.
+- If the launcher reports missing dependencies, rerun `./src/scripts/start_r34.sh` and let it install the required packages.
 
 ## Launcher Behavior
 

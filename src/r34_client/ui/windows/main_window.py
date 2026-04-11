@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from PySide6.QtCore import QEvent, QThreadPool, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QKeyEvent, QPixmap, QShortcut
@@ -34,13 +33,14 @@ try:
 except ImportError:  # pragma: no cover - optional runtime dependency
     vlc = None
 
-from ...api import Rule34Client
-from ...concurrency import FunctionWorker
-from ...config import AppSettings, SettingsStore
-from ...flaresolverr_client import FlareSolverrFavoritesClient
-from ...local_favorites import LocalFavoritesStore
-from ...models import Post, TagSuggestion
-from ...rate_limit import DegradedModeController
+from ...clients.api_client import Rule34Client
+from ...execution.concurrency import FunctionWorker
+from ...core.settings import AppSettings, SettingsStore
+from ...clients.flaresolverr_favorites_client import FlareSolverrFavoritesClient
+from ...storage.local_favorites_store import LocalFavoritesStore
+from ...core.models import Post, TagSuggestion
+from ...core.rate_limit import DegradedModeController, TokenBucket
+from .worker_pools import build_worker_pools
 from ..debug.diagnostics import DiagnosticsSnapshot
 from ..rendering.image_fit import FitMode
 from ..rendering.post_helpers import (
@@ -54,7 +54,7 @@ from ..rendering.post_helpers import (
 )
 from ..features import autocomplete as autocomplete_feature
 from ..features import context_menu as context_menu_feature
-from ..features import dialogs as dialogs_feature
+from ..features import ui_dialogs as dialogs_feature
 from ..features import downloads as downloads_feature
 from ..features import favorites as favorites_feature
 from ..features import media as media_feature
@@ -76,24 +76,7 @@ class MainWindow(QMainWindow):
         self.settings = store.load()
         self.client = self._make_client(self.settings)
         self.local_favorites = LocalFavoritesStore()
-        cpu_count = max(1, os.cpu_count() or 1)
-        self._worker_pools: dict[str, QThreadPool] = {
-            "general": QThreadPool.globalInstance(),
-            "search": QThreadPool(),
-            "preview": QThreadPool(),
-            "sync": QThreadPool(),
-            "mutation": QThreadPool(),
-            "autocomplete": QThreadPool(),
-            "download": QThreadPool(),
-        }
-        self._worker_pools["general"].setMaxThreadCount(max(8, min(24, cpu_count * 3)))
-        self._worker_pools["search"].setMaxThreadCount(max(2, min(6, cpu_count)))
-        self._worker_pools["preview"].setMaxThreadCount(max(2, min(8, cpu_count * 2)))
-        self._worker_pools["sync"].setMaxThreadCount(max(1, min(4, cpu_count)))
-        # Keep remote mutations serialized per account to reduce auth/rate-limit contention.
-        self._worker_pools["mutation"].setMaxThreadCount(1)
-        self._worker_pools["autocomplete"].setMaxThreadCount(max(1, min(3, cpu_count)))
-        self._worker_pools["download"].setMaxThreadCount(max(2, min(6, cpu_count)))
+        self._worker_pools = build_worker_pools()
 
         self.current_posts: list[Post] = []
         self.favorite_posts: list[Post] = []
@@ -247,6 +230,8 @@ class MainWindow(QMainWindow):
         self._download_token = 0
         self._hydrate_token = 0
         self._rate_limit = DegradedModeController()
+        # Keep remote mutation flow paced even under large pending queues.
+        self._remote_mutation_bucket = TokenBucket(capacity=8.0, refill_rate_per_second=1.25)
 
         self.meta_view = QPlainTextEdit()
         self.meta_view.setReadOnly(True)
