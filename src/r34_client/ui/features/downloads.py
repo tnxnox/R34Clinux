@@ -79,10 +79,7 @@ def download_multiple_posts(window: MainWindow, posts: list[Post]) -> None:
     window._set_status(f"Downloading {len(unique_posts)} selected favorites...")
 
     def download_many() -> list[Path]:
-        output: list[Path] = []
-        for post in unique_posts:
-            output.append(download_post_to_directory(window, post, target_directory))
-        return output
+        return [download_post_to_directory(window, post, target_directory) for post in unique_posts]
 
     window._download_token += 1
     token = window._download_token

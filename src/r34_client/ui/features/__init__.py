@@ -1,7 +1,6 @@
 __all__ = [
     "autocomplete",
     "context_menu",
-    "ui_dialogs",
     "downloads",
     "favorites",
     "media",
@@ -10,4 +9,5 @@ __all__ = [
     "search",
     "settings",
     "status",
+    "ui_dialogs",
 ]

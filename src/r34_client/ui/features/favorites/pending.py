@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import time
 from typing import TYPE_CHECKING
 
@@ -128,7 +129,7 @@ def process_pending_remote_mutations_impl(window: MainWindow) -> dict[str, int]:
         "remaining_add": len(window._pending_remote_add_ids),
         "remaining_remove": len(window._pending_remote_remove_ids),
         "tokens_available": int(window._remote_mutation_bucket.available_tokens(time.monotonic())),
-        "token_wait_seconds": int(window._remote_mutation_bucket.seconds_until_available(1.0, time.monotonic())),
+        "token_wait_seconds": math.ceil(window._remote_mutation_bucket.seconds_until_available(1.0, time.monotonic())),
         "token_exhausted": int(token_exhausted),
     }
 

@@ -94,7 +94,7 @@ class Post:
     @property
     def dimensions(self) -> str:
         if self.width and self.height:
-            return f"{self.width} × {self.height}"
+            return f"{self.width} x {self.height}"
         return "Unknown size"
 
     @property
