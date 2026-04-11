@@ -226,39 +226,7 @@ def process_pending_remote_mutations_impl(window: MainWindow) -> dict[str, int]:
 
     now_ts = time.time()
 
-    for post_id in sorted(list(window._pending_remote_add_ids)):
-        if processed >= budget or window._degraded_mode_active():
-            break
-        meta = window._pending_remote_add_meta.get(post_id, {})
-        if float(meta.get("next_attempt_at", 0.0)) > now_ts:
-            continue
-        try:
-            sync_client.add_favorite(post_id)
-            window._pending_remote_add_ids.discard(post_id)
-            window._pending_remote_add_meta.pop(post_id, None)
-            window._rate_limit.note_success()
-            _note_endpoint_success(window, "add")
-            processed += 1
-        except FlareSolverrError as exc:
-            message = str(exc)
-            window._mark_rate_limited_if_needed("pending_remote_add", message)
-            attempts = int(meta.get("attempts", 0)) + 1
-            delay = _compute_backoff_seconds(window, "add", attempts, message)
-            meta.update(
-                {
-                    "attempts": attempts,
-                    "next_attempt_at": time.time() + delay,
-                    "last_error": message,
-                    "first_queued_at": float(meta.get("first_queued_at", time.time())),
-                }
-            )
-            window._pending_remote_add_meta[post_id] = meta
-            if is_rate_limited_error_message(message):
-                break
-            processed += 1
-
-    now_ts = time.time()
-
+    # Prioritize remote deletes first so removal intent converges quickly.
     for post_id in sorted(list(window._pending_remote_remove_ids)):
         if processed >= budget or window._degraded_mode_active():
             break
@@ -286,6 +254,40 @@ def process_pending_remote_mutations_impl(window: MainWindow) -> dict[str, int]:
                 }
             )
             window._pending_remote_remove_meta[post_id] = meta
+            if is_rate_limited_error_message(message):
+                break
+            processed += 1
+
+    for post_id in sorted(list(window._pending_remote_add_ids)):
+        if window._pending_remote_remove_ids:
+            # Keep this cycle focused on draining deletes first.
+            break
+        if processed >= budget or window._degraded_mode_active():
+            break
+        meta = window._pending_remote_add_meta.get(post_id, {})
+        if float(meta.get("next_attempt_at", 0.0)) > now_ts:
+            continue
+        try:
+            sync_client.add_favorite(post_id)
+            window._pending_remote_add_ids.discard(post_id)
+            window._pending_remote_add_meta.pop(post_id, None)
+            window._rate_limit.note_success()
+            _note_endpoint_success(window, "add")
+            processed += 1
+        except FlareSolverrError as exc:
+            message = str(exc)
+            window._mark_rate_limited_if_needed("pending_remote_add", message)
+            attempts = int(meta.get("attempts", 0)) + 1
+            delay = _compute_backoff_seconds(window, "add", attempts, message)
+            meta.update(
+                {
+                    "attempts": attempts,
+                    "next_attempt_at": time.time() + delay,
+                    "last_error": message,
+                    "first_queued_at": float(meta.get("first_queued_at", time.time())),
+                }
+            )
+            window._pending_remote_add_meta[post_id] = meta
             if is_rate_limited_error_message(message):
                 break
             processed += 1

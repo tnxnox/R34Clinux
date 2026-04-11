@@ -354,7 +354,7 @@ class MainWindow(QMainWindow):
         if not self._sync_enabled():
             self.pending_remote_sync_timer.stop()
             return
-        self.pending_remote_sync_timer.setInterval(8000)
+        self.pending_remote_sync_timer.setInterval(4000)
         self.pending_remote_sync_timer.start()
 
     def _background_sync_tick(self) -> None:
