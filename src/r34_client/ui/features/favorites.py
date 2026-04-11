@@ -498,6 +498,8 @@ def remove_multiple_favorites_impl(window: MainWindow, posts: list[Post]) -> dic
     for post in posts:
         if sync_client is None:
             window.local_favorites.remove_favorite(post.id)
+            _clear_pending_remove(window, post.id)
+            _clear_pending_add(window, post.id)
             removed_ids.append(post.id)
             continue
 
@@ -732,7 +734,7 @@ def remove_favorite_impl(window: MainWindow, post: Post) -> int:
             )
             window._last_favorite_sync_debug = ""
         else:
-            attempts = 3
+            attempts = 2
             removed_remote = False
             for attempt in range(1, attempts + 1):
                 try:
@@ -749,8 +751,7 @@ def remove_favorite_impl(window: MainWindow, post: Post) -> int:
                     window._last_favorite_sync_debug = sync_client.debug_summary()
                     window._mark_rate_limited_if_needed("favorite_remove", window._last_favorite_sync_error)
                     if is_rate_limited_error_message(window._last_favorite_sync_error) and attempt < attempts:
-                        time.sleep(0.35 * attempt)
-                        continue
+                        break
                     window._log_sync_debug(
                         f"Favorite remove sync failure for #{post.id}",
                         f"Error: {window._last_favorite_sync_error}\n\n{window._last_favorite_sync_debug}",
@@ -764,7 +765,10 @@ def remove_favorite_impl(window: MainWindow, post: Post) -> int:
                 return post.id
 
     window.local_favorites.remove_favorite(post.id)
-    _clear_pending_remove(window, post.id)
+    if window._last_favorite_sync_failed and is_rate_limited_error_message(window._last_favorite_sync_error):
+        _queue_pending_remove(window, post.id, window._last_favorite_sync_error)
+    else:
+        _clear_pending_remove(window, post.id)
     _clear_pending_add(window, post.id)
     return post.id
 
