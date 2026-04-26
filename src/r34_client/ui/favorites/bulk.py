@@ -61,15 +61,6 @@ def add_multiple_favorites_impl(local_favorites, posts: list[Post], sync_enabled
 
     save_pending_state(window_ref)
 
-    if failed_ids:
-        window._last_favorite_sync_failed = True
-        window._last_favorite_sync_error = f"Bulk add failed for {len(failed_ids)} post(s)."
-        window._last_favorite_sync_debug = "\n".join(failed_errors)
-    else:
-        window._last_favorite_sync_failed = False
-        window._last_favorite_sync_error = ""
-        window._last_favorite_sync_debug = ""
-
     return {
         "added_ids": added_ids,
         "failed_ids": failed_ids,
@@ -97,6 +88,10 @@ def favorite_bulk_add_finished(window: MainWindow, token: int, result: object) -
         window.favorite_ids.add(post_id)
 
     if failed_ids:
+        window._last_favorite_sync_failed = True
+        window._last_favorite_sync_error = f"Bulk add failed for {len(failed_ids)} post(s)."
+        window._last_favorite_sync_debug = "\n".join(failed_errors)
+        
         window._set_status(
             f"Added {len(added_ids)} favorites; {len(failed_ids)} failed due to sync limits."
         )
@@ -111,6 +106,10 @@ def favorite_bulk_add_finished(window: MainWindow, token: int, result: object) -
                 "Some favorites could not be added remotely.\n\n" + "\n".join(failed_errors[:12]),
             )
     else:
+        window._last_favorite_sync_failed = False
+        window._last_favorite_sync_error = ""
+        window._last_favorite_sync_debug = ""
+        
         if deferred_sync_ids:
             window._set_status(
                 f"Added {len(added_ids)} favorites locally; queued {len(deferred_sync_ids)} for background remote sync."
@@ -168,15 +167,6 @@ def remove_multiple_favorites_impl(local_favorites, posts: list[Post], sync_enab
 
     save_pending_state(window_ref)
 
-    if failed_ids:
-        window._last_favorite_sync_failed = True
-        window._last_favorite_sync_error = f"Bulk remove failed for {len(failed_ids)} post(s)."
-        window._last_favorite_sync_debug = "\n".join(failed_errors)
-    else:
-        window._last_favorite_sync_failed = False
-        window._last_favorite_sync_error = ""
-        window._last_favorite_sync_debug = ""
-
     return {
         "requested_ids": requested_ids,
         "removed_count": removed_count,
@@ -206,6 +196,10 @@ def favorite_bulk_mutation_finished(window: MainWindow, token: int, result: obje
         window.favorite_ids.discard(post_id)
 
     if failed_ids:
+        window._last_favorite_sync_failed = True
+        window._last_favorite_sync_error = f"Bulk remove failed for {len(failed_ids)} post(s)."
+        window._last_favorite_sync_debug = "\n".join(failed_errors)
+        
         window._set_status(
             f"Removed {removed_count} of {len(requested_ids)} favorites locally; {len(failed_ids)} failed and were kept."
         )
@@ -216,6 +210,10 @@ def favorite_bulk_mutation_finished(window: MainWindow, token: int, result: obje
             + "\n".join(failed_errors[:12]),
         )
     else:
+        window._last_favorite_sync_failed = False
+        window._last_favorite_sync_error = ""
+        window._last_favorite_sync_debug = ""
+        
         if deferred_sync_ids:
             if removed_count != len(requested_ids):
                 window._set_status(

@@ -34,10 +34,11 @@ def process_pending_remote_mutations(window: MainWindow) -> None:
     window._pending_sync_worker_active = True
 
     # Take a snapshot of current state to process in background
-    pending_adds = set(window._pending_remote_add_ids)
-    pending_removes = set(window._pending_remote_remove_ids)
-    add_meta = dict(window._pending_remote_add_meta)
-    remove_meta = dict(window._pending_remote_remove_meta)
+    with window._pending_state_lock:
+        pending_adds = set(window._pending_remote_add_ids)
+        pending_removes = set(window._pending_remote_remove_ids)
+        add_meta = dict(window._pending_remote_add_meta)
+        remove_meta = dict(window._pending_remote_remove_meta)
     
     sync_client = window._make_sync_client(window.settings)
     is_degraded = window._degraded_mode_active()

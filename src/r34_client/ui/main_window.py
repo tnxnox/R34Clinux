@@ -103,7 +103,13 @@ class MainWindow(QMainWindow):
         self._last_favorite_sync_debug = ""
         self._pending_remote_add_ids: set[int] = set()
         self._pending_remote_remove_ids: set[int] = set()
+        self._pending_remote_add_meta: dict[int, dict] = {}
+        self._pending_remote_remove_meta: dict[int, dict] = {}
+        self._pending_endpoint_streaks: dict[str, int] = {"add": 0, "remove": 0}
+        self._pending_state_loaded = False
         self._pending_sync_worker_active = False
+        import threading
+        self._pending_state_lock = threading.Lock()
         self._sync_debug_log_path = self.local_favorites.database_path.parent / "sync-debug.log"
         self._is_long_strip_image = False
 

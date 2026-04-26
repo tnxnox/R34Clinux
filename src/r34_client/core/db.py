@@ -195,28 +195,36 @@ class LocalFavoritesStore:
         if not unique_ids:
             return 0
 
-        placeholders = ", ".join("?" for _ in unique_ids)
+        # Chunk large requests to avoid SQLite variable limits (typically 999)
+        chunk_size = 500
+        removed_total = 0
+        
         with self._connect() as connection:
-            existing_rows = connection.execute(
-                f"SELECT id FROM favorites WHERE id IN ({placeholders})",
-                tuple(unique_ids),
-            ).fetchall()
-            existing_ids = [int(row["id"]) for row in existing_rows]
+            for i in range(0, len(unique_ids), chunk_size):
+                chunk = unique_ids[i : i + chunk_size]
+                placeholders = ", ".join("?" for _ in chunk)
+                
+                existing_rows = connection.execute(
+                    f"SELECT id FROM favorites WHERE id IN ({placeholders})",
+                    tuple(chunk),
+                ).fetchall()
+                existing_ids = [int(row["id"]) for row in existing_rows]
 
-            if unique_ids:
                 connection.execute(
                     f"DELETE FROM favorite_collection_items WHERE post_id IN ({placeholders})",
-                    tuple(unique_ids),
+                    tuple(chunk),
                 )
 
-            if existing_ids:
-                existing_placeholders = ", ".join("?" for _ in existing_ids)
-                connection.execute(
-                    f"DELETE FROM favorites WHERE id IN ({existing_placeholders})",
-                    tuple(existing_ids),
-                )
+                if existing_ids:
+                    existing_placeholders = ", ".join("?" for _ in existing_ids)
+                    connection.execute(
+                        f"DELETE FROM favorites WHERE id IN ({existing_placeholders})",
+                        tuple(existing_ids),
+                    )
+                    removed_total += len(existing_ids)
+            
             connection.commit()
-        return len(existing_ids)
+        return removed_total
 
     def list_collections(self) -> list[str]:
         with self._connect() as connection:

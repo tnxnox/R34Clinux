@@ -44,9 +44,6 @@ def remove_favorite(window: MainWindow, post: Post) -> None:
 
 
 def add_favorite_impl(window: MainWindow, post: Post) -> int:
-    window._last_favorite_sync_failed = False
-    window._last_favorite_sync_error = ""
-    window._last_favorite_sync_debug = ""
     window.local_favorites.add_favorite(post)
     if window._sync_enabled():
         queue_pending_add(window, post.id, "queued optimistic add")
@@ -57,9 +54,6 @@ def add_favorite_impl(window: MainWindow, post: Post) -> int:
 
 
 def remove_favorite_impl(window: MainWindow, post: Post) -> int:
-    window._last_favorite_sync_failed = False
-    window._last_favorite_sync_error = ""
-    window._last_favorite_sync_debug = ""
     window.local_favorites.remove_favorites([post.id])
     if window._sync_enabled():
         queue_pending_remove(window, post.id, "queued optimistic remove")
@@ -72,6 +66,11 @@ def remove_favorite_impl(window: MainWindow, post: Post) -> int:
 def favorite_mutation_finished(window: MainWindow, token: int, post_id: int, favorited: bool) -> None:
     if token != window._mutation_token:
         return
+
+    window._last_favorite_sync_failed = False
+    window._last_favorite_sync_error = ""
+    window._last_favorite_sync_debug = ""
+
     if favorited:
         window.favorite_ids.add(post_id)
     else:
