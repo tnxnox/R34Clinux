@@ -4,11 +4,11 @@ from datetime import datetime
 import time
 from typing import TYPE_CHECKING
 
-from ...core.rate_limit import is_rate_limited_error_message
+from r34_client.core.rate_limit import is_rate_limited_error_message
 
 if TYPE_CHECKING:
-    from ..rendering.image_fit import FitMode
-    from ..windows.main_window import MainWindow
+    from ..helpers.image_fit import FitMode
+    from ..main_window import MainWindow
 
 
 def update_action_state(window: MainWindow) -> None:
@@ -17,8 +17,8 @@ def update_action_state(window: MainWindow) -> None:
     window.download_button.setEnabled(has_selection)
     window.open_button.setEnabled(has_selection)
     window.copy_button.setEnabled(has_selection)
-    window.volume_slider.setEnabled(window._vlc_player is not None)
-    window.seek_slider.setEnabled(window._vlc_player is not None and has_selection and window._current_post_is_video())
+    window.volume_slider.setEnabled(window.video_player.is_available)
+    window.seek_slider.setEnabled(window.video_player.is_available and has_selection and window._current_post_is_video())
     window.save_search_button.setEnabled(has_query)
     window.pin_filter_button.setEnabled(has_query)
     window.pin_filter_button.setText(
