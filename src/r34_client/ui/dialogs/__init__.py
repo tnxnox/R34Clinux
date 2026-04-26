@@ -1,3 +1,3 @@
-from .settings_dialog import SettingsDialog
+from r34_client.ui.dialogs.settings import SettingsDialog
 
 __all__ = ["SettingsDialog"]
