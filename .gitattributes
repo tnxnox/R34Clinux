@@ -1,2 +1,0 @@
-.venv/lib/python3.12/site-packages/PySide6/Qt/lib/libQt6WebEngineCore.so.6 filter=lfs diff=lfs merge=lfs -text
-.venv/lib/python3.12/site-packages/playwright/driver/node filter=lfs diff=lfs merge=lfs -text
