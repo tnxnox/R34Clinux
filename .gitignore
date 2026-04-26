@@ -28,8 +28,11 @@ dist/
 *.log
 logs/
 
-# Test folder
-tests/
+# Local database
+*.db
+
+# Local mutations state
+pending-mutations.json
 
 # Internal project notes/agent configs
 .github/ROADMAP_INTERNAL.md
