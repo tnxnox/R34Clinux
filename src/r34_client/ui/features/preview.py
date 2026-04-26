@@ -5,14 +5,14 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
 
-from ...execution.concurrency import FunctionWorker
-from ...core.models import Post
-from ..rendering.image_fit import compute_base_render_size
-from ..rendering.post_helpers import is_video_post, needs_hydration, probe_file_size
-from ..rendering.preview_fetcher import fetch_preview_bytes
+from r34_client.core.worker import FunctionWorker
+from r34_client.core.models import Post
+from r34_client.ui.helpers.image_fit import compute_base_render_size
+from r34_client.ui.helpers.post import is_video_post, needs_hydration, probe_file_size
+from r34_client.ui.helpers.preview_fetcher import fetch_preview_bytes
 
 if TYPE_CHECKING:
-    from ..windows.main_window import MainWindow
+    from ..main_window import MainWindow
 
 
 def _find_item_by_post_id(list_widget, post_id: int):
@@ -43,7 +43,7 @@ def show_post(window: MainWindow, post: Post, allow_hydrate: bool = True) -> Non
         window._hydrate_token += 1
         token = window._hydrate_token
 
-        worker = FunctionWorker(lambda: hydrate_post(window, post))
+        worker = FunctionWorker(hydrate_post, window, post)
         worker.signals.finished.connect(lambda hydrated: show_hydrated_post(window, token, post, hydrated))
         worker.signals.failed.connect(lambda error_text: show_hydration_failed(window, token, post, error_text))
         window._start_worker(worker, workload="preview")
@@ -62,10 +62,7 @@ def show_post(window: MainWindow, post: Post, allow_hydrate: bool = True) -> Non
         window.preview_label.setText("This post does not expose a preview URL.")
         return
 
-    def fetch_preview() -> bytes:
-        return fetch_preview_bytes(post, user_id=window.settings.user_id)
-
-    worker = FunctionWorker(fetch_preview)
+    worker = FunctionWorker(fetch_preview_bytes, post, user_id=window.settings.user_id)
     worker.signals.finished.connect(lambda data: preview_loaded(window, token, data, post))
     worker.signals.failed.connect(lambda error_text: preview_failed_with_context(window, post, error_text))
     window._start_worker(worker, workload="preview")
