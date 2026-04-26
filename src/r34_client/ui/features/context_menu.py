@@ -5,10 +5,10 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMenu
 
-from ...core.models import Post
+from r34_client.core.models import Post
 
 if TYPE_CHECKING:
-    from ..windows.main_window import MainWindow
+    from ..main_window import MainWindow
 
 
 def selected_results_posts(window: MainWindow) -> list[Post]:
