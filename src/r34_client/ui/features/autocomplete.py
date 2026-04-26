@@ -5,11 +5,11 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QStandardItem
 
-from ...execution.concurrency import FunctionWorker
-from ...core.models import TagSuggestion
+from r34_client.core.worker import FunctionWorker
+from r34_client.core.models import TagSuggestion
 
 if TYPE_CHECKING:
-    from ..windows.main_window import MainWindow
+    from ..main_window import MainWindow
 
 
 def schedule_autocomplete(window: MainWindow, *_: object) -> None:
@@ -53,7 +53,7 @@ def refresh_autocomplete(window: MainWindow) -> None:
     window._autocomplete_token += 1
     token = window._autocomplete_token
 
-    worker = FunctionWorker(lambda: window.client.autocomplete_tags(prefix))
+    worker = FunctionWorker(window.client.autocomplete_tags, prefix)
     worker.signals.finished.connect(lambda result: autocomplete_finished(window, token, prefix, result))
     worker.signals.failed.connect(lambda error_text: autocomplete_failed(window, token, error_text))
     window._start_worker(worker, workload="autocomplete")
