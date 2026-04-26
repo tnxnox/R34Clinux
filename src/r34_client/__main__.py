@@ -6,8 +6,8 @@ import sys
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
-from .core.settings import SettingsStore
-from .ui.windows.main_window import MainWindow
+from r34_client.core.settings import SettingsStore
+from r34_client.ui.main_window import MainWindow
 
 
 def main() -> int:
