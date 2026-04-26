@@ -18,6 +18,12 @@ class AppSettings:
     flaresolverr_url: str = "http://127.0.0.1:8191"
     sync_conflict_strategy: str = "merge"
     background_sync_interval_minutes: int = 0
+    download_naming_template: str = "{id}"
+    download_path_template: str = ""
+    download_use_sample: bool = False
+    download_sidecar_enabled: bool = False
+    download_sidecar_format: str = "json"  # json, txt, both
+    download_max_retries: int = 3
 
     @property
     def has_credentials(self) -> bool:
@@ -59,6 +65,12 @@ class SettingsStore:
             flaresolverr_url=self._settings.value("sync/flaresolverr_url", "http://127.0.0.1:8191", str),
             sync_conflict_strategy=self._settings.value("sync/conflict_strategy", "merge", str),
             background_sync_interval_minutes=self._settings.value("sync/background_interval_minutes", 0, int),
+            download_naming_template=self._settings.value("downloads/naming_template", "{id}", str),
+            download_path_template=self._settings.value("downloads/path_template", "", str),
+            download_use_sample=self._settings.value("downloads/use_sample", False, bool),
+            download_sidecar_enabled=self._settings.value("downloads/sidecar_enabled", False, bool),
+            download_sidecar_format=self._settings.value("downloads/sidecar_format", "json", str),
+            download_max_retries=self._settings.value("downloads/max_retries", 3, int),
         )
 
     def save(self, settings: AppSettings) -> None:
@@ -72,6 +84,12 @@ class SettingsStore:
         self._settings.setValue("sync/flaresolverr_url", settings.flaresolverr_url)
         self._settings.setValue("sync/conflict_strategy", settings.sync_conflict_strategy)
         self._settings.setValue("sync/background_interval_minutes", settings.background_sync_interval_minutes)
+        self._settings.setValue("downloads/naming_template", settings.download_naming_template)
+        self._settings.setValue("downloads/path_template", settings.download_path_template)
+        self._settings.setValue("downloads/use_sample", settings.download_use_sample)
+        self._settings.setValue("downloads/sidecar_enabled", settings.download_sidecar_enabled)
+        self._settings.setValue("downloads/sidecar_format", settings.download_sidecar_format)
+        self._settings.setValue("downloads/max_retries", settings.download_max_retries)
         self._settings.sync()
 
     def load_search_history(self, limit: int = 12) -> list[str]:
