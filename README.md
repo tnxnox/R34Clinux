@@ -21,8 +21,9 @@ suggestions, and a launcher that can bootstrap the runtime on a fresh system.
 - Save favorites locally with instant indexing in the Favorites tab.
 - Add or remove multiple favorites at once from the context menu.
 - Organize favorites into collections/folders.
-- Optional real-time favorites sync through FlareSolverr.
-- Choose sync conflict strategy: merge, local wins, or remote wins.
+- **High Performance:** Connection pooling via `requests.Session` for rapid search and autocomplete responses.
+- **Intelligent Sync:** Non-destructive favorites synchronization that preserves local data while aligning with your remote account.
+- **Robustness:** Thread-safe operations and automatic handling of Rule34 rate limits.
 - Configure background favorites sync intervals.
 - See built-in diagnostics and controls panels.
 - Persist API credentials, sync settings, and download location with Qt settings.
