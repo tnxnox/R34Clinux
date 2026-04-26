@@ -3,17 +3,16 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import requests
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QApplication, QFileDialog
 
-from ...execution.concurrency import FunctionWorker
-from ..rendering.post_helpers import download_url_needs_hydration
+from r34_client.core.worker import FunctionWorker
+from r34_client.ui.helpers.post import download_url_needs_hydration
 
 if TYPE_CHECKING:
     from ...core.models import Post
-    from ..windows.main_window import MainWindow
+    from ..main_window import MainWindow
 
 
 def open_selected_post(window: MainWindow) -> None:
@@ -59,7 +58,7 @@ def download_selected_post(window: MainWindow) -> None:
     window._download_token += 1
     token = window._download_token
 
-    worker = FunctionWorker(download)
+    worker = FunctionWorker(download_post_to_directory, window, post, target_directory)
     worker.signals.finished.connect(lambda result: download_finished(window, token, result))
     worker.signals.failed.connect(window._operation_failed)
     window._start_worker(worker, workload="download")
@@ -78,13 +77,13 @@ def download_multiple_posts(window: MainWindow, posts: list[Post]) -> None:
 
     window._set_status(f"Downloading {len(unique_posts)} selected favorites...")
 
-    def download_many() -> list[Path]:
-        return [download_post_to_directory(window, post, target_directory) for post in unique_posts]
+    def download_many(win: MainWindow, posts_to_dl: list[Post], tgt_dir: str) -> list[Path]:
+        return [download_post_to_directory(win, p, tgt_dir) for p in posts_to_dl]
 
     window._download_token += 1
     token = window._download_token
 
-    worker = FunctionWorker(download_many)
+    worker = FunctionWorker(download_many, window, unique_posts, target_directory)
     worker.signals.finished.connect(lambda result: download_many_finished(window, token, result))
     worker.signals.failed.connect(window._operation_failed)
     window._start_worker(worker, workload="download")
@@ -92,31 +91,11 @@ def download_multiple_posts(window: MainWindow, posts: list[Post]) -> None:
 
 def download_post_to_directory(window: MainWindow, post: Post, target_directory: str) -> Path:
     resolved = resolve_download_post(window, post)
-    url = resolved.download_url
-    if not url:
-        raise RuntimeError("This post does not expose a downloadable file URL.")
-
-    destination = Path(target_directory) / resolved.file_name
-    if destination.exists():
-        destination = destination.with_name(f"{destination.stem}-{resolved.id}{destination.suffix}")
-
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (X11; Linux x86_64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        ),
-        "Referer": resolved.page_url,
-        "Accept": "*/*",
-    }
-    response = requests.get(url, timeout=60, stream=True, headers=headers)
-    response.raise_for_status()
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with destination.open("wb") as file_handle:
-        for chunk in response.iter_content(chunk_size=1024 * 64):
-            if chunk:
-                file_handle.write(chunk)
-    return destination
+    result = window.download_manager.download_post(resolved, window.settings)
+    if result is None:
+        # Already downloaded or skipped
+        return Path("") 
+    return result
 
 
 def resolve_download_post(window: MainWindow, post: Post) -> Post:
@@ -146,11 +125,14 @@ def download_finished(window: MainWindow, token: int, result: object) -> None:
     if token != window._download_token:
         return
     if isinstance(result, Path):
-        window._set_status(f"Saved to {result}")
+        if str(result):
+            window._set_status(f"Saved to {result}")
+        else:
+            window._set_status("Post already downloaded.")
 
 
 def download_many_finished(window: MainWindow, token: int, result: object) -> None:
     if token != window._download_token:
         return
-    paths = [item for item in result if isinstance(item, Path)] if isinstance(result, list) else []
+    paths = [item for item in result if isinstance(item, Path) and str(item)] if isinstance(result, list) else []
     window._set_status(f"Saved {len(paths)} files.")
