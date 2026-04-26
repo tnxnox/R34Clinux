@@ -573,14 +573,30 @@ class FlareSolverrFavoritesClient:
                         raise FlareSolverrError(
                             "Favorites mutation requires a logged rule34 web session in FlareSolverr (server replied not logged in)."
                         )
+
+                # Verification fetch is required because mutation endpoints can return 200 OK 
+                # even if the mutation didn't stick due to session issues FlareSolverr missed.
+                after_present = self._favorite_exists_in_view_with_retries(
+                    target_id,
+                    attempts=2,
+                    allow_unknown=False,
+                )
+                self._debug(f"mutate_favorite: after_present={after_present}")
+                if after_present is True:
+                    return
                 
-                # Trust the success if we didn't get an error or a "not logged in" signal.
-                # Redundant verification fetches are too expensive for bulk operations.
-                return
+                raise FlareSolverrError(
+                    f"Unable to add account favorite #{target_id}. Latest server response: {effective_body or 'empty response'}"
+                )
             return
 
-        # For deletion, we also skip the pre-check if we want to be fast.
-        # Rule34 delete endpoint is idempotent enough for our needs.
+        # For deletion, we first check if it exists to avoid unnecessary requests
+        before_present = self._favorite_exists_in_view(target_id)
+        self._debug(f"mutate_favorite: before_present={before_present}")
+        if before_present is False:
+            self._debug("mutate_favorite: already in desired state")
+            return
+
         web_delete_url = delete_favorite_web_url(target_id)
         for auth_attempt in range(1, 3):
             last_body = self._request_body_with_rate_limit_retries(
@@ -599,11 +615,21 @@ class FlareSolverrFavoritesClient:
                     "Favorites mutation requires a logged rule34 web session in FlareSolverr (server replied not logged in)."
                 )
             
-            # If we got a response that isn't a rate limit, assume success.
-            if not looks_rate_limited(last_body) and not self._looks_transient_web_gate(last_body):
+            # Post-mutation check to confirm deletion
+            after_present = self._favorite_exists_in_view_with_retries(
+                target_id,
+                attempts=2,
+                allow_unknown=True,
+            )
+            self._debug(f"mutate_favorite: after_present={after_present}")
+            if after_present is False:
+                return
+            if after_present is None:
+                # If we can't verify due to rate limit, we assume it's pending
+                self._debug("mutate_favorite: delete verification deferred due to temporary rate limit")
                 return
             
             raise FlareSolverrError(
-                "Rule34 temporarily rate limited favorite removal (HTTP 429). Please retry in a few seconds."
+                f"Unable to remove account favorite #{target_id}. Latest server response: {last_body or 'empty response'}"
             )
 

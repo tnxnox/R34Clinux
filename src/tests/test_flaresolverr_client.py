@@ -136,6 +136,8 @@ class FlareSolverrClientTests(unittest.TestCase):
     def test_add_favorite_calls_solver(self) -> None:
         with (
             patch.object(FlareSolverrFavoritesClient, "_ensure_web_login", return_value=None),
+            patch.object(FlareSolverrFavoritesClient, "_favorite_exists_in_view", return_value=False),
+            patch.object(FlareSolverrFavoritesClient, "_favorite_exists_in_view_with_retries", return_value=True),
             patch.object(
                 FlareSolverrFavoritesClient,
                 "_request_via_solver",
@@ -145,12 +147,13 @@ class FlareSolverrClientTests(unittest.TestCase):
             client = FlareSolverrFavoritesClient(user_id="1", api_key="secret")
             client.add_favorite(321)
 
-        request_mock.assert_called_once_with("https://rule34.xxx/public/addfav.php?id=321", headers=None)
+        request_mock.assert_any_call("https://rule34.xxx/public/addfav.php?id=321", headers=None)
 
     def test_add_favorite_raises_when_not_logged_in(self) -> None:
         with (
             patch.object(FlareSolverrFavoritesClient, "_ensure_web_login", return_value=None),
             patch.object(FlareSolverrFavoritesClient, "_destroy_session", return_value=None),
+            patch.object(FlareSolverrFavoritesClient, "_favorite_exists_in_view", return_value=False),
             patch.object(
                 FlareSolverrFavoritesClient,
                 "_request_via_solver",
@@ -165,6 +168,8 @@ class FlareSolverrClientTests(unittest.TestCase):
         with (
             patch.object(FlareSolverrFavoritesClient, "_ensure_web_login", return_value=None) as ensure_login_mock,
             patch.object(FlareSolverrFavoritesClient, "_destroy_session", return_value=None),
+            patch.object(FlareSolverrFavoritesClient, "_favorite_exists_in_view", return_value=False),
+            patch.object(FlareSolverrFavoritesClient, "_favorite_exists_in_view_with_retries", return_value=True),
             patch.object(
                 FlareSolverrFavoritesClient,
                 "_request_via_solver",
@@ -184,6 +189,7 @@ class FlareSolverrClientTests(unittest.TestCase):
         with (
             patch.object(FlareSolverrFavoritesClient, "_ensure_web_login", return_value=None),
             patch.object(FlareSolverrFavoritesClient, "_destroy_session", return_value=None),
+            patch.object(FlareSolverrFavoritesClient, "_favorite_exists_in_view", return_value=False),
             patch.object(
                 FlareSolverrFavoritesClient,
                 "_request_via_solver",
@@ -204,6 +210,7 @@ class FlareSolverrClientTests(unittest.TestCase):
         with (
             patch.object(FlareSolverrFavoritesClient, "_ensure_web_login", return_value=None),
             patch.object(FlareSolverrFavoritesClient, "_destroy_session", return_value=None),
+            patch.object(FlareSolverrFavoritesClient, "_favorite_exists_in_view", return_value=False),
             patch.object(
                 FlareSolverrFavoritesClient,
                 "_request_via_solver",
@@ -223,6 +230,8 @@ class FlareSolverrClientTests(unittest.TestCase):
     def test_remove_favorite_uses_web_delete_endpoint(self) -> None:
         with (
             patch.object(FlareSolverrFavoritesClient, "_ensure_web_login", return_value=None),
+            patch.object(FlareSolverrFavoritesClient, "_favorite_exists_in_view", return_value=True),
+            patch.object(FlareSolverrFavoritesClient, "_favorite_exists_in_view_with_retries", return_value=False),
             patch.object(
                 FlareSolverrFavoritesClient,
                 "_request_via_solver",
@@ -248,6 +257,8 @@ class FlareSolverrClientTests(unittest.TestCase):
         rate_limited_html = "<div>429 Rate limiting</div>"
         with (
             patch.object(FlareSolverrFavoritesClient, "_ensure_web_login", return_value=None),
+            patch.object(FlareSolverrFavoritesClient, "_favorite_exists_in_view", return_value=True),
+            patch.object(FlareSolverrFavoritesClient, "_favorite_exists_in_view_with_retries", side_effect=[False, False]),
             patch.object(FlareSolverrFavoritesClient, "_request_via_solver") as request_mock,
             patch("r34_client.api.flaresolverr.time.sleep", return_value=None),
         ):
@@ -268,10 +279,27 @@ class FlareSolverrClientTests(unittest.TestCase):
             {"Referer": "https://rule34.xxx/index.php?page=favorites&s=view&id=1"},
         )
 
-    def test_remove_favorite_raises_on_rate_limit(self) -> None:
+    def test_remove_favorite_allows_unknown_state_when_view_rate_limited(self) -> None:
         rate_limited_html = "<div>429 Rate limiting</div>"
         with (
             patch.object(FlareSolverrFavoritesClient, "_ensure_web_login", return_value=None),
+            patch.object(FlareSolverrFavoritesClient, "_favorite_exists_in_view", return_value=True),
+            patch.object(FlareSolverrFavoritesClient, "_favorite_exists_in_view_with_retries", return_value=None),
+            patch.object(FlareSolverrFavoritesClient, "_request_via_solver") as request_mock,
+            patch("r34_client.api.flaresolverr.time.sleep", return_value=None),
+        ):
+            request_mock.side_effect = [
+                "<html>ok</html>",
+            ]
+            client = FlareSolverrFavoritesClient(user_id="1", api_key="secret")
+            client.remove_favorite(321)
+
+    def test_remove_favorite_accepts_unknown_after_endpoint_rate_limit(self) -> None:
+        rate_limited_html = "<div>429 Rate limiting</div>"
+        with (
+            patch.object(FlareSolverrFavoritesClient, "_ensure_web_login", return_value=None),
+            patch.object(FlareSolverrFavoritesClient, "_favorite_exists_in_view", return_value=True),
+            patch.object(FlareSolverrFavoritesClient, "_favorite_exists_in_view_with_retries", return_value=None),
             patch.object(FlareSolverrFavoritesClient, "_request_via_solver") as request_mock,
             patch("r34_client.api.flaresolverr.time.sleep", return_value=None),
         ):
@@ -281,12 +309,13 @@ class FlareSolverrClientTests(unittest.TestCase):
                 rate_limited_html,
             ]
             client = FlareSolverrFavoritesClient(user_id="1", api_key="secret")
-            with self.assertRaises(FlareSolverrError):
-                client.remove_favorite(321)
+            client.remove_favorite(321)
 
     def test_remove_favorite_does_not_call_api_delete(self) -> None:
         with (
             patch.object(FlareSolverrFavoritesClient, "_ensure_web_login", return_value=None),
+            patch.object(FlareSolverrFavoritesClient, "_favorite_exists_in_view", return_value=True),
+            patch.object(FlareSolverrFavoritesClient, "_favorite_exists_in_view_with_retries", return_value=False),
             patch.object(FlareSolverrFavoritesClient, "_request_via_solver") as request_mock,
         ):
             request_mock.side_effect = [
