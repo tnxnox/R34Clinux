@@ -46,7 +46,8 @@ class TokenBucket:
     def seconds_until_available(self, amount: float, now_monotonic: float) -> float:
         needed = max(0.0, float(amount))
         with self._lock:
-            available = self.available_tokens(now_monotonic)
+            self._refill(now_monotonic)
+            available = max(0.0, self.tokens)
         if available >= needed:
             return 0.0
         deficit = needed - available
