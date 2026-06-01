@@ -7,10 +7,8 @@ if TYPE_CHECKING:
     from ...core.models import Post
     from ..main_window import MainWindow
 
-def _configure_vlc_backend(window: MainWindow, *, fallback: bool) -> bool:
-    if fallback:
-        return window.video_player.configure_fallback()
-    return window.video_player.is_available
+def _ensure_fallback_backend(window: MainWindow) -> bool:
+    return window.video_player.configure_fallback()
 
 
 def _start_embedded_playback(window: MainWindow, source_url: str) -> None:
@@ -75,7 +73,7 @@ def show_video_preview(window: MainWindow, post: Post) -> None:
             window._set_status("Playing video preview in-app.")
     except Exception as exc:
         playback_error = str(exc)
-        if _configure_vlc_backend(window, fallback=True):
+        if _ensure_fallback_backend(window):
             try:
                 _start_embedded_playback(window, source_url)
                 on_volume_changed(window, window.volume_slider.value())
