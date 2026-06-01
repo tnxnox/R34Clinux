@@ -14,7 +14,7 @@ def normalize_media_url(url: str) -> str:
         return ""
     if value.startswith("//"):
         return f"https:{value}"
-    if value.startswith("http://"):
+    if value.lower().startswith("http://"):
         return f"https://{value[7:]}"
     return value
 
