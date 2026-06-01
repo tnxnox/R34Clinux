@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from PySide6.QtCore import QEvent, QThreadPool, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QKeyEvent, QPixmap, QShortcut
@@ -108,6 +109,8 @@ class MainWindow(QMainWindow):
         self._pending_endpoint_streaks: dict[str, int] = {"add": 0, "remove": 0}
         self._pending_state_loaded = False
         self._pending_sync_worker_active = False
+        self._pending_sync_started_at = 0.0
+        self._pending_sync_last_restart_at = 0.0
         import threading
         self._pending_state_lock = threading.Lock()
         self._sync_debug_log_path = self.local_favorites.database_path.parent / "sync-debug.log"
@@ -288,6 +291,7 @@ class MainWindow(QMainWindow):
         self._update_action_state()
         # Startup should never block on remote sync; load local cache first.
         self._refresh_local_favorites()
+        self._shutdown_in_progress = False
 
         if not self.settings.has_credentials:
             self._set_left_status("Enter API credentials in Settings before searching.")
@@ -314,7 +318,7 @@ class MainWindow(QMainWindow):
         )
 
     def _sync_enabled(self) -> bool:
-        return self._make_sync_client(self.settings) is not None
+        return self.settings.flaresolverr_enabled and self.settings.has_credentials
 
     def _configure_background_sync_timer(self) -> None:
         interval_minutes = max(0, int(self.settings.background_sync_interval_minutes))
@@ -652,12 +656,6 @@ class MainWindow(QMainWindow):
     def _add_multiple_favorites(self, posts: list[Post]) -> None:
         favorites_feature.add_multiple_favorites(self, posts)
 
-    def _add_multiple_favorites_impl(self, posts: list[Post]) -> dict[str, object]:
-        return favorites_feature.add_multiple_favorites_impl(self, posts)
-
-    def _favorite_bulk_add_finished(self, token: int, result: object) -> None:
-        favorites_feature.favorite_bulk_add_finished(self, token, result)
-
     def _open_favorites_context_menu(self, position) -> None:
         context_menu_feature.open_favorites_context_menu(self, position)
 
@@ -666,12 +664,6 @@ class MainWindow(QMainWindow):
 
     def _remove_multiple_favorites(self, posts: list[Post]) -> None:
         favorites_feature.remove_multiple_favorites(self, posts)
-
-    def _remove_multiple_favorites_impl(self, posts: list[Post]) -> dict[str, object]:
-        return favorites_feature.remove_multiple_favorites_impl(self, posts)
-
-    def _favorite_bulk_mutation_finished(self, token: int, result: object) -> None:
-        favorites_feature.favorite_bulk_mutation_finished(self, token, result)
 
     def _assign_selection_to_new_collection(self, posts: list[Post]) -> None:
         favorites_feature.assign_selection_to_new_collection(self, posts)
@@ -954,5 +946,34 @@ class MainWindow(QMainWindow):
         return super().eventFilter(watched, event)
 
     def closeEvent(self, event):  # type: ignore[override]
+        if self._shutdown_in_progress:
+            super().closeEvent(event)
+            return
+
+        self._shutdown_in_progress = True
         self.store.save(self.settings)
+        self.autocomplete_timer.stop()
+        self.playback_timer.stop()
+        self.background_sync_timer.stop()
+        self.pending_remote_sync_timer.stop()
+        self.video_player.stop()
+        sync_client = self._make_sync_client(self.settings)
+        if sync_client is not None:
+            sync_client._destroy_session()
+
+        # Let in-flight work finish before clearing queued jobs.
+        for pool_name, pool in self._worker_pools.items():
+            if pool_name == "general":
+                continue
+            try:
+                pool.waitForDone(2000)
+                pool.clear()
+            except Exception:
+                pass
+
         super().closeEvent(event)
+
+        if self._active_workers:
+            # Some worker functions can block on network calls; force process exit so
+            # closing the UI always returns control to the launching terminal.
+            QTimer.singleShot(1500, lambda: os._exit(0))
