@@ -7,6 +7,8 @@ import requests
 
 from r34_client.core.models import Post
 
+_HTTP = requests.Session()
+
 
 def is_video_post(post: Post) -> bool:
     candidates = [post.file_url, post.sample_url, post.preview_url]
@@ -58,7 +60,7 @@ def probe_file_size(url: str, referer: str) -> int | None:
         "Accept": "*/*",
     }
     try:
-        head = requests.head(url, timeout=15, headers=headers, allow_redirects=True)
+        head = _HTTP.head(url, timeout=15, headers=headers, allow_redirects=True)
         if head.ok:
             content_length = head.headers.get("Content-Length")
             if content_length and content_length.isdigit():
@@ -68,16 +70,19 @@ def probe_file_size(url: str, referer: str) -> int | None:
 
     try:
         ranged_headers = {**headers, "Range": "bytes=0-0"}
-        resp = requests.get(url, timeout=20, headers=ranged_headers, stream=True)
-        if resp.status_code in (200, 206):
-            content_range = resp.headers.get("Content-Range", "")
-            if "/" in content_range:
-                total = content_range.rsplit("/", 1)[-1].strip()
-                if total.isdigit():
-                    return int(total)
-            content_length = resp.headers.get("Content-Length")
-            if content_length and content_length.isdigit():
-                return int(content_length)
+        resp = _HTTP.get(url, timeout=20, headers=ranged_headers, stream=True)
+        try:
+            if resp.status_code in (200, 206):
+                content_range = resp.headers.get("Content-Range", "")
+                if "/" in content_range:
+                    total = content_range.rsplit("/", 1)[-1].strip()
+                    if total.isdigit():
+                        return int(total)
+                content_length = resp.headers.get("Content-Length")
+                if content_length and content_length.isdigit():
+                    return int(content_length)
+        finally:
+            resp.close()
     except Exception:
         return None
     return None
