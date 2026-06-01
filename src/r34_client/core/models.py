@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as replace_dataclass
 from urllib.parse import urlparse
 
 
@@ -105,6 +105,23 @@ class Post:
         path = urlparse(url).path
         name = path.rsplit("/", 1)[-1]
         return name or f"post-{self.id}"
+
+    def merge_with(self, other: Post) -> Post:
+        return replace_dataclass(
+            other,
+            tags=other.tags or self.tags,
+            rating=other.rating or self.rating,
+            score=other.score if other.score is not None else self.score,
+            width=other.width if other.width is not None else self.width,
+            height=other.height if other.height is not None else self.height,
+            file_size=other.file_size if other.file_size is not None else self.file_size,
+            source=other.source or self.source,
+            md5=other.md5 or self.md5,
+            preview_url=other.preview_url or self.preview_url,
+            sample_url=other.sample_url or self.sample_url,
+            file_url=other.file_url or self.file_url,
+            created_at=other.created_at or self.created_at,
+        )
 
     @property
     def tags_text(self) -> str:
