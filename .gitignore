@@ -21,8 +21,19 @@ apikey.txt
 build/
 dist/
 
-# IDE
+# IDE and editor configs
 .vscode/
+.idea/
+.claude/
+.mcp.json
+
+# Local shell and system configs (user dotfiles in project root)
+.bash_*
+.z*
+.profile
+.gitconfig
+.gitmodules
+.ripgreprc
 
 # Logs and local runtime files
 *.log
@@ -33,6 +44,10 @@ logs/
 
 # Local mutations state
 pending-mutations.json
+
+# Tests (dev-only, not shipped)
+tests/
+src/tests/
 
 # Internal project notes/agent configs
 .github/ROADMAP_INTERNAL.md
