@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 import time
 from dataclasses import dataclass, field
@@ -12,8 +13,8 @@ import requests
 from r34_client.api.flaresolverr_parsing import (
     decode_payload,
     extract_body_text,
+    extract_favorite_tile_ids,
     extract_items,
-    extract_post_ids,
     looks_logged_in,
     looks_rate_limited,
 )
@@ -28,6 +29,8 @@ from r34_client.api.urls import (
     favorites_list_url,
     favorites_view_url,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class FlareSolverrError(RuntimeError):
@@ -169,14 +172,12 @@ class FlareSolverrFavoritesClient:
             try:
                 response = self._session.post(self._solver_endpoint(), json=payload, timeout=self.timeout)
                 response.raise_for_status()
-            except requests.RequestException as exc:
-                if attempt < 4:
-                    delay = 0.35 * attempt
-                    self._debug(f"request.get: transient failure attempt={attempt}/4 wait={delay:.2f}s")
-                    self._session_ready = False
-                    time.sleep(delay)
-                    continue
-                raise FlareSolverrError(f"FlareSolverr request failed: {exc}") from exc
+            except requests.RequestException:
+                delay = 0.35 * attempt
+                self._debug(f"request.get: transient failure attempt={attempt}/4 wait={delay:.2f}s")
+                self._session_ready = False
+                time.sleep(delay)
+                continue
 
             try:
                 body = response.json()
@@ -205,7 +206,8 @@ class FlareSolverrFavoritesClient:
         raise FlareSolverrError("FlareSolverr request failed after retries.")
 
     def _post_via_solver(self, url: str, post_data: str, referer: str | None = None) -> str:
-        self._debug(f"request.post: {url} payload={post_data[:200]}")
+        safe_post_data = re.sub(r"(pass=)[^&]*", r"\1***", post_data, flags=re.IGNORECASE)
+        self._debug(f"request.post: {url} payload={safe_post_data[:200]}")
 
         headers: dict[str, str] = {
             "Content-Type": "application/x-www-form-urlencoded",
@@ -228,14 +230,12 @@ class FlareSolverrFavoritesClient:
             try:
                 response = self._session.post(self._solver_endpoint(), json=payload, timeout=self.timeout)
                 response.raise_for_status()
-            except requests.RequestException as exc:
-                if attempt < 4:
-                    delay = 0.35 * attempt
-                    self._debug(f"request.post: transient failure attempt={attempt}/4 wait={delay:.2f}s")
-                    self._session_ready = False
-                    time.sleep(delay)
-                    continue
-                raise FlareSolverrError(f"FlareSolverr POST request failed: {exc}") from exc
+            except requests.RequestException:
+                delay = 0.35 * attempt
+                self._debug(f"request.post: transient failure attempt={attempt}/4 wait={delay:.2f}s")
+                self._session_ready = False
+                time.sleep(delay)
+                continue
 
             try:
                 body = response.json()
@@ -268,8 +268,11 @@ class FlareSolverrFavoritesClient:
         return f"{self.api_base_url}?{urlencode(query)}"
 
     def _favorite_exists(self, post_id: int) -> bool:
-        favorites = self.list_favorites(limit=500)
-        return any(post.id == int(post_id) for post in favorites)
+        return self._favorite_exists_in_view_with_retries(
+            post_id,
+            attempts=2,
+            allow_unknown=False,
+        )
 
     def _favorite_exists_in_view(self, post_id: int) -> bool:
         return self._favorite_exists_in_view_with_retries(post_id, attempts=3, allow_unknown=False)
@@ -300,8 +303,17 @@ class FlareSolverrFavoritesClient:
                 self._debug("favorites_view_check: unresolved due to rate limit, accepting unknown state")
                 return None
             raise FlareSolverrError("Rate limited while checking favorites state. Please retry in a few seconds.")
+
+        if not self._looks_favorites_view_authenticated(html_text):
+            self._debug("favorites_view_check: unexpected page content while verifying favorites state")
+            if allow_unknown:
+                return None
+            raise FlareSolverrError("Unable to verify favorites state from favorites view. Please retry.")
+
         target = int(post_id)
-        return any(candidate == target for candidate in extract_post_ids(html_text))
+        parsed_ids = extract_favorite_tile_ids(html_text)
+        self._debug(f"favorites_view_check: parsed_tiles={len(parsed_ids)}")
+        return target in parsed_ids
 
     @staticmethod
     def _looks_transient_web_gate(text: str) -> bool:
@@ -443,10 +455,16 @@ class FlareSolverrFavoritesClient:
         if posts:
             return posts
 
+        logger.warning("list_favorites: DAPI returned empty, falling back to HTML parsing")
+
         html_posts = self._list_favorites_from_html(limit)
         if html_posts:
             return html_posts
 
+        logger.warning(
+            "list_favorites: both DAPI and HTML parsing returned zero posts. "
+            "The favorite list page may have changed its HTML structure."
+        )
         return []
 
     def _list_favorites_from_dapi(self, limit: int) -> list[Post]:
@@ -466,6 +484,7 @@ class FlareSolverrFavoritesClient:
             raise FlareSolverrError("Unable to parse response returned via FlareSolverr.") from exc
         except FlareSolverrError as exc:
             self._debug(f"list_favorites_dapi: fallback_to_html reason={exc}")
+            logger.warning("list_favorites_dapi: falling back to HTML due to: %s", exc)
             return []
 
         if isinstance(payload, list):
