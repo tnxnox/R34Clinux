@@ -260,25 +260,34 @@ class LocalFavoritesStore:
         if not unique_ids:
             return 0
 
+        chunk_size = 500
+        assigned_count = 0
+        
         with self._connect() as connection:
             connection.execute(
                 "INSERT OR IGNORE INTO favorite_collections (name) VALUES (?)",
                 (normalized,),
             )
 
-            existing_rows = connection.execute(
-                f"SELECT id FROM favorites WHERE id IN ({', '.join('?' for _ in unique_ids)})",
-                tuple(unique_ids),
-            ).fetchall()
-            existing_ids = {int(row["id"]) for row in existing_rows}
+            for i in range(0, len(unique_ids), chunk_size):
+                chunk = unique_ids[i : i + chunk_size]
+                placeholders = ", ".join("?" for _ in chunk)
+                
+                existing_rows = connection.execute(
+                    f"SELECT id FROM favorites WHERE id IN ({placeholders})",
+                    tuple(chunk),
+                ).fetchall()
+                existing_ids = {int(row["id"]) for row in existing_rows}
 
-            for post_id in sorted(existing_ids):
-                connection.execute(
-                    "INSERT OR IGNORE INTO favorite_collection_items (collection_name, post_id) VALUES (?, ?)",
-                    (normalized, post_id),
-                )
+                for post_id in sorted(existing_ids):
+                    connection.execute(
+                        "INSERT OR IGNORE INTO favorite_collection_items (collection_name, post_id) VALUES (?, ?)",
+                        (normalized, post_id),
+                    )
+                    assigned_count += 1
+            
             connection.commit()
-        return len(existing_ids)
+        return assigned_count
 
     def remove_posts_from_collection(self, post_ids: list[int], collection_name: str) -> int:
         normalized = collection_name.strip()
@@ -286,15 +295,24 @@ class LocalFavoritesStore:
         if not normalized or not unique_ids:
             return 0
 
+        chunk_size = 500
+        removed_count = 0
+        
         with self._connect() as connection:
-            before = connection.total_changes
-            connection.execute(
-                f"DELETE FROM favorite_collection_items WHERE collection_name = ? "
-                f"AND post_id IN ({', '.join('?' for _ in unique_ids)})",
-                (normalized, *unique_ids),
-            )
+            for i in range(0, len(unique_ids), chunk_size):
+                chunk = unique_ids[i : i + chunk_size]
+                placeholders = ", ".join("?" for _ in chunk)
+                
+                before = connection.total_changes
+                connection.execute(
+                    f"DELETE FROM favorite_collection_items WHERE collection_name = ? "
+                    f"AND post_id IN ({placeholders})",
+                    (normalized, *chunk),
+                )
+                removed_count += (connection.total_changes - before)
+            
             connection.commit()
-            return connection.total_changes - before
+            return removed_count
 
     def _upsert(self, connection: sqlite3.Connection, post: Post) -> None:
         connection.execute(
