@@ -53,5 +53,8 @@ src/tests/
 .github/ROADMAP_INTERNAL.md
 .github/agents/
 
+# Project-internal docs (not shipped)
+ROADMAP.md
+
 # Keep repository metadata local-only
 .github/
