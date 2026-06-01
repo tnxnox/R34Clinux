@@ -78,7 +78,15 @@ def download_multiple_posts(window: MainWindow, posts: list[Post]) -> None:
     window._set_status(f"Downloading {len(unique_posts)} selected favorites...")
 
     def download_many(win: MainWindow, posts_to_dl: list[Post], tgt_dir: str) -> list[Path]:
-        return [download_post_to_directory(win, p, tgt_dir) for p in posts_to_dl]
+        successes: list[Path] = []
+        for p in posts_to_dl:
+            try:
+                result = download_post_to_directory(win, p, tgt_dir)
+                if result is not None:
+                    successes.append(result)
+            except RuntimeError:
+                continue
+        return successes
 
     window._download_token += 1
     token = window._download_token
