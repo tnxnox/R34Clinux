@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 try:
     import vlc  # type: ignore
 except ImportError:  # pragma: no cover
+    logger.warning("VLC Python bindings not available; in-app video playback disabled.")
     vlc = None
 
 
@@ -74,6 +79,19 @@ class VideoPlayer:
         if result == -1:
             raise RuntimeError("VLC could not start playback")
 
+    def release(self) -> None:
+        if self._vlc_player is not None:
+            try:
+                self._vlc_player.stop()
+            except Exception:
+                pass
+            try:
+                self._vlc_player.release()
+            except Exception:
+                pass
+            self._vlc_player = None
+            self._vlc_instance = None
+
     def stop(self) -> None:
         if self._vlc_player is not None:
             try:
@@ -107,7 +125,7 @@ class VideoPlayer:
         if self._vlc_player is None or vlc is None:
             return False
         try:
-            return self._vlc_player.get_state() in (vlc.State.Paused, vlc.State.Stopped, vlc.State.Ended)
+            return self._vlc_player.get_state() == vlc.State.Paused
         except Exception:
             return False
 
