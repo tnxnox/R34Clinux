@@ -19,13 +19,14 @@ def assign_selection_to_new_collection(window: MainWindow, posts: list[Post]) ->
 
 
 def assign_selection_to_collection(window: MainWindow, posts: list[Post], collection_name: str) -> None:
+    collection_name = collection_name.strip()
     post_ids = [post.id for post in posts]
     
     worker = FunctionWorker(window.local_favorites.assign_posts_to_collection, post_ids, collection_name)
     
     def on_finished(assigned: int) -> None:
         window._refresh_collection_filter()
-        window._set_status(f"Added {assigned} favorites to collection '{collection_name.strip()}'.")
+        window._set_status(f"Added {assigned} favorites to collection '{collection_name}'.")
         
     def on_failed(error_text: str) -> None:
         QMessageBox.warning(window, "Collections", error_text)
