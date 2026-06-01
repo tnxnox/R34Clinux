@@ -96,6 +96,20 @@ def extract_post_ids(html_text: str) -> list[int]:
     return ids
 
 
+def extract_favorite_tile_ids(html_text: str) -> list[int]:
+    normalized = _normalize_html_text(html_text)
+    seen: set[int] = set()
+    ids: list[int] = []
+
+    for raw_id in re.findall(r"<a[^>]+id=['\"]p(\d+)['\"][^>]*>", normalized, flags=re.IGNORECASE):
+        post_id = int(raw_id)
+        if post_id in seen:
+            continue
+        seen.add(post_id)
+        ids.append(post_id)
+    return ids
+
+
 def extract_items(html_text: str) -> list[tuple[int, str]]:
     normalized = _normalize_html_text(html_text)
 
