@@ -96,7 +96,6 @@ class DownloadManager:
 
         # Retry logic
         max_retries = max(0, settings.download_max_retries)
-        last_error = None
 
         for attempt in range(max_retries + 1):
             try:
@@ -109,7 +108,6 @@ class DownloadManager:
                                 f.write(chunk)
                 break  # Success
             except requests.RequestException as e:
-                last_error = e
                 if attempt < max_retries:
                     time.sleep(2**attempt)  # Exponential backoff
                     continue
