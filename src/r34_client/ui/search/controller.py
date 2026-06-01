@@ -9,6 +9,7 @@ from r34_client.core.worker import FunctionWorker
 from r34_client.core.models import Post, TagSuggestion
 from r34_client.ui.search import history as history_feature
 from r34_client.ui.search import related as related_feature
+from r34_client.ui.favorites.pending import process_pending_remote_mutations
 from r34_client.sync.favorites_sync import sync_remote_favorites
 
 if TYPE_CHECKING:
@@ -134,14 +135,33 @@ def sync_remote(window: MainWindow) -> tuple[list[Post], bool]:
         cached_posts = window.local_favorites.list_favorites()
         return (cached_posts, bool(cached_posts))
 
-    return sync_remote_favorites(
+    # Snapshot pending sets under lock to avoid data races with main-thread mutations.
+    with window._pending_state_lock:
+        pending_add_snapshot = set(window._pending_remote_add_ids)
+        pending_remove_snapshot = set(window._pending_remote_remove_ids)
+
+    # Save originals before sync_remote_favorites mutates the snapshots.
+    pending_add_before = set(pending_add_snapshot)
+
+    result = sync_remote_favorites(
         settings=window.settings,
         local_favorites=window.local_favorites,
         make_sync_client=window._make_sync_client,
         log_sync_debug=window._log_sync_debug,
         on_sync_error=lambda message: window._mark_rate_limited_if_needed("favorites_sync", message),
-        pending_remote_add_ids=window._pending_remote_add_ids,
+        pending_remote_add_ids=pending_add_snapshot,
+        pending_remote_remove_ids=pending_remove_snapshot,
     )
+
+    # Only clear IDs from the live pending set that were confirmed on the remote.
+    # sync_remote_favorites mutates the snapshot via pending_ids.difference_update(remote_ids),
+    # removing IDs that exist on the remote. The remaining IDs in the snapshot
+    # are local-only pending adds still waiting to be pushed remotely.
+    confirmed_add_ids = pending_add_before - pending_add_snapshot
+    with window._pending_state_lock:
+        window._pending_remote_add_ids.difference_update(confirmed_add_ids)
+
+    return result
 
 
 def favorites_loaded(window: MainWindow, token: int, result: object) -> None:
@@ -200,6 +220,8 @@ def favorites_loaded(window: MainWindow, token: int, result: object) -> None:
                 window._handle_selection_change(selected_item, None)
 
     if window._sync_enabled():
+        pending_add = len(window._pending_remote_add_ids)
+        pending_remove = len(window._pending_remote_remove_ids)
         if window._favorites_sync_fallback_used:
             if window._degraded_mode_active():
                 window._set_status(
@@ -212,7 +234,13 @@ def favorites_loaded(window: MainWindow, token: int, result: object) -> None:
                 )
         else:
             window._rate_limit.note_success()
-            window._set_right_status(f"Favorites synced ({len(window.favorite_posts)} posts).")
+            if pending_add or pending_remove:
+                window._set_right_status(
+                    f"Favorites loaded ({len(window.favorite_posts)} posts). Pending sync: {pending_add} add, {pending_remove} remove."
+                )
+                process_pending_remote_mutations(window)
+            else:
+                window._set_right_status(f"Favorites synced ({len(window.favorite_posts)} posts).")
     else:
         window._set_right_status(f"Local favorites loaded ({len(window.favorite_posts)} posts).")
     window._update_action_state()
