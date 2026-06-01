@@ -23,6 +23,17 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true
+disallow_untyped_defs = false
+warn_unused_ignores = true
+exclude = [
+  "src/tests/",
+]
+files = "src/r34_client/"
+
 [tool.ruff.lint]
 extend-select = ["N"]
 
@@ -33,4 +44,8 @@ ignore-names = [
   "resizeEvent",
   "eventFilter",
   "closeEvent",
+  "setUp",
+  "setUpClass",
+  "tearDown",
+  "tearDownClass",
 ]
