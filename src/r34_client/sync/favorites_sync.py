@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 
 from r34_client.core.settings import AppSettings
@@ -7,8 +8,44 @@ from r34_client.api.flaresolverr import FlareSolverrError, FlareSolverrFavorites
 from r34_client.core.db import LocalFavoritesStore
 from r34_client.core.models import Post
 
+# Synchronization lock to prevent concurrent sync operations
+_sync_lock = threading.Lock()
+_sync_lock_timeout = 10  # seconds
+
 
 def sync_remote_favorites(
+    settings: AppSettings,
+    local_favorites: LocalFavoritesStore,
+    make_sync_client: Callable[[AppSettings], FlareSolverrFavoritesClient | None],
+    log_sync_debug: Callable[[str, str], None],
+    on_sync_error: Callable[[str], None] | None = None,
+    pending_remote_add_ids: set[int] | None = None,
+    pending_remote_remove_ids: set[int] | None = None,
+) -> tuple[list[Post], bool]:
+    # Acquire sync lock to prevent concurrent sync operations
+    if not _sync_lock.acquire(timeout=_sync_lock_timeout):
+        log_sync_debug(
+            "Favorites sync skipped",
+            f"Another sync operation is still in progress (waited {_sync_lock_timeout}s)."
+            " Returning cached local favorites to prevent data corruption.",
+        )
+        return (local_favorites.list_favorites(), False)
+
+    try:
+        return _do_sync_remote_favorites(
+            settings=settings,
+            local_favorites=local_favorites,
+            make_sync_client=make_sync_client,
+            log_sync_debug=log_sync_debug,
+            on_sync_error=on_sync_error,
+            pending_remote_add_ids=pending_remote_add_ids,
+            pending_remote_remove_ids=pending_remote_remove_ids,
+        )
+    finally:
+        _sync_lock.release()
+
+
+def _do_sync_remote_favorites(
     settings: AppSettings,
     local_favorites: LocalFavoritesStore,
     make_sync_client: Callable[[AppSettings], FlareSolverrFavoritesClient | None],
