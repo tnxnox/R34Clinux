@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import sys
 
@@ -8,6 +9,14 @@ from PySide6.QtWidgets import QApplication
 
 from r34_client.core.settings import SettingsStore
 from r34_client.ui.main_window import MainWindow
+
+_LOG_LEVEL = os.environ.get("R34_LOG_LEVEL", "").upper()
+if _LOG_LEVEL:
+    logging.basicConfig(
+        level=getattr(logging, _LOG_LEVEL, logging.INFO),
+        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
 
 
 def main() -> int:

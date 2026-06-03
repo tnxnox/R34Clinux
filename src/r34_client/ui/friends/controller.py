@@ -64,13 +64,43 @@ def _parse_friend_favorites(html: str) -> list[Post]:
     return posts
 
 
+def _hydrate_posts_from_api(posts: list[Post]) -> None:
+    """Fetch full metadata for each post from the public API in-place."""
+    import requests as req_module
+
+    api_base = "https://api.rule34.xxx/index.php"
+    for i, post in enumerate(posts):
+        try:
+            resp = req_module.get(
+                api_base,
+                params={
+                    "page": "dapi",
+                    "s": "post",
+                    "q": "index",
+                    "tags": f"id:{post.id}",
+                    "pid": 0,
+                    "limit": 1,
+                    "json": 1,
+                },
+                timeout=15,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if isinstance(data, list) and data:
+                posts[i] = Post.from_payload(data[0])
+        except Exception:
+            continue
+
+
 def _fetch_friend_favorites_impl(user_id: str, solver_url: str) -> list[Post]:
     url = favorites_view_url(user_id)
     html = _fetch_page(url, flare_solver_url=solver_url)
     if html is None:
         msg = f"Failed to fetch favorites for user {user_id}"
         raise RuntimeError(msg)
-    return _parse_friend_favorites(html)
+    posts = _parse_friend_favorites(html)
+    _hydrate_posts_from_api(posts)
+    return posts
 
 
 def add_friend_dialog(window: MainWindow) -> None:
