@@ -255,6 +255,7 @@ class MainWindow(QMainWindow):
         self._mutation_token = 0
         self._download_token = 0
         self._hydrate_token = 0
+        self._friend_fetch_token = 0
         self._rate_limit = DegradedModeController()
         # Keep remote mutation flow paced even under large pending queues.
         self._remote_mutation_bucket = TokenBucket(capacity=8.0, refill_rate_per_second=1.25)
