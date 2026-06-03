@@ -64,7 +64,7 @@ def _parse_friend_favorites(html: str) -> list[Post]:
     return posts
 
 
-def _hydrate_posts_from_api(client, posts: list[Post], *, limit: int = 25) -> None:
+def _hydrate_posts_from_api(client, posts: list[Post], *, limit: int = 10) -> None:
     """Fetch full metadata for each post via the authenticated client in-place."""
     for i, post in enumerate(posts):
         if i >= limit:
@@ -244,8 +244,8 @@ def _friend_favorites_fetched(window: MainWindow, token: int, result: object) ->
 
     # Limit displayed count to reduce lag and API pressure.
     # Paginate if you want more — the prefetch/hydration only touches
-    # the first 25 posts anyway.
-    DISPLAY_LIMIT = 25
+    # the first 10 posts anyway.
+    DISPLAY_LIMIT = 10
     displayed = posts[:DISPLAY_LIMIT]
 
     window.friend_posts_list.clear()
