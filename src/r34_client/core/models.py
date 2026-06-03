@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, replace as replace_dataclass
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
 
 
 def _as_int(value: object | None, default: int | None = None) -> int | None:
@@ -10,13 +13,17 @@ def _as_int(value: object | None, default: int | None = None) -> int | None:
     try:
         return int(value)
     except (TypeError, ValueError):
+        logger.debug("Failed to convert value '%s' to int, using default %s", value, default)
         return default
 
 
 def _as_str(value: object | None) -> str:
     if value is None:
         return ""
-    return str(value)
+    try:
+        return str(value)
+    except Exception:
+        return ""
 
 
 def _split_tags(value: object | None) -> list[str]:
