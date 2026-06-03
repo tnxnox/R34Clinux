@@ -100,6 +100,12 @@ def show_hydrated_post(window: MainWindow, token: int, fallback: Post, hydrated:
                 target_item.setText(window._format_post_tile(chosen))
             window.favorite_posts = [chosen if item.id == chosen.id else item for item in window.favorite_posts]
             window.local_favorites.add_favorite(chosen)
+        elif window.left_tabs.currentWidget() is window.friends_tab:
+            target_item = _find_item_by_post_id(window.friend_posts_list, fallback.id)
+            if target_item is not None:
+                target_item.setData(Qt.ItemDataRole.UserRole, chosen)
+                target_item.setText(window._format_post_tile(chosen))
+            window.friend_posts = [chosen if item.id == chosen.id else item for item in window.friend_posts]
         else:
             target_item = _find_item_by_post_id(window.results_list, fallback.id)
             if target_item is not None:
