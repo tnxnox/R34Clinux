@@ -234,4 +234,7 @@ def _friend_favorites_fetched(window: MainWindow, token: int, result: object) ->
         window.friend_posts_list.addItem(item)
 
     window.friend_posts = posts
+    if posts:
+        if window.left_tabs.currentWidget() is window.friends_tab:
+            window.friend_posts_list.setCurrentRow(0)
     window._set_status(f"Loaded {len(posts)} favorites")
