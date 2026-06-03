@@ -17,7 +17,6 @@ class WorkerLifecycleTests(unittest.TestCase):
         worker.signals.deleteLater()
         self._app.processEvents()
 
-        # Must not raise if worker completes after QObject teardown.
         worker.run()
 
     def test_worker_run_ignores_failed_emit_after_signals_deleted(self) -> None:
@@ -28,5 +27,4 @@ class WorkerLifecycleTests(unittest.TestCase):
         worker.signals.deleteLater()
         self._app.processEvents()
 
-        # Must not raise if worker fails after QObject teardown.
         worker.run()

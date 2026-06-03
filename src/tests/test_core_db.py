@@ -94,7 +94,3 @@ class LocalFavoritesStoreTests(unittest.TestCase):
 
             keep_collection = store.list_favorites(collection_name="Keep")
             self.assertEqual([post.id for post in keep_collection], [10])
-
-
-if __name__ == "__main__":
-    unittest.main()

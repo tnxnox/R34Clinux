@@ -45,9 +45,6 @@ logs/
 # Local mutations state
 pending-mutations.json
 
-# Tests (dev-only, not shipped)
-tests/
-src/tests/
 
 # Internal project notes/agent configs
 .github/ROADMAP_INTERNAL.md

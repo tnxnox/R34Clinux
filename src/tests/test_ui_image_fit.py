@@ -51,7 +51,3 @@ class ImageFitTests(unittest.TestCase):
             fit_mode=FitMode.SMART,
         )
         self.assertEqual(width, 900)
-
-
-if __name__ == "__main__":
-    unittest.main()

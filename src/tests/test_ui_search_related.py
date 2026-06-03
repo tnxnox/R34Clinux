@@ -1,16 +1,12 @@
 from __future__ import annotations
 
-import sys
 import unittest
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from r34_client.core.models import Post
-from r34_client.ui.search.controller import build_related_tags
+from r34_client.ui.search.related import build_related_tags
 
 
-class SearchV3Tests(unittest.TestCase):
+class SearchRelatedTests(unittest.TestCase):
     def test_build_related_tags_ranks_common_tags(self) -> None:
         posts = [
             Post(
@@ -88,7 +84,3 @@ class SearchV3Tests(unittest.TestCase):
 
         self.assertNotIn("rating:safe", [item.value for item in suggestions])
         self.assertEqual([item.value for item in suggestions], ["blue_hair", "solo"])
-
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)

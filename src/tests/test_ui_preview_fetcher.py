@@ -70,7 +70,3 @@ class PreviewFetcherTests(unittest.TestCase):
 
         self.assertEqual(data, b"image")
         self.assertGreaterEqual(len(calls), 2)
-
-
-if __name__ == "__main__":
-    unittest.main()

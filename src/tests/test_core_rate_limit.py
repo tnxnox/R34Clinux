@@ -34,7 +34,6 @@ class RateLimitTests(unittest.TestCase):
         self.assertTrue(bucket.consume(1.0, now_monotonic=10.0))
         self.assertFalse(bucket.consume(1.0, now_monotonic=10.0))
 
-        # After 2 seconds at 1 token/sec, 2 tokens should be available.
         self.assertTrue(bucket.consume(1.0, now_monotonic=12.0))
         self.assertTrue(bucket.consume(1.0, now_monotonic=12.0))
         self.assertFalse(bucket.consume(1.0, now_monotonic=12.0))
@@ -44,7 +43,3 @@ class RateLimitTests(unittest.TestCase):
         self.assertTrue(bucket.consume(2.0, now_monotonic=20.0))
         self.assertAlmostEqual(bucket.seconds_until_available(1.0, now_monotonic=20.0), 0.5, places=3)
         self.assertAlmostEqual(bucket.seconds_until_available(1.0, now_monotonic=20.5), 0.0, places=3)
-
-
-if __name__ == "__main__":
-    unittest.main()

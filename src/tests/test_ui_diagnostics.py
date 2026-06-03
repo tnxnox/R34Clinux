@@ -28,7 +28,3 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertIn("Degraded mode remaining (s): 12", report)
         self.assertIn("Image fit mode: smart", report)
         self.assertIn("Selected post id: 123", report)
-
-
-if __name__ == "__main__":
-    unittest.main()
