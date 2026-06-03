@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 import time
 from pathlib import Path
 
 from r34_client.core.models import Post
+
+logger = logging.getLogger(__name__)
 
 
 def _default_database_path() -> Path:
@@ -16,7 +19,8 @@ def _default_database_path() -> Path:
             root = Path(app_data)
         else:
             root = Path.home() / ".local" / "share" / "R34LinuxClient"
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to resolve Qt app data location: %s. Falling back to ~/.local/share/R34LinuxClient", exc)
         root = Path.home() / ".local" / "share" / "R34LinuxClient"
 
     root.mkdir(parents=True, exist_ok=True)
@@ -29,10 +33,44 @@ class LocalFavoritesStore:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.database_path)
-        connection.row_factory = sqlite3.Row
-        return connection
+    def _connect(self, max_retries: int = 3) -> sqlite3.Connection:
+        last_error: Exception | None = None
+        for attempt in range(max_retries):
+            try:
+                connection = sqlite3.connect(str(self.database_path), timeout=30)
+                connection.row_factory = sqlite3.Row
+                # Enable WAL mode for better concurrent access
+                connection.execute("PRAGMA journal_mode=WAL")
+                # Verify the connection is healthy
+                connection.execute("SELECT 1")
+                return connection
+            except sqlite3.DatabaseError as e:
+                last_error = e
+                logger.warning(
+                    "Database connection attempt %d/%d failed: %s",
+                    attempt + 1, max_retries, e,
+                )
+                if attempt < max_retries - 1:
+                    if "database is locked" in str(e):
+                        time.sleep(0.5 * (2**attempt))  # Exponential backoff
+                        continue
+                    # For corruption, try to reconnect
+                    time.sleep(1)
+                    continue
+            except Exception as e:
+                last_error = e
+                logger.error(
+                    "Unexpected database error on attempt %d/%d: %s",
+                    attempt + 1, max_retries, e,
+                )
+                if attempt < max_retries - 1:
+                    time.sleep(1)
+                    continue
+                raise
+
+        raise RuntimeError(
+            f"Cannot connect to database after {max_retries} attempts: {last_error}"
+        )
 
     def _init_schema(self) -> None:
         with self._connect() as connection:
