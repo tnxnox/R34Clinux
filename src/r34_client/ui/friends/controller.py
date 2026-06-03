@@ -64,9 +64,11 @@ def _parse_friend_favorites(html: str) -> list[Post]:
     return posts
 
 
-def _hydrate_posts_from_api(client, posts: list[Post]) -> None:
+def _hydrate_posts_from_api(client, posts: list[Post], *, limit: int = 25) -> None:
     """Fetch full metadata for each post via the authenticated client in-place."""
     for i, post in enumerate(posts):
+        if i >= limit:
+            break
         try:
             candidates = client.search_posts(f"id:{post.id}", 0, 1)
             if candidates:
@@ -240,15 +242,22 @@ def _friend_favorites_fetched(window: MainWindow, token: int, result: object) ->
         if isinstance(obj, Post):
             posts.append(obj)
 
+    # Limit displayed count to reduce lag and API pressure.
+    # Paginate if you want more — the prefetch/hydration only touches
+    # the first 25 posts anyway.
+    DISPLAY_LIMIT = 25
+    displayed = posts[:DISPLAY_LIMIT]
+
     window.friend_posts_list.clear()
-    for post in posts:
+    for post in displayed:
         item = QListWidgetItem(window._format_post_tile(post))
         item.setData(Qt.ItemDataRole.UserRole, post)
         window.friend_posts_list.addItem(item)
 
-    window.friend_posts = posts
-    # Detect whether there are more pages to load.
-    window._friend_has_more = len(posts) > 0
+    window.friend_posts = displayed
+    # Rule34 web view returns 50 items per page. If the raw page had
+    # >= 50 there's likely a next page.
+    window._friend_has_more = len(posts) >= 50
 
     # Update the friend‑specific page label.
     window._update_friend_page_label()
