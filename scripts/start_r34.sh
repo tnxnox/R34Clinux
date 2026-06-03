@@ -1019,7 +1019,7 @@ launch_app() {
   log_both "Launching R34 Linux Client with $APP_PYTHON..."
   APP_LAUNCHED=1
   set +o errexit
-  "$APP_PYTHON" -m r34_client
+  QT_IMAGEIO_MAXALLOC=0 "$APP_PYTHON" -m r34_client
   local rc=$?
   set -o errexit
   log_both "Application exited with code $rc."

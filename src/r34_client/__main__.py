@@ -32,6 +32,10 @@ def main() -> int:
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = " ".join(filtered_flags)
     os.environ.setdefault("QT_OPENGL", "software")
     os.environ.setdefault("LIBGL_ALWAYS_SOFTWARE", "1")
+    # Raise the image allocation limit so very tall / high-resolution
+    # long-strip images (e.g. 4000×40000) can be decoded without Qt
+    # rejecting them.  0 = unlimited.
+    os.environ.setdefault("QT_IMAGEIO_MAXALLOC", "0")
 
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseSoftwareOpenGL, True)
     app = QApplication(sys.argv)

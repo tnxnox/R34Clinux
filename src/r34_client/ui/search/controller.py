@@ -87,6 +87,14 @@ def search_finished(window: MainWindow, token: int, result: object) -> None:
         item.setData(Qt.ItemDataRole.UserRole, post)
         window.results_list.addItem(item)
 
+    update_related_tags(window, posts)
+    window._update_action_state()
+
+    # Warm the cache BEFORE selecting the first row so the background
+    # prefetch has a head start before show_post checks the cache.
+    if posts:
+        window._prefetch_images(posts)
+
     if posts:
         if window.left_tabs.currentWidget() is window.results_list:
             window.results_list.setCurrentRow(0)
@@ -95,13 +103,6 @@ def search_finished(window: MainWindow, token: int, result: object) -> None:
         window.preview_label.setText("No posts matched the search query.")
         window.meta_view.setPlainText("No results.")
         window._set_status("Search completed with no results.")
-
-    update_related_tags(window, posts)
-    window._update_action_state()
-
-    # Warm the cache: prefetch preview images for all results on this page.
-    if posts:
-        window._prefetch_images(posts)
 
 
 def refresh_favorites(window: MainWindow) -> None:
@@ -203,6 +204,11 @@ def favorites_loaded(window: MainWindow, token: int, result: object) -> None:
         item.setData(Qt.ItemDataRole.UserRole, post)
         window.favorites_list.addItem(item)
 
+    # Warm the cache BEFORE restoring the selection so the background
+    # prefetch has a head start before show_post checks the cache.
+    if window.favorite_posts:
+        window._prefetch_images(window.favorite_posts)
+
     should_restore_selection = (
         window.left_tabs.currentWidget() is window.favorites_list
         or previous_current_id is not None
@@ -248,10 +254,6 @@ def favorites_loaded(window: MainWindow, token: int, result: object) -> None:
     else:
         window._set_right_status(f"Local favorites loaded ({len(window.favorite_posts)} posts).")
     window._update_action_state()
-
-    # Warm the cache for J/K navigation through favorites.
-    if window.favorite_posts:
-        window._prefetch_images(window.favorite_posts)
 
 
 def favorites_failed(window: MainWindow, token: int, error_text: str) -> None:
