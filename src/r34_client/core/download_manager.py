@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-import os
+import logging
+import shutil
 import time
 import json
+import os
 import requests
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -12,10 +14,19 @@ if TYPE_CHECKING:
     from r34_client.core.settings import AppSettings
     from r34_client.core.db import LocalFavoritesStore
 
+logger = logging.getLogger(__name__)
+
+# Maximum allowed download size: 500 MB
+MAX_DOWNLOAD_BYTES = 500 * 1024 * 1024
+
 
 class DownloadManager:
     def __init__(self, db: LocalFavoritesStore) -> None:
         self.db = db
+
+    def _sanitize_path_segment(self, segment: str) -> str:
+        """Sanitize a single path segment, allowing only safe characters."""
+        return "".join(c for c in segment if c.isalnum() or c in (" ", ".", "_", "-")).strip(". ")
 
     def _format_template(self, template: str, post: Post, is_path: bool = False) -> str:
         def sanitize(segment: str) -> str:
@@ -33,12 +44,26 @@ class DownloadManager:
             formatted = str(post.id)
 
         if is_path:
-            # For paths, we split by / and sanitize each segment to avoid path traversal
+            # For paths, split by / and sanitize each segment to avoid path traversal
             segments = formatted.replace("\\", "/").split("/")
-            sanitized_segments = [sanitize(s) for s in segments if s.strip() and s.strip() != ".."]
-            return os.path.join(*sanitized_segments) if sanitized_segments else ""
+            sanitized_segments = [
+                self._sanitize_path_segment(s)
+                for s in segments
+                if s.strip() and self._sanitize_path_segment(s.strip()) not in (".", "..", "~")
+            ]
+            # Build result and verify it stays within base directory (resolved later)
+            return str(Path(*sanitized_segments)) if sanitized_segments else ""
         else:
             return sanitize(formatted)
+
+    def _validate_path_within_base(self, full_path: Path, base_dir: Path) -> None:
+        """Ensure the resolved path stays within the base directory (path traversal guard)."""
+        resolved_full = full_path.resolve()
+        resolved_base = base_dir.resolve()
+        if not str(resolved_full).startswith(str(resolved_base)):
+            raise ValueError(
+                f"Path traversal detected: {resolved_full} is outside {resolved_base}"
+            )
 
     def format_filename(self, post: Post, template: str, use_sample: bool = False) -> str:
         url = post.sample_url if use_sample and post.sample_url else post.file_url
@@ -55,6 +80,18 @@ class DownloadManager:
         if not name:
             name = str(post.id)
         return f"{name}{ext}"
+
+    def _check_disk_space(self, dest: Path, required_bytes: int) -> None:
+        """Check that there's enough free disk space at the destination."""
+        try:
+            stat = shutil.disk_usage(dest.parent)
+            if stat.free < required_bytes:
+                raise RuntimeError(
+                    f"Insufficient disk space: need {required_bytes / (1024*1024):.1f} MB, "
+                    f"have {stat.free / (1024*1024):.1f} MB at {dest.parent}"
+                )
+        except OSError as e:
+            logger.warning("Could not check disk space: %s", e)
 
     def download_post(self, post: Post, settings: AppSettings) -> Path | None:
         if not post.file_url and not post.sample_url:
@@ -79,11 +116,21 @@ class DownloadManager:
 
         dest = Path(base_dir) / subfolder / filename
 
+        # Validate path stays within base directory (path traversal protection)
+        self._validate_path_within_base(dest, Path(base_dir))
+
         # Handle filename collisions
         if dest.exists():
             dest = dest.with_name(f"{dest.stem}_{post.id}{dest.suffix}")
 
-        dest.parent.mkdir(parents=True, exist_ok=True)
+        # Handle unwritable download path
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            raise PermissionError(
+                f"Cannot write to download directory: {dest.parent}. "
+                "Check directory permissions or configure a different download path in Settings."
+            )
 
         url = post.sample_url if settings.download_use_sample and post.sample_url else post.file_url
         if not url:
@@ -100,16 +147,56 @@ class DownloadManager:
         for attempt in range(max_retries + 1):
             try:
                 with requests.get(url, timeout=60, stream=True, headers=headers) as response:
+                    # Graceful error for deleted content (HTTP 404/410)
+                    if response.status_code in (404, 410):
+                        raise RuntimeError(
+                            f"Post #{post.id} no longer available on server "
+                            f"(HTTP {response.status_code}) - the content may have been deleted."
+                        )
                     response.raise_for_status()
 
-                    with dest.open("wb") as f:
-                        for chunk in response.iter_content(chunk_size=1024 * 64):
-                            if chunk:
-                                f.write(chunk)
+                    # Check Content-Length to prevent oversized downloads
+                    content_length = response.headers.get("content-length")
+                    if content_length:
+                        expected_size = int(content_length)
+                        if expected_size > MAX_DOWNLOAD_BYTES:
+                            raise RuntimeError(
+                                f"Download too large: {expected_size / (1024*1024):.1f} MB "
+                                f"(max {MAX_DOWNLOAD_BYTES / (1024*1024):.0f} MB)"
+                            )
+                        # Check disk space beforehand
+                        self._check_disk_space(dest, expected_size * 2)
+
+                    # Check disk space with a reasonable default even without content-length
+                    if not content_length:
+                        self._check_disk_space(dest, MAX_DOWNLOAD_BYTES)
+
+                    bytes_downloaded = 0
+                    try:
+                        with dest.open("wb") as f:
+                            for chunk in response.iter_content(chunk_size=1024 * 64):
+                                if chunk:
+                                    bytes_downloaded += len(chunk)
+                                    if bytes_downloaded > MAX_DOWNLOAD_BYTES:
+                                        raise RuntimeError(
+                                            f"Download exceeded maximum size of "
+                                            f"{MAX_DOWNLOAD_BYTES / (1024*1024):.0f} MB"
+                                        )
+                                    f.write(chunk)
+                    except PermissionError:
+                        raise PermissionError(
+                            f"Cannot write to {dest}. "
+                            "Check directory permissions or configure a different download path in Settings."
+                        )
                 break  # Success
             except requests.RequestException as e:
                 if attempt < max_retries:
-                    time.sleep(2**attempt)  # Exponential backoff
+                    wait = 2**attempt
+                    logger.warning(
+                        "Download attempt %d/%d failed for post %d: %s. Retrying in %ds...",
+                        attempt + 1, max_retries + 1, post.id, e, wait,
+                    )
+                    time.sleep(wait)
                     continue
                 else:
                     if dest.exists():
