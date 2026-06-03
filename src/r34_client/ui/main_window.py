@@ -225,6 +225,8 @@ class MainWindow(QMainWindow):
         friends_layout.addWidget(self.friends_list, 1)
 
         friends_layout.addWidget(QLabel("Friend's Favorites"))
+        self.friend_page_label = QLabel("")
+        friends_layout.addWidget(self.friend_page_label)
         friends_layout.addWidget(self.friend_posts_list, 2)
 
         self.left_tabs = QTabWidget()
@@ -260,6 +262,9 @@ class MainWindow(QMainWindow):
         self._download_token = 0
         self._hydrate_token = 0
         self._friend_fetch_token = 0
+        self._friend_current_page = 0
+        self._friend_user_id: str = ""
+        self._friend_has_more = False
         self._rate_limit = DegradedModeController()
         # Keep remote mutation flow paced even under large pending queues.
         self._remote_mutation_bucket = TokenBucket(capacity=8.0, refill_rate_per_second=1.25)
@@ -654,14 +659,32 @@ class MainWindow(QMainWindow):
     def _log_sync_debug(self, title: str, details: str) -> None:
         status_feature.log_sync_debug(self, title, details)
 
+    def _update_friend_page_label(self) -> None:
+        if self._friend_user_id:
+            page_num = self._friend_current_page + 1
+            label = f"Page {page_num}"
+            if not self._friend_has_more and self.friend_posts:
+                label += " (last)"
+            elif self._friend_has_more:
+                label += "+"
+            self.friend_page_label.setText(label)
+        else:
+            self.friend_page_label.setText("")
+
     def search(self) -> None:
         search_feature.search(self)
 
     def next_page(self) -> None:
-        search_feature.next_page(self)
+        if self.left_tabs.currentWidget() is self.friends_tab:
+            friends_feature.next_friend_page(self)
+        else:
+            search_feature.next_page(self)
 
     def previous_page(self) -> None:
-        search_feature.previous_page(self)
+        if self.left_tabs.currentWidget() is self.friends_tab:
+            friends_feature.prev_friend_page(self)
+        else:
+            search_feature.previous_page(self)
 
     def _run_search(self) -> None:
         search_feature.run_search(self)

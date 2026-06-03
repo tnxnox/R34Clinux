@@ -7,8 +7,8 @@ RULE34_WIMG_HOST = "wimg.rule34.xxx"
 RULE34_IMG_HOST = "img.rule34.xxx"
 
 
-def favorites_view_url(user_id: str) -> str:
-    return f"{RULE34_WEB_BASE_URL}/index.php?page=favorites&s=view&id={user_id.strip()}"
+def favorites_view_url(user_id: str, page: int = 0) -> str:
+    return f"{RULE34_WEB_BASE_URL}/index.php?page=favorites&s=view&id={user_id.strip()}&pid={page}"
 
 
 def favorites_list_url() -> str:

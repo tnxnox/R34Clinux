@@ -75,11 +75,11 @@ def _hydrate_posts_from_api(client, posts: list[Post]) -> None:
             continue
 
 
-def _fetch_friend_favorites_impl(client, user_id: str, solver_url: str) -> list[Post]:
-    url = favorites_view_url(user_id)
+def _fetch_friend_favorites_impl(client, user_id: str, solver_url: str, page: int = 0) -> list[Post]:
+    url = favorites_view_url(user_id, page=page)
     html = _fetch_page(url, flare_solver_url=solver_url)
     if html is None:
-        msg = f"Failed to fetch favorites for user {user_id}"
+        msg = f"Failed to fetch favorites for user {user_id} (page {page})"
         raise RuntimeError(msg)
     posts = _parse_friend_favorites(html)
     _hydrate_posts_from_api(client, posts)
@@ -181,17 +181,47 @@ def load_friend_favorites(window: MainWindow, item: object = None) -> None:
     user_id = str(friend["user_id"])
     solver_url = window.settings.flaresolverr_url
 
+    window._friend_current_page = 0
+    window._friend_user_id = user_id
+    _fetch_friend_page(window, user_id, solver_url, page=0)
+
+
+def _fetch_friend_page(window: MainWindow, user_id: str, solver_url: str, page: int) -> None:
     window._friend_fetch_token += 1
     token = window._friend_fetch_token
 
     window.friend_posts_list.clear()
     window.friend_posts = []
-    window._set_status(f"Loading favorites for user {user_id}...")
+    window._set_status(f"Loading favorites for user {user_id} (page {page + 1})...")
 
-    worker = FunctionWorker(_fetch_friend_favorites_impl, window.client, user_id, solver_url)
+    worker = FunctionWorker(_fetch_friend_favorites_impl, window.client, user_id, solver_url, page)
     worker.signals.finished.connect(lambda result: _friend_favorites_fetched(window, token, result))
     worker.signals.failed.connect(window._operation_failed)
     window._start_worker(worker, workload="general")
+
+
+def next_friend_page(window: MainWindow) -> None:
+    if not window._friend_user_id:
+        return
+    window._friend_current_page += 1
+    _fetch_friend_page(
+        window,
+        window._friend_user_id,
+        window.settings.flaresolverr_url,
+        window._friend_current_page,
+    )
+
+
+def prev_friend_page(window: MainWindow) -> None:
+    if not window._friend_user_id or window._friend_current_page <= 0:
+        return
+    window._friend_current_page -= 1
+    _fetch_friend_page(
+        window,
+        window._friend_user_id,
+        window.settings.flaresolverr_url,
+        window._friend_current_page,
+    )
 
 
 def _friend_favorites_fetched(window: MainWindow, token: int, result: object) -> None:
@@ -217,6 +247,12 @@ def _friend_favorites_fetched(window: MainWindow, token: int, result: object) ->
         window.friend_posts_list.addItem(item)
 
     window.friend_posts = posts
+    # Detect whether there are more pages to load.
+    window._friend_has_more = len(posts) > 0
+
+    # Update the friend‑specific page label.
+    window._update_friend_page_label()
+
     # Warm the cache BEFORE selecting the first row so the background
     # prefetch has a head start before show_post checks the cache.
     if posts:

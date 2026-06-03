@@ -17,11 +17,15 @@ from r34_client.api.urls import (
 class UrlsTests(unittest.TestCase):
     def test_favorites_view_url(self) -> None:
         url = favorites_view_url("42")
-        self.assertEqual(url, f"{RULE34_WEB_BASE_URL}/index.php?page=favorites&s=view&id=42")
+        self.assertEqual(url, f"{RULE34_WEB_BASE_URL}/index.php?page=favorites&s=view&id=42&pid=0")
 
     def test_favorites_view_url_strips_whitespace(self) -> None:
         url = favorites_view_url("  42  ")
-        self.assertEqual(url, f"{RULE34_WEB_BASE_URL}/index.php?page=favorites&s=view&id=42")
+        self.assertEqual(url, f"{RULE34_WEB_BASE_URL}/index.php?page=favorites&s=view&id=42&pid=0")
+
+    def test_favorites_view_url_with_page(self) -> None:
+        url = favorites_view_url("42", page=3)
+        self.assertEqual(url, f"{RULE34_WEB_BASE_URL}/index.php?page=favorites&s=view&id=42&pid=3")
 
     def test_favorites_list_url(self) -> None:
         url = favorites_list_url()
