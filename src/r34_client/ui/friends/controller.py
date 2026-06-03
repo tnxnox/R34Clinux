@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import signal
 from typing import TYPE_CHECKING
 
 import requests
@@ -13,35 +12,6 @@ from r34_client.core.worker import FunctionWorker
 
 if TYPE_CHECKING:
     from ..main_window import MainWindow
-
-
-def _timeout_handler(signum, frame):  # type: ignore[no-untyped-def]
-    """Handler for SIGALRM timeout signal."""
-    raise TimeoutError("Worker operation exceeded maximum time limit")
-
-
-def _fetch_friend_favorites_with_timeout(user_id: str, solver_url: str, timeout_sec: int = 120) -> list[Post]:
-    """Fetch friend favorites with a timeout guarantee.
-    
-    Args:
-        user_id: The friend's user ID
-        solver_url: FlareSolverr server URL
-        timeout_sec: Maximum time to wait in seconds
-    
-    Returns:
-        List of Post objects
-    
-    Raises:
-        TimeoutError: If operation exceeds timeout_sec
-        RuntimeError: If fetch fails
-    """
-    old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
-    signal.alarm(timeout_sec)
-    try:
-        return _fetch_friend_favorites_impl(user_id, solver_url)
-    finally:
-        signal.alarm(0)  # Cancel alarm
-        signal.signal(signal.SIGALRM, old_handler)  # Restore original handler
 
 
 
@@ -205,7 +175,7 @@ def load_friend_favorites(window: MainWindow, item: object = None) -> None:
     window.friend_posts = []
     window._set_status(f"Loading favorites for user {user_id}...")
 
-    worker = FunctionWorker(_fetch_friend_favorites_with_timeout, user_id, solver_url)
+    worker = FunctionWorker(_fetch_friend_favorites_impl, user_id, solver_url)
     worker.signals.finished.connect(lambda result: _friend_favorites_fetched(window, token, result))
     worker.signals.failed.connect(window._operation_failed)
     window._start_worker(worker, workload="general")
