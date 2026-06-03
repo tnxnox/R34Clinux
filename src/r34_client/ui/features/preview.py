@@ -43,11 +43,11 @@ def show_post(window: MainWindow, post: Post, allow_hydrate: bool = True) -> Non
         window.preview_label.setText("Loading preview...")
 
         window._hydrate_token += 1
-        token = window._hydrate_token
+        h_token = window._hydrate_token
 
         worker = FunctionWorker(hydrate_post, window, post)
-        worker.signals.finished.connect(lambda hydrated: show_hydrated_post(window, token, post, hydrated))
-        worker.signals.failed.connect(lambda error_text: show_hydration_failed(window, token, post, error_text))
+        worker.signals.finished.connect(lambda hydrated, t=h_token: show_hydrated_post(window, t, post, hydrated))
+        worker.signals.failed.connect(lambda error_text, t=h_token: show_hydration_failed(window, t, post, error_text))
         window._start_worker(worker, workload="preview")
 
     if is_video_post(post):
