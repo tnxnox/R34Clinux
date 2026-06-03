@@ -147,6 +147,21 @@ class FlareSolverrFavoritesClient:
             return
         self._debug(f"destroy_session: ignored status={status} message={message}")
 
+    def close(self) -> None:
+        """Close the underlying requests session and destroy the FlareSolverr session."""
+        try:
+            self._destroy_session()
+        finally:
+            self._session.close()
+
+    def __enter__(self) -> FlareSolverrFavoritesClient:
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:  # type: ignore[no-untyped-def]
+        """Context manager exit; close session resources."""
+        self.close()
+
     @staticmethod
     def _is_session_error(message: str) -> bool:
         lowered = (message or "").lower()

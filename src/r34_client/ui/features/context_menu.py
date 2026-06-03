@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QMenu
 from r34_client.core.models import Post
 
 if TYPE_CHECKING:
+    from PySide6.QtCore import QPoint
     from ..main_window import MainWindow
 
 
@@ -35,7 +36,7 @@ def selected_favorite_posts(window: MainWindow) -> list[Post]:
     return [current] if current is not None else []
 
 
-def open_results_context_menu(window: MainWindow, position) -> None:
+def open_results_context_menu(window: MainWindow, position: QPoint) -> None:
     item = window.results_list.itemAt(position)
     if item is None:
         return
@@ -72,7 +73,7 @@ def open_results_context_menu(window: MainWindow, position) -> None:
     menu.exec(window.results_list.viewport().mapToGlobal(position))
 
 
-def open_favorites_context_menu(window: MainWindow, position) -> None:
+def open_favorites_context_menu(window: MainWindow, position: QPoint) -> None:
     item = window.favorites_list.itemAt(position)
     if item is None:
         return
@@ -119,7 +120,7 @@ def open_favorites_context_menu(window: MainWindow, position) -> None:
     menu.exec(window.favorites_list.viewport().mapToGlobal(position))
 
 
-def open_friend_posts_context_menu(window: MainWindow, position) -> None:
+def open_friend_posts_context_menu(window: MainWindow, position: QPoint) -> None:
     item = window.friend_posts_list.itemAt(position)
     if item is None:
         return

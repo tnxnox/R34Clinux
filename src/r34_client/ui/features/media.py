@@ -71,7 +71,8 @@ def show_video_preview(window: MainWindow, post: Post) -> None:
             window._set_status("Playing video preview in-app (VLC compatibility backend).")
         else:
             window._set_status("Playing video preview in-app.")
-    except Exception as exc:
+    except (RuntimeError, OSError) as exc:
+        # Catch platform-specific video playback errors (e.g., codec issues, permission errors)
         playback_error = str(exc)
         if _ensure_fallback_backend(window):
             try:
@@ -79,7 +80,8 @@ def show_video_preview(window: MainWindow, post: Post) -> None:
                 on_volume_changed(window, window.volume_slider.value())
                 window._set_status("Playing video preview in-app (VLC compatibility backend).")
                 return
-            except Exception as fallback_exc:
+            except (RuntimeError, OSError) as fallback_exc:
+                # Fallback backend also failed
                 playback_error = str(fallback_exc)
 
         hide_video_view(window)
@@ -162,8 +164,8 @@ def on_seek_slider_released(window: MainWindow) -> None:
                 window._pending_seek_target_ms = target
                 window._pending_seek_deadline = time.monotonic() + 2.0
                 return
-            except Exception:
-                # Fall back to direct seek methods below.
+            except (RuntimeError, OSError, ValueError):
+                # Fall back to direct seek methods below if playback restart fails
                 pass
 
     window.video_player.set_time(target)
