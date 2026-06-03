@@ -36,7 +36,9 @@ def handle_selection_change(window: MainWindow, current, _previous) -> None:
 
 
 def show_post(window: MainWindow, post: Post, allow_hydrate: bool = True) -> None:
-    if allow_hydrate and needs_hydration(post, window._metadata_hydrated_ids):
+    needs_hydrate = allow_hydrate and needs_hydration(post, window._metadata_hydrated_ids)
+
+    if needs_hydrate:
         window.meta_view.setPlainText("Loading post details...")
         window.preview_label.setText("Loading preview...")
 
@@ -47,13 +49,14 @@ def show_post(window: MainWindow, post: Post, allow_hydrate: bool = True) -> Non
         worker.signals.finished.connect(lambda hydrated: show_hydrated_post(window, token, post, hydrated))
         worker.signals.failed.connect(lambda error_text: show_hydration_failed(window, token, post, error_text))
         window._start_worker(worker, workload="preview")
-        return
 
     if is_video_post(post):
-        window._show_video_preview(post)
+        if not needs_hydrate:
+            window._show_video_preview(post)
         return
 
-    window.meta_view.setPlainText(window._format_post_metadata(post))
+    if not needs_hydrate:
+        window.meta_view.setPlainText(window._format_post_metadata(post))
 
     window._preview_token += 1
     token = window._preview_token
