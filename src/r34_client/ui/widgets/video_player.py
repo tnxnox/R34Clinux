@@ -35,7 +35,8 @@ class VideoPlayer:
             self._vlc_player = self._vlc_instance.media_player_new()
             self._fallback_active = fallback
             return True
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to set up VLC backend (fallback=%s): %s", fallback, exc)
             self._vlc_instance = None
             self._vlc_player = None
             self._fallback_active = False
