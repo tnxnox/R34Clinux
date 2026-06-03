@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 import requests
@@ -10,6 +11,46 @@ from r34_client.core.models import Post
 
 if TYPE_CHECKING:
     from ..main_window import MainWindow
+
+
+def _fetch_page(url: str, flare_solver_url: str = "") -> str | None:
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (X11; Linux x86_64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+    }
+
+    try:
+        response = requests.get(url, timeout=20, headers=headers)
+        if response.status_code == 200:
+            return response.text
+    except requests.RequestException:
+        pass
+
+    if not flare_solver_url.strip():
+        return None
+
+    try:
+        payload = {
+            "cmd": "request.get",
+            "url": url,
+            "maxTimeout": 30000,
+        }
+        resp = requests.post(
+            f"{flare_solver_url.rstrip('/')}/v1",
+            json=payload,
+            timeout=35,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        solution = body.get("solution", {})
+        return solution.get("response")
+    except (requests.RequestException, json.JSONDecodeError, KeyError, TypeError):
+        return None
 
 
 def add_friend_dialog(window: MainWindow) -> None:
@@ -114,15 +155,13 @@ def _fetch_and_display_friend_favorites(window: MainWindow, user_id: str) -> Non
     window.friend_posts = []
 
     url = favorites_view_url(user_id)
+    solver_url = window.settings.flaresolverr_url if window.settings.flaresolverr_enabled else ""
 
-    try:
-        response = requests.get(url, timeout=20)
-        response.raise_for_status()
-    except requests.RequestException:
+    html = _fetch_page(url, flare_solver_url=solver_url)
+    if html is None:
         window._set_status(f"Failed to fetch favorites for user {user_id}")
         return
 
-    html = response.text
     body = extract_body_text(html)
     items = extract_items(body)
 
