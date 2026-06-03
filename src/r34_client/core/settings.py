@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, QStandardPaths
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -54,7 +57,7 @@ class SettingsStore:
         return cleaned[: max(0, int(limit))]
 
     def load(self) -> AppSettings:
-        return AppSettings(
+        settings = AppSettings(
             user_id=self._settings.value("api/user_id", "", str),
             api_key=self._settings.value("api/api_key", "", str),
             website_username=self._settings.value("sync/website_username", "", str),
@@ -72,6 +75,52 @@ class SettingsStore:
             download_sidecar_format=self._settings.value("downloads/sidecar_format", "json", str),
             download_max_retries=self._settings.value("downloads/max_retries", 3, int),
         )
+        self._validate_settings(settings)
+        return settings
+
+    def _validate_settings(self, settings: AppSettings) -> None:
+        """Validate loaded settings and log warnings for any issues."""
+        # Validate download directory exists or can be created
+        dl_dir = settings.download_directory
+        if dl_dir:
+            dl_path = Path(dl_dir)
+            if dl_path.exists() and not dl_path.is_dir():
+                logger.warning("Download directory '%s' exists but is not a directory", dl_dir)
+            elif not dl_path.exists():
+                try:
+                    dl_path.mkdir(parents=True, exist_ok=True)
+                except PermissionError:
+                    logger.warning("Cannot create download directory '%s': permission denied", dl_dir)
+
+        # Validate page_size
+        if settings.page_size < 1:
+            logger.warning("page_size is %d, resetting to default 50", settings.page_size)
+            settings.page_size = 50
+        elif settings.page_size > 1000:
+            logger.warning("page_size is %d (very large), may cause performance issues", settings.page_size)
+
+        # Validate download_max_retries
+        if settings.download_max_retries < 0:
+            logger.warning("download_max_retries is %d, resetting to 0", settings.download_max_retries)
+            settings.download_max_retries = 0
+
+        # Validate sidecar format
+        valid_formats = {"json", "txt", "both"}
+        if settings.download_sidecar_format.lower() not in valid_formats:
+            logger.warning(
+                "Unknown sidecar format '%s', valid options: %s. Resetting to 'json'.",
+                settings.download_sidecar_format, ", ".join(sorted(valid_formats)),
+            )
+            settings.download_sidecar_format = "json"
+
+        # Validate sync conflict strategy
+        valid_strategies = {"merge", "local_wins", "remote_wins"}
+        if settings.sync_conflict_strategy.lower() not in valid_strategies:
+            logger.warning(
+                "Unknown sync conflict strategy '%s', valid options: %s. Resetting to 'merge'.",
+                settings.sync_conflict_strategy, ", ".join(sorted(valid_strategies)),
+            )
+            settings.sync_conflict_strategy = "merge"
 
     def save(self, settings: AppSettings) -> None:
         self._settings.setValue("api/user_id", settings.user_id)
