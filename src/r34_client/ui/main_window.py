@@ -48,7 +48,7 @@ from r34_client.ui.helpers.post import (
     needs_hydration,
     probe_file_size,
 )
-from r34_client.ui.helpers.prefetch import ImageCache, prefetch_adjacent, prefetch_images_batch
+from r34_client.ui.helpers.prefetch import ImageCache, prefetch_adjacent, prefetch_images_batch, prefetch_metadata_batch
 from r34_client.ui.features import autocomplete as autocomplete_feature
 from r34_client.ui.features import context_menu as context_menu_feature
 from r34_client.ui.dialogs import controls as dialogs_feature
@@ -851,11 +851,12 @@ class MainWindow(QMainWindow):
     def _preview_loaded(self, token: int, data: object, post: Post) -> None:
         preview_feature.preview_loaded(self, token, data, post)
 
-    def _prefetch_images(self, posts: list[Post], *, limit: int = 42) -> None:
+    def _prefetch_images(self, posts: list[Post], *, limit: int = 5) -> None:
         """Prefetch preview images for *posts* in the background.
 
         Skips posts already cached.  Use after search results load to warm the
-        cache for all visible results.
+        cache for all visible results.  Also triggers a background metadata
+        (hydration) prefetch for the same window.
         """
         if not posts or not self.settings.user_id:
             return
@@ -869,8 +870,15 @@ class MainWindow(QMainWindow):
         worker.signals.failed.connect(lambda _: None)  # Silently swallow errors.
         self._start_worker(worker, workload="general")
 
-    def _prefetch_adjacent(self, post: Post, *, count: int = 2) -> None:
-        """Prefetch posts around *post* in the current active list."""
+        # Also prefetch metadata for the first *limit* posts.
+        self._prefetch_metadata_for_posts(posts, start=0, count=limit)
+
+    def _prefetch_adjacent(self, post: Post, *, count: int = 5) -> None:
+        """Prefetch posts around *post* in the current active list.
+
+        Warms both the image cache and the metadata for upcoming posts so
+        J/K navigation is instant.
+        """
         posts = self.current_posts or self.favorite_posts or self.friend_posts or []
         if not posts or not self.settings.user_id:
             return
@@ -884,6 +892,113 @@ class MainWindow(QMainWindow):
         )
         worker.signals.failed.connect(lambda _: None)
         self._start_worker(worker, workload="general")
+
+        # Also prefetch metadata for the same range.
+        self._prefetch_metadata_for_posts(posts, around=post, count=count)
+
+    def _prefetch_metadata_for_posts(
+        self,
+        posts: list[Post],
+        *,
+        around: Post | None = None,
+        start: int = 0,
+        count: int = 5,
+    ) -> None:
+        """Hydrate upcoming posts in the background.
+
+        Picks up to *count* posts starting from *start* (or centred on
+        *around*), calls the API to fill in missing fields, and updates the
+        list items in-place on the main thread.
+        """
+        if not posts or not self.settings.has_credentials:
+            return
+
+        # Pick the slice of posts to prefetch.
+        if around is not None:
+            try:
+                idx = posts.index(around)
+            except ValueError:
+                return
+            candidates = []
+            # Next items (most likely navigation targets)
+            candidates.extend(posts[idx + 1 : idx + 1 + count])
+            # Items before the current one
+            start_before = max(0, idx - count)
+            candidates.extend(posts[start_before:idx])
+        else:
+            candidates = posts[start : start + count]
+
+        if not candidates:
+            return
+
+        # Filter to only posts that still need hydration.
+        todo = [p for p in candidates if needs_hydration(p, self._metadata_hydrated_ids)]
+        if not todo:
+            return
+
+        worker = FunctionWorker(
+            prefetch_metadata_batch,
+            todo,
+            self.client,
+            limit=len(todo),
+        )
+        worker.signals.finished.connect(self._apply_prefetched_metadata)
+        worker.signals.failed.connect(lambda _: None)
+        self._start_worker(worker, workload="general")
+
+    def _apply_prefetched_metadata(self, result: object) -> None:
+        """Callback: apply hydrated Post dict to the active list."""
+        if not isinstance(result, dict):
+            return
+
+        # Determine which list pair to update.
+        if self.left_tabs.currentWidget() is self.favorites_list:
+            list_widget = self.favorites_list
+            store = self.favorite_posts
+        elif self.left_tabs.currentWidget() is self.friends_tab:
+            list_widget = self.friend_posts_list
+            store = self.friend_posts
+        else:
+            list_widget = self.results_list
+            store = self.current_posts
+
+        # Helper: find item by post id.
+        def _find_item(post_id: int):
+            for row in range(list_widget.count()):
+                item = list_widget.item(row)
+                if item is None:
+                    continue
+                candidate = item.data(Qt.ItemDataRole.UserRole)
+                if isinstance(candidate, Post) and candidate.id == post_id:
+                    return item, row
+            return None, -1
+
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QListWidgetItem
+
+        changed: set[int] = set()
+        for post_id, hydrated in result.items():
+            if not isinstance(hydrated, Post):
+                continue
+            self._metadata_hydrated_ids.add(post_id)
+            changed.add(post_id)
+
+            # Update the list item.
+            item, _ = _find_item(post_id)
+            if item is not None:
+                item.setData(Qt.ItemDataRole.UserRole, hydrated)
+                item.setText(self._format_post_tile(hydrated))
+
+            # Update the stored list in-place.
+            for i, p in enumerate(store):
+                if p.id == post_id:
+                    store[i] = hydrated
+                    break
+
+        # If the currently shown post got hydrated, refresh the preview panel.
+        current = self._current_post()
+        if current is not None and current.id in changed:
+            self._show_post(current, allow_hydrate=False)
 
     def _update_preview_scaling(self) -> None:
         preview_feature.update_preview_scaling(self)

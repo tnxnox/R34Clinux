@@ -76,7 +76,7 @@ def prefetch_images_batch(
     user_id: str,
     cache: ImageCache,
     *,
-    limit: int = 42,
+    limit: int = 5,
 ) -> int:
     """Download preview images for *posts* not already in *cache*.
 
@@ -131,7 +131,7 @@ def prefetch_adjacent(
     user_id: str,
     cache: ImageCache,
     *,
-    count: int = 2,
+    count: int = 5,
 ) -> int:
     """Prefetch *count* posts on each side of *current_post* in *all_posts*.
 
@@ -151,3 +151,32 @@ def prefetch_adjacent(
     candidates.extend(all_posts[start:idx])
 
     return prefetch_images_batch(candidates, user_id, cache)
+
+
+def prefetch_metadata_batch(
+    posts: list[Post],
+    client,
+    *,
+    limit: int = 5,
+) -> dict[int, Post]:
+    """Hydrate metadata for *posts* not yet fully populated.
+
+    Calls the API for each post that still has fields missing (score,
+    file_url, tags, etc.) and returns a dict mapping post_id to the
+    hydrated Post.  Runs synchronously — call from a background worker.
+    """
+    from r34_client.ui.helpers.post import needs_hydration
+
+    results: dict[int, Post] = {}
+    for post in posts[:limit]:
+        if post.id in results:
+            continue
+        if not needs_hydration(post, set()):
+            continue
+        try:
+            candidates = client.search_posts(f"id:{post.id}", 0, 1)
+            if candidates:
+                results[post.id] = candidates[0]
+        except Exception:
+            continue
+    return results
