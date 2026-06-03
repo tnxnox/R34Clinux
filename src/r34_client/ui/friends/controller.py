@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import requests
 
 from r34_client.api.flaresolverr_parsing import extract_body_text, extract_items
-from r34_client.api.urls import RULE34_WEB_BASE_URL
+from r34_client.api.urls import favorites_view_url
 from r34_client.core.models import Post
 
 if TYPE_CHECKING:
@@ -56,6 +55,7 @@ def add_friend_dialog(window: MainWindow) -> None:
 
 
 def remove_friend_dialog(window: MainWindow) -> None:
+    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QMessageBox
 
     item = window.friends_list.currentItem()
@@ -93,8 +93,11 @@ def _refresh_friends_list(window: MainWindow) -> None:
         window.friends_list.addItem(item)
 
 
-def load_friend_favorites(window: MainWindow) -> None:
-    item = window.friends_list.currentItem()
+def load_friend_favorites(window: MainWindow, item: object = None) -> None:
+    from PySide6.QtCore import Qt
+
+    if item is None:
+        item = window.friends_list.currentItem()
     if item is None:
         return
     friend = item.data(Qt.ItemDataRole.UserRole)
@@ -110,7 +113,7 @@ def _fetch_and_display_friend_favorites(window: MainWindow, user_id: str) -> Non
     window.friend_posts_list.clear()
     window.friend_posts = []
 
-    url = f"{RULE34_WEB_BASE_URL}/index.php?page=favorites&s=view&id={user_id}"
+    url = favorites_view_url(user_id)
 
     try:
         response = requests.get(url, timeout=20)

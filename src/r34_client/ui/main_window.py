@@ -181,7 +181,7 @@ class MainWindow(QMainWindow):
 
         self.friends_list = QListWidget()
         self.friends_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.friends_list.currentItemChanged.connect(self._on_friend_selected)
+        self.friends_list.itemClicked.connect(self._on_friend_selected)
 
         self.add_friend_button = QPushButton("Add Friend")
         self.add_friend_button.clicked.connect(self._add_friend_dialog)
@@ -733,8 +733,8 @@ class MainWindow(QMainWindow):
     def _remove_friend_dialog(self) -> None:
         friends_feature.remove_friend_dialog(self)
 
-    def _on_friend_selected(self, current: QListWidgetItem | None, _: QListWidgetItem | None) -> None:
-        friends_feature.load_friend_favorites(self)
+    def _on_friend_selected(self, item: QListWidgetItem | None) -> None:
+        friends_feature.load_friend_favorites(self, item)
 
     def _open_friend_posts_context_menu(self, position) -> None:
         context_menu_feature.open_friend_posts_context_menu(self, position)
