@@ -189,6 +189,7 @@ class FlareSolverrFavoritesClient:
                 response.raise_for_status()
             except requests.RequestException:
                 delay = 0.35 * attempt
+                logger.warning("FlareSolverr request.get failed (attempt %d/4): retrying in %.2fs", attempt, delay)
                 self._debug(f"request.get: transient failure attempt={attempt}/4 wait={delay:.2f}s")
                 self._session_ready = False
                 time.sleep(delay)
@@ -247,6 +248,7 @@ class FlareSolverrFavoritesClient:
                 response.raise_for_status()
             except requests.RequestException:
                 delay = 0.35 * attempt
+                logger.warning("FlareSolverr request.post failed (attempt %d/4): retrying in %.2fs", attempt, delay)
                 self._debug(f"request.post: transient failure attempt={attempt}/4 wait={delay:.2f}s")
                 self._session_ready = False
                 time.sleep(delay)
