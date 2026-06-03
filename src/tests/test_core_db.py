@@ -75,6 +75,54 @@ class LocalFavoritesStoreTests(unittest.TestCase):
             filtered_after = store.list_favorites(collection_name="Artists")
             self.assertEqual([post.id for post in filtered_after], [1])
 
+    def test_add_list_remove_friend(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "friends.db"
+            store = LocalFavoritesStore(database_path=db_path)
+
+            store.add_friend("123", "Alice", "my friend")
+            friends = store.list_friends()
+            self.assertEqual(len(friends), 1)
+            self.assertEqual(friends[0]["user_id"], "123")
+            self.assertEqual(friends[0]["display_name"], "Alice")
+            self.assertEqual(friends[0]["notes"], "my friend")
+
+            got = store.get_friend("123")
+            self.assertIsNotNone(got)
+            self.assertEqual(got["display_name"], "Alice")
+
+            store.remove_friend("123")
+            self.assertEqual(store.list_friends(), [])
+            self.assertIsNone(store.get_friend("123"))
+
+    def test_add_friend_deduplicates_by_user_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "friends.db"
+            store = LocalFavoritesStore(database_path=db_path)
+
+            store.add_friend("123", "Alice")
+            store.add_friend("123", "Bob")
+            friends = store.list_friends()
+            self.assertEqual(len(friends), 1)
+            self.assertEqual(friends[0]["display_name"], "Bob")
+
+    def test_list_friends_sorted_by_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "friends.db"
+            store = LocalFavoritesStore(database_path=db_path)
+
+            store.add_friend("2", "Zoe")
+            store.add_friend("1", "Alice")
+            store.add_friend("3", "bob")
+            names = [f["display_name"] for f in store.list_friends()]
+            self.assertEqual(names, ["Alice", "bob", "Zoe"])
+
+    def test_get_friend_returns_none_for_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "friends.db"
+            store = LocalFavoritesStore(database_path=db_path)
+            self.assertIsNone(store.get_friend("999"))
+
     def test_replace_all_preserves_collection_for_kept_posts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "favorites.db"

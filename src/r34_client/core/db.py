@@ -90,6 +90,16 @@ class LocalFavoritesStore:
                 """
             )
             connection.execute("CREATE INDEX IF NOT EXISTS idx_downloads_md5 ON downloads (md5)")
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS friends (
+                    user_id TEXT PRIMARY KEY,
+                    display_name TEXT NOT NULL,
+                    notes TEXT DEFAULT '',
+                    added_at INTEGER NOT NULL
+                )
+                """
+            )
             connection.commit()
 
     def is_downloaded(self, post_id: int, md5: str) -> bool:
@@ -353,3 +363,46 @@ class LocalFavoritesStore:
                 int(time.time()),
             ),
         )
+
+    def add_friend(self, user_id: str, display_name: str, notes: str = "") -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO friends (user_id, display_name, notes, added_at) VALUES (?, ?, ?, ?)",
+                (user_id.strip(), display_name.strip(), notes.strip(), int(time.time())),
+            )
+            connection.commit()
+
+    def remove_friend(self, user_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute("DELETE FROM friends WHERE user_id = ?", (user_id.strip(),))
+            connection.commit()
+
+    def list_friends(self) -> list[dict[str, str | int]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT user_id, display_name, notes, added_at FROM friends ORDER BY lower(display_name)"
+            ).fetchall()
+        return [
+            {
+                "user_id": str(row["user_id"]),
+                "display_name": str(row["display_name"]),
+                "notes": str(row["notes"]),
+                "added_at": int(row["added_at"]),
+            }
+            for row in rows
+        ]
+
+    def get_friend(self, user_id: str) -> dict[str, str | int] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT user_id, display_name, notes, added_at FROM friends WHERE user_id = ?",
+                (user_id.strip(),),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "user_id": str(row["user_id"]),
+            "display_name": str(row["display_name"]),
+            "notes": str(row["notes"]),
+            "added_at": int(row["added_at"]),
+        }

@@ -37,7 +37,11 @@ def invoke_global_navigation(window: MainWindow, callback: Callable[[], None]) -
 
 
 def active_posts_list(window: MainWindow) -> QListWidget:
-    return window.favorites_list if window.left_tabs.currentWidget() is window.favorites_list else window.results_list
+    if window.left_tabs.currentWidget() is window.favorites_list:
+        return window.favorites_list
+    if window.left_tabs.currentWidget() is window.friends_tab:
+        return window.friend_posts_list
+    return window.results_list
 
 
 def move_selection(window: MainWindow, delta: int) -> None:

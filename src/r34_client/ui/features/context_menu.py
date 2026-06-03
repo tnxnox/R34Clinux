@@ -117,3 +117,73 @@ def open_favorites_context_menu(window: MainWindow, position) -> None:
         )
 
     menu.exec(window.favorites_list.viewport().mapToGlobal(position))
+
+
+def open_friend_posts_context_menu(window: MainWindow, position) -> None:
+    item = window.friend_posts_list.itemAt(position)
+    if item is None:
+        return
+
+    if item not in window.friend_posts_list.selectedItems():
+        window.friend_posts_list.setCurrentItem(item)
+        item.setSelected(True)
+
+    selected_posts: list[Post] = []
+    for si in window.friend_posts_list.selectedItems():
+        post = si.data(Qt.ItemDataRole.UserRole)
+        if isinstance(post, Post):
+            selected_posts.append(post)
+    if not selected_posts:
+        current = window._current_post()
+        if current is not None:
+            selected_posts = [current]
+    if not selected_posts:
+        return
+
+    menu = QMenu(window)
+
+    if len(selected_posts) > 1:
+        download_action = menu.addAction(f"Download {len(selected_posts)} selected")
+        download_action.triggered.connect(lambda: window._download_multiple_posts(selected_posts))
+
+        open_action = menu.addAction(f"Open {len(selected_posts)} selected in browser")
+        open_action.triggered.connect(lambda: window._open_multiple_posts(selected_posts))
+    else:
+        post = selected_posts[0]
+        menu.addAction("Download").triggered.connect(lambda: window._download_post(post))
+        menu.addAction("Open in browser").triggered.connect(lambda: window._open_post_in_browser(post))
+
+    menu.addSeparator()
+
+    selected_not_favorited = [p for p in selected_posts if p.id not in window.favorite_ids]
+    selected_favorited = [p for p in selected_posts if p.id in window.favorite_ids]
+
+    if len(selected_posts) > 1:
+        if selected_not_favorited:
+            action = menu.addAction(f"Add {len(selected_not_favorited)} to favorites")
+            action.triggered.connect(lambda: window._add_multiple_favorites(selected_not_favorited))
+        if selected_favorited:
+            action = menu.addAction(f"Remove {len(selected_favorited)} from favorites")
+            action.triggered.connect(lambda: window._remove_multiple_favorites(selected_favorited))
+    else:
+        post = selected_posts[0]
+        if post.id in window.favorite_ids:
+            action = menu.addAction("Remove from favorites")
+            action.triggered.connect(lambda: window._remove_favorite(post))
+        else:
+            action = menu.addAction("Add to favorites")
+            action.triggered.connect(lambda: window._add_favorite(post))
+
+    menu.addSeparator()
+    assign_submenu = menu.addMenu("Add selected to collection")
+    new_collection_action = assign_submenu.addAction("New collection...")
+    new_collection_action.triggered.connect(
+        lambda: window._assign_selection_to_new_collection(selected_posts)
+    )
+    for collection in window.local_favorites.list_collections():
+        action = assign_submenu.addAction(collection)
+        action.triggered.connect(
+            lambda _checked=False, c=collection: window._assign_selection_to_collection(selected_posts, c)
+        )
+
+    menu.exec(window.friend_posts_list.viewport().mapToGlobal(position))

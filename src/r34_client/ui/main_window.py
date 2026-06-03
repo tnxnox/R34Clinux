@@ -53,6 +53,7 @@ from r34_client.ui.features import context_menu as context_menu_feature
 from r34_client.ui.dialogs import controls as dialogs_feature
 from r34_client.ui.features import downloads as downloads_feature
 from r34_client.ui.favorites import controller as favorites_feature
+from r34_client.ui.friends import controller as friends_feature
 from r34_client.ui.features import media as media_feature
 from r34_client.ui.features import navigation as navigation_feature
 from r34_client.ui.features import preview as preview_feature
@@ -78,6 +79,7 @@ class MainWindow(QMainWindow):
 
         self.current_posts: list[Post] = []
         self.favorite_posts: list[Post] = []
+        self.friend_posts: list[Post] = []
         self.favorite_ids: set[int] = set()
         self.current_page = 0
         self.current_query = ""
@@ -177,6 +179,22 @@ class MainWindow(QMainWindow):
         self.favorites_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.favorites_list.customContextMenuRequested.connect(self._open_favorites_context_menu)
 
+        self.friends_list = QListWidget()
+        self.friends_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.friends_list.currentItemChanged.connect(self._on_friend_selected)
+
+        self.add_friend_button = QPushButton("Add Friend")
+        self.add_friend_button.clicked.connect(self._add_friend_dialog)
+
+        self.remove_friend_button = QPushButton("Remove Friend")
+        self.remove_friend_button.clicked.connect(self._remove_friend_dialog)
+
+        self.friend_posts_list = QListWidget()
+        self.friend_posts_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.friend_posts_list.currentItemChanged.connect(self._handle_selection_change)
+        self.friend_posts_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.friend_posts_list.customContextMenuRequested.connect(self._open_friend_posts_context_menu)
+
         self.collection_filter = QComboBox()
         self.collection_filter.addItem("All Favorites", None)
         self.collection_filter.currentIndexChanged.connect(self._on_collection_filter_changed)
@@ -190,9 +208,25 @@ class MainWindow(QMainWindow):
         self.related_tags_list.itemClicked.connect(self._related_tag_selected)
         self.related_tags_list.setEnabled(False)
 
+        self.friends_tab = QWidget()
+        friends_layout = QVBoxLayout(self.friends_tab)
+        friends_layout.setContentsMargins(0, 0, 0, 0)
+
+        friend_buttons = QHBoxLayout()
+        friend_buttons.addWidget(self.add_friend_button)
+        friend_buttons.addWidget(self.remove_friend_button)
+        friends_layout.addLayout(friend_buttons)
+
+        friends_layout.addWidget(QLabel("Friends"))
+        friends_layout.addWidget(self.friends_list, 1)
+
+        friends_layout.addWidget(QLabel("Friend's Favorites"))
+        friends_layout.addWidget(self.friend_posts_list, 2)
+
         self.left_tabs = QTabWidget()
         self.left_tabs.addTab(self.results_list, "Search Results")
         self.left_tabs.addTab(self.favorites_list, "Favorites")
+        self.left_tabs.addTab(self.friends_tab, "Friends")
         self.left_tabs.currentChanged.connect(self._on_tab_changed)
 
         self.preview_label = QLabel("Search for a post to preview it here.")
@@ -291,6 +325,7 @@ class MainWindow(QMainWindow):
         self._update_action_state()
         # Startup should never block on remote sync; load local cache first.
         self._refresh_local_favorites()
+        friends_feature._refresh_friends_list(self)
         self._shutdown_in_progress = False
 
         if not self.settings.has_credentials:
@@ -692,6 +727,18 @@ class MainWindow(QMainWindow):
     def _operation_failed(self, error_text: str) -> None:
         favorites_feature.operation_failed(self, error_text)
 
+    def _add_friend_dialog(self) -> None:
+        friends_feature.add_friend_dialog(self)
+
+    def _remove_friend_dialog(self) -> None:
+        friends_feature.remove_friend_dialog(self)
+
+    def _on_friend_selected(self, current: QListWidgetItem | None, _: QListWidgetItem | None) -> None:
+        friends_feature.load_friend_favorites(self)
+
+    def _open_friend_posts_context_menu(self, position) -> None:
+        context_menu_feature.open_friend_posts_context_menu(self, position)
+
     def _handle_selection_change(self, current: QListWidgetItem | None, _: QListWidgetItem | None) -> None:
         preview_feature.handle_selection_change(self, current, _)
 
@@ -825,6 +872,8 @@ class MainWindow(QMainWindow):
     def _current_post(self) -> Post | None:
         if self.left_tabs.currentWidget() is self.favorites_list:
             item = self.favorites_list.currentItem()
+        elif self.left_tabs.currentWidget() is self.friends_tab:
+            item = self.friend_posts_list.currentItem()
         else:
             item = self.results_list.currentItem()
         if item is None:
