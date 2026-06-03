@@ -18,6 +18,27 @@ class VideoPlayer:
         self._fallback_active = True
         self._setup_backend(fallback=True)
 
+    def _argument_profiles(self, fallback: bool) -> list[list[str]]:
+        """Return progressively more conservative argument sets to try.
+
+        Returns a list of argument lists, ordered from most aggressive to
+        most conservative.  Each profile is tried in order until one
+        succeeds.
+        """
+        base = ["--no-video-title-show", "--network-caching=600", "--file-caching=300"]
+
+        if not fallback:
+            return [base[:]]
+
+        return [
+            # Profile 1 — hardware decode disabled, forced xcb output (default)
+            base + ["--avcodec-hw=none", "--vout=xcb_x11", "--codec=avcodec"],
+            # Profile 2 — alternative flags for VLC 4.0+ / different builds
+            base + ["--avcodec-hw=none", "--vout=xcb", "--codec=avcodec"],
+            # Profile 3 — no hardware opts at all
+            base[:],
+        ]
+
     def _setup_backend(self, fallback: bool) -> bool:
         if vlc is None:
             self._vlc_instance = None
@@ -25,22 +46,46 @@ class VideoPlayer:
             self._fallback_active = False
             return False
 
-        args = ["--no-video-title-show", "--network-caching=600", "--file-caching=300"]
-        if fallback:
-            # Compatibility profile avoids problematic GPU decode/output paths on some Linux systems.
-            args.extend(["--avcodec-hw=none", "--vout=xcb_x11", "--codec=avcodec"])
+        profiles = self._argument_profiles(fallback)
 
-        try:
-            self._vlc_instance = vlc.Instance(*args)
-            self._vlc_player = self._vlc_instance.media_player_new()
-            self._fallback_active = fallback
-            return True
-        except Exception as exc:
-            logger.warning("Failed to set up VLC backend (fallback=%s): %s", fallback, exc)
-            self._vlc_instance = None
-            self._vlc_player = None
-            self._fallback_active = False
-            return False
+        for idx, args in enumerate(profiles):
+            try:
+                instance = vlc.Instance(*args)
+                if instance is None:
+                    logger.debug(
+                        "VLC instance returned None with profile %d/%d (args=%s)",
+                        idx + 1, len(profiles), args,
+                    )
+                    continue
+                player = instance.media_player_new()
+                if player is None:
+                    logger.debug(
+                        "VLC media_player_new returned None with profile %d/%d",
+                        idx + 1, len(profiles),
+                    )
+                    continue
+                self._vlc_instance = instance
+                self._vlc_player = player
+                self._fallback_active = fallback
+                if idx > 0:
+                    logger.info("VLC backend initialised with fallback profile %d/%d", idx + 1, len(profiles))
+                return True
+            except Exception as exc:
+                logger.debug(
+                    "VLC profile %d/%d failed: %s",
+                    idx + 1, len(profiles), exc,
+                )
+                continue
+
+        # All profiles exhausted
+        logger.warning(
+            "Failed to set up VLC backend (fallback=%s) after %d profiles",
+            fallback, len(profiles),
+        )
+        self._vlc_instance = None
+        self._vlc_player = None
+        self._fallback_active = False
+        return False
 
     @property
     def is_available(self) -> bool:
@@ -58,8 +103,9 @@ class VideoPlayer:
             raise RuntimeError("In-app video backend unavailable")
 
         media = self._vlc_instance.media_new(source_url)
-        media.add_option(":avcodec-hw=none")
-        media.add_option(":codec=avcodec")
+        if self._fallback_active:
+            media.add_option(":avcodec-hw=none")
+            media.add_option(":codec=avcodec")
         media.add_option(":network-caching=600")
         media.add_option(":file-caching=300")
         

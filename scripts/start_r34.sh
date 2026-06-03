@@ -252,6 +252,15 @@ ensure_vlc() {
       if ! pacman -Qq vlc-plugins-all >/dev/null 2>&1 && ! pacman -Qq vlc-plugin-ffmpeg >/dev/null 2>&1; then
         log_both "Installing VLC codec plugins..."
         safe_run install_system_packages vlc-plugins-all
+        # Regenerate VLC plugin cache so libvlc finds the newly installed plugins.
+        if has_command vlc-cache-gen; then
+          local vlc_plugin_dir
+          vlc_plugin_dir="$(vlc-cache-gen --help 2>/dev/null | grep -oP '/usr/lib/vlc/plugins' 2>/dev/null || echo "/usr/lib/vlc/plugins")"
+          if [[ -d "$vlc_plugin_dir" ]]; then
+            log_both "Regenerating VLC plugin cache..."
+            safe_run run_with_sudo vlc-cache-gen "$vlc_plugin_dir"
+          fi
+        fi
       fi
     fi
     return 0
