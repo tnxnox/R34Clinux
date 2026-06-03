@@ -5,7 +5,7 @@ shopt -s nullglob
 unset PYTHONINSPECT PYTHONSTARTUP
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 VENV_DIR="$PROJECT_DIR/.venv"
 LOG_DIR="$PROJECT_DIR/logs"
 LOG_FILE="$LOG_DIR/r34-launcher.log"
