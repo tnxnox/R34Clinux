@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import traceback
 from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot
+
+logger = logging.getLogger(__name__)
 
 
 class WorkerSignals(QObject):
@@ -24,7 +27,9 @@ class FunctionWorker(QRunnable):
         try:
             result = self.function(*self.args, **self.kwargs)
         except Exception:
-            self._safe_emit_failed(traceback.format_exc())
+            error_text = traceback.format_exc()
+            logger.error("Worker function raised an exception:\n%s", error_text)
+            self._safe_emit_failed(error_text)
             return
         self._safe_emit_finished(result)
 
@@ -33,6 +38,7 @@ class FunctionWorker(QRunnable):
             self.signals.finished.emit(result)
         except RuntimeError:
             # Receiver QObject can be deleted if the window closes while work is still running.
+            logger.debug("Could not emit 'finished' signal — receiver may have been deleted")
             return
 
     def _safe_emit_failed(self, error_text: str) -> None:
@@ -40,4 +46,5 @@ class FunctionWorker(QRunnable):
             self.signals.failed.emit(error_text)
         except RuntimeError:
             # Ignore late signal delivery during teardown.
+            logger.debug("Could not emit 'failed' signal — receiver may have been deleted")
             return
