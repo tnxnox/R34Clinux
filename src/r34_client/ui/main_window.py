@@ -48,6 +48,7 @@ from r34_client.ui.helpers.post import (
     needs_hydration,
     probe_file_size,
 )
+from r34_client.ui.helpers.prefetch import ImageCache, prefetch_adjacent, prefetch_images_batch
 from r34_client.ui.features import autocomplete as autocomplete_feature
 from r34_client.ui.features import context_menu as context_menu_feature
 from r34_client.ui.dialogs import controls as dialogs_feature
@@ -117,6 +118,9 @@ class MainWindow(QMainWindow):
         self._pending_state_lock = threading.Lock()
         self._sync_debug_log_path = self.local_favorites.database_path.parent / "sync-debug.log"
         self._is_long_strip_image = False
+
+        # Image preview cache for prefetching
+        self._image_cache = ImageCache(max_size=100)
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search tags, e.g. character rating:safe")
@@ -823,6 +827,40 @@ class MainWindow(QMainWindow):
 
     def _preview_loaded(self, token: int, data: object, post: Post) -> None:
         preview_feature.preview_loaded(self, token, data, post)
+
+    def _prefetch_images(self, posts: list[Post], *, limit: int = 42) -> None:
+        """Prefetch preview images for *posts* in the background.
+
+        Skips posts already cached.  Use after search results load to warm the
+        cache for all visible results.
+        """
+        if not posts or not self.settings.user_id:
+            return
+        worker = FunctionWorker(
+            prefetch_images_batch,
+            posts,
+            self.settings.user_id,
+            self._image_cache,
+            limit=limit,
+        )
+        worker.signals.failed.connect(lambda _: None)  # Silently swallow errors.
+        self._start_worker(worker, workload="general")
+
+    def _prefetch_adjacent(self, post: Post, *, count: int = 2) -> None:
+        """Prefetch posts around *post* in the current active list."""
+        posts = self.current_posts or self.favorite_posts or self.friend_posts or []
+        if not posts or not self.settings.user_id:
+            return
+        worker = FunctionWorker(
+            prefetch_adjacent,
+            post,
+            posts,
+            self.settings.user_id,
+            self._image_cache,
+            count=count,
+        )
+        worker.signals.failed.connect(lambda _: None)
+        self._start_worker(worker, workload="general")
 
     def _update_preview_scaling(self) -> None:
         preview_feature.update_preview_scaling(self)

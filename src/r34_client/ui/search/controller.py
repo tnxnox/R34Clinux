@@ -99,6 +99,10 @@ def search_finished(window: MainWindow, token: int, result: object) -> None:
     update_related_tags(window, posts)
     window._update_action_state()
 
+    # Warm the cache: prefetch preview images for all results on this page.
+    if posts:
+        window._prefetch_images(posts)
+
 
 def refresh_favorites(window: MainWindow) -> None:
     refresh_favorites_impl(window, local_only=False)
@@ -244,6 +248,10 @@ def favorites_loaded(window: MainWindow, token: int, result: object) -> None:
     else:
         window._set_right_status(f"Local favorites loaded ({len(window.favorite_posts)} posts).")
     window._update_action_state()
+
+    # Warm the cache for J/K navigation through favorites.
+    if window.favorite_posts:
+        window._prefetch_images(window.favorite_posts)
 
 
 def favorites_failed(window: MainWindow, token: int, error_text: str) -> None:

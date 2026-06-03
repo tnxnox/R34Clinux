@@ -54,14 +54,21 @@ def show_post(window: MainWindow, post: Post, allow_hydrate: bool = True) -> Non
         return
 
     window.meta_view.setPlainText(window._format_post_metadata(post))
-    window.preview_label.setText("Loading preview...")
 
     window._preview_token += 1
     token = window._preview_token
+
     if not post.best_preview_url:
         window.preview_label.setText("This post does not expose a preview URL.")
         return
 
+    # Check cache first — instant display without a network request.
+    cached = window._image_cache.get(post.id)
+    if cached is not None:
+        preview_loaded(window, token, cached, post)
+        return
+
+    window.preview_label.setText("Loading preview...")
     worker = FunctionWorker(fetch_preview_bytes, post, user_id=window.settings.user_id)
     worker.signals.finished.connect(lambda data: preview_loaded(window, token, data, post))
     worker.signals.failed.connect(lambda error_text: preview_failed_with_context(window, post, error_text))
@@ -168,12 +175,18 @@ def preview_loaded(window: MainWindow, token: int, data: object, post: Post) -> 
         window.preview_label.setText("Preview image could not be loaded.")
         return
 
+    # Cache for future requests (adjacent post navigation, tab switches, etc.)
+    window._image_cache.put(post.id, bytes(data))
+
     window._base_preview_pixmap = pixmap
     window._is_long_strip_image = pixmap.height() >= (pixmap.width() * 2.2)
     window._image_zoom_percent = 100
     window._hide_video_view()
     window.preview_label.setText("")
     update_preview_scaling(window)
+
+    # Fire-and-forget: prefetch adjacent posts for instant J/K navigation.
+    window._prefetch_adjacent(post)
     if window._is_long_strip_image:
         window.preview_container.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         window.preview_container.verticalScrollBar().setValue(0)

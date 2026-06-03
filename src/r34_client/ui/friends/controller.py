@@ -238,3 +238,7 @@ def _friend_favorites_fetched(window: MainWindow, token: int, result: object) ->
         if window.left_tabs.currentWidget() is window.friends_tab:
             window.friend_posts_list.setCurrentRow(0)
     window._set_status(f"Loaded {len(posts)} favorites")
+
+    # Warm the cache for J/K navigation through friend posts.
+    if posts:
+        window._prefetch_images(posts)
