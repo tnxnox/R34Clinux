@@ -182,7 +182,19 @@ def preview_loaded(window: MainWindow, token: int, data: object, post: Post) -> 
     window._image_cache.put(post.id, bytes(data))
 
     window._base_preview_pixmap = pixmap
-    window._is_long_strip_image = pixmap.height() >= (pixmap.width() * 2.2)
+
+    # Classify as "long strip" (comic strip / stitched multi-panel) only when
+    # the image is both very tall *and* narrower than the viewport.  A genuine
+    # strip is typically ~500–800 px wide with height/width > 4× — fitting it to
+    # viewport height would make it unreadably tiny.  A tall single image
+    # (full-body portrait, phone wallpaper, etc.) that's 2.2–4× taller than it is
+    # wide still looks fine centered in the viewport and shouldn't be top-aligned
+    # or forced to full width.
+    vp = window.preview_container.viewport()
+    vp_w = max(1, vp.width())
+    ratio = pixmap.height() / pixmap.width()
+    width_is_narrow = pixmap.width() < vp_w
+    window._is_long_strip_image = ratio >= 4.0 or (ratio >= 2.8 and width_is_narrow)
     window._image_zoom_percent = 100
     window._hide_video_view()
     window.preview_label.setText("")
