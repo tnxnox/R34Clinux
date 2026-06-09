@@ -540,7 +540,7 @@ class FlareSolverrFavoritesClient:
 
         for url in candidates:
             html = self._request_via_solver(url)
-            items = extract_items(html)
+            items = extract_items(html, validate=True)
             self._debug(f"list_favorites_html: url={url} extracted_items={len(items)}")
             for post_id, preview_url in items:
                 if post_id in seen_ids:
