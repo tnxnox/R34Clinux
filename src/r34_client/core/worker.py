@@ -8,9 +8,68 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 
+import socket
+import weakref
+
 logger = logging.getLogger(__name__)
 
 _thread_local = threading.local()
+_worker_sockets_lock = threading.Lock()
+# Mapping of FunctionWorker -> WeakSet of active sockets
+_worker_sockets: dict[FunctionWorker, weakref.WeakSet[socket.socket]] = {}
+
+
+def register_socket_for_worker(worker: FunctionWorker, sock: socket.socket) -> None:
+    with _worker_sockets_lock:
+        if worker not in _worker_sockets:
+            _worker_sockets[worker] = weakref.WeakSet()
+        _worker_sockets[worker].add(sock)
+
+
+def unregister_socket_for_worker(worker: FunctionWorker, sock: socket.socket) -> None:
+    with _worker_sockets_lock:
+        if worker in _worker_sockets:
+            _worker_sockets[worker].discard(sock)
+            if not _worker_sockets[worker]:
+                del _worker_sockets[worker]
+
+
+def cancel_worker_sockets(worker: FunctionWorker) -> None:
+    with _worker_sockets_lock:
+        socks = list(_worker_sockets.get(worker, []))
+    for sock in socks:
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except Exception:
+            pass
+        try:
+            sock.close()
+        except Exception:
+            pass
+
+
+_original_socket_class = socket.socket
+
+
+class TrackedSocket(_original_socket_class):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        worker = getattr(_thread_local, "current_worker", None)
+        if worker is not None:
+            self._associated_worker = worker
+            register_socket_for_worker(worker, self)
+        else:
+            self._associated_worker = None
+
+    def close(self) -> None:
+        worker = getattr(self, "_associated_worker", None)
+        if worker is not None:
+            unregister_socket_for_worker(worker, self)
+        super().close()
+
+
+# Apply the monkeypatch
+socket.socket = TrackedSocket
 
 
 class WorkerCancelledError(BaseException):
@@ -63,6 +122,7 @@ class FunctionWorker(QRunnable):
 
     def cancel(self) -> None:
         self._cancel_event.set()
+        cancel_worker_sockets(self)
 
     @Slot()
     def run(self) -> None:
