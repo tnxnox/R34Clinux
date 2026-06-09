@@ -80,6 +80,11 @@ class MainWindow(QMainWindow):
         self._worker_pools = build_worker_pools()
 
         self.state = AppState()
+        self.state.search_completed.connect(self._on_search_completed)
+        self.state.favorites_updated.connect(self._on_favorites_updated)
+        self.state.friend_favorites_updated.connect(self._on_friend_favorites_updated)
+        self.state.page_changed.connect(self._on_page_changed)
+        self.state.query_changed.connect(self._on_query_changed)
         self._search_history_limit = 12
         self._search_history = self.store.load_search_history(self._search_history_limit)
         self._saved_searches_limit = 12
@@ -1284,3 +1289,113 @@ class MainWindow(QMainWindow):
     @current_query.setter
     def current_query(self, query: str) -> None:
         self.state.current_query = query
+
+    def _on_search_completed(self, posts: list[Post]) -> None:
+        self.results_list.clear()
+        for post in posts:
+            item = QListWidgetItem(self._format_post_tile(post))
+            item.setData(Qt.ItemDataRole.UserRole, post)
+            self.results_list.addItem(item)
+
+        search_feature.update_related_tags(self, posts)
+        self._update_action_state()
+
+        if posts:
+            self._prefetch_images(posts)
+
+        if posts:
+            if self.left_tabs.currentWidget() is self.results_list:
+                self.results_list.setCurrentRow(0)
+            self._set_status(f"Loaded {len(posts)} posts.")
+        else:
+            self.preview_label.setText("No posts matched the search query.")
+            self.meta_view.setPlainText("No results.")
+            self._set_status("Search completed with no results.")
+
+    def _on_favorites_updated(self, posts: list[Post]) -> None:
+        previous_current_id: int | None = None
+        previous_current_item = self.favorites_list.currentItem()
+        if previous_current_item is not None:
+            previous_post = previous_current_item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(previous_post, Post):
+                previous_current_id = previous_post.id
+
+        self._refresh_collection_filter()
+
+        self.favorites_list.clear()
+        for post in posts:
+            item = QListWidgetItem(self._format_post_tile(post))
+            item.setData(Qt.ItemDataRole.UserRole, post)
+            self.favorites_list.addItem(item)
+
+        if posts:
+            self._prefetch_images(posts)
+
+        should_restore_selection = (
+            self.left_tabs.currentWidget() is self.favorites_list
+            or previous_current_id is not None
+        )
+
+        if should_restore_selection and self.favorites_list.count() > 0:
+            target_row = 0
+            if previous_current_id is not None:
+                for index, post in enumerate(posts):
+                    if post.id == previous_current_id:
+                        target_row = index
+                        break
+
+            self.favorites_list.setCurrentRow(target_row)
+            selected_item = self.favorites_list.item(target_row)
+            if selected_item is not None:
+                selected_item.setSelected(True)
+                if self.left_tabs.currentWidget() is self.favorites_list:
+                    self._handle_selection_change(selected_item, None)
+
+        if self._sync_enabled():
+            pending_add = len(self._pending_remote_add_ids)
+            pending_remove = len(self._pending_remote_remove_ids)
+            if self._favorites_sync_fallback_used:
+                if self._degraded_mode_active():
+                    self._set_status(
+                        "Favorites sync temporarily degraded due to rate limiting; "
+                        f"showing local cache ({len(posts)} posts)."
+                    )
+                else:
+                    self._set_status(
+                        f"Favorites sync returned empty data; showing local cache ({len(posts)} posts)."
+                    )
+            else:
+                self._rate_limit.note_success()
+                if pending_add or pending_remove:
+                    self._set_right_status(
+                        f"Favorites loaded ({len(posts)} posts). Pending sync: {pending_add} add, {pending_remove} remove."
+                    )
+                    from r34_client.ui.favorites.pending import process_pending_remote_mutations
+                    process_pending_remote_mutations(self)
+                else:
+                    self._set_right_status(f"Favorites synced ({len(posts)} posts).")
+        else:
+            self._set_right_status(f"Local favorites loaded ({len(posts)} posts).")
+        self._update_action_state()
+
+    def _on_friend_favorites_updated(self, posts: list[Post]) -> None:
+        self.friend_posts_list.clear()
+        for post in posts:
+            item = QListWidgetItem(self._format_post_tile(post))
+            item.setData(Qt.ItemDataRole.UserRole, post)
+            self.friend_posts_list.addItem(item)
+
+        self._update_friend_page_label()
+
+        if posts:
+            self._prefetch_images(posts)
+        if posts:
+            if self.left_tabs.currentWidget() is self.friends_tab:
+                self.friend_posts_list.setCurrentRow(0)
+        self._set_status(f"Loaded {len(posts)} favorites")
+
+    def _on_page_changed(self, page: int) -> None:
+        self.page_label.setText(f"Page {page + 1}")
+
+    def _on_query_changed(self, query: str) -> None:
+        self.search_input.setText(query)
