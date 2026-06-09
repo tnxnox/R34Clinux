@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import signal
 import sys
 from pathlib import Path
 
@@ -81,6 +82,18 @@ def main() -> int:
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseSoftwareOpenGL, True)
     app = QApplication(sys.argv)
     app.setApplicationName("R34 Linux Client")
+
+    # Allow Ctrl+C to cleanly quit the application instead of being
+    # swallowed by Qt's event loop (which causes infinite KeyboardInterrupt
+    # spam in timer callbacks).
+    signal.signal(signal.SIGINT, lambda *_: app.quit())
+    # Python's signal handler only fires between bytecodes, but Qt's event
+    # loop blocks in C code.  A tiny no-op timer forces Python to regain
+    # control every 200 ms so the signal handler can actually execute.
+    from PySide6.QtCore import QTimer
+    _sigint_timer = QTimer()
+    _sigint_timer.timeout.connect(lambda: None)
+    _sigint_timer.start(200)
 
     # Load and apply the QSS stylesheet
     try:
