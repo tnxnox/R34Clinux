@@ -1213,7 +1213,7 @@ class MainWindow(QMainWindow):
         self.playback_timer.stop()
         self.background_sync_timer.stop()
         self.pending_remote_sync_timer.stop()
-        self.video_player.stop()
+        self.video_player.release()
         sync_client = self._make_sync_client(self.settings)
         if sync_client is not None:
             sync_client._destroy_session()
@@ -1227,8 +1227,6 @@ class MainWindow(QMainWindow):
 
         # Let in-flight work finish before clearing queued jobs.
         for pool_name, pool in self._worker_pools.items():
-            if pool_name == "general":
-                continue
             try:
                 pool.waitForDone(2000)
                 pool.clear()
@@ -1236,11 +1234,7 @@ class MainWindow(QMainWindow):
                 pass
 
         super().closeEvent(event)
-
-        if self._active_workers:
-            # Some worker functions can block on network calls; force process exit so
-            # closing the UI always returns control to the launching terminal.
-            QTimer.singleShot(1500, lambda: os._exit(0))
+        logger.info("Shutdown completed. Active workers remaining: %d", len(self._active_workers))
 
     @property
     def current_posts(self) -> list[Post]:
