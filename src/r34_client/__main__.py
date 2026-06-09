@@ -84,7 +84,6 @@ def main() -> int:
 
     # Load and apply the QSS stylesheet
     try:
-        from pathlib import Path
         qss_path = Path(__file__).parent / "ui" / "style.qss"
         if qss_path.exists():
             app.setStyleSheet(qss_path.read_text(encoding="utf-8"))
