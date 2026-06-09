@@ -122,7 +122,11 @@ class MainWindow(QMainWindow):
         self._is_long_strip_image = False
 
         # Image preview cache for prefetching
-        self._image_cache = ImageCache(max_size=100)
+        self._image_cache = ImageCache(max_size=20)
+
+        # Favorites pagination/lazy loading
+        self._all_favorites_posts = []
+        self._favorites_loaded_count = 0
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search tags, e.g. character rating:safe")
@@ -184,6 +188,7 @@ class MainWindow(QMainWindow):
         self.favorites_list.currentItemChanged.connect(self._handle_selection_change)
         self.favorites_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.favorites_list.customContextMenuRequested.connect(self._open_favorites_context_menu)
+        self.favorites_list.verticalScrollBar().valueChanged.connect(self._favorites_scroll_changed)
 
         self.friends_list = QListWidget()
         self.friends_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -1316,27 +1321,29 @@ class MainWindow(QMainWindow):
 
         self._refresh_collection_filter()
 
+        self._all_favorites_posts = posts
         self.favorites_list.clear()
-        for post in posts:
-            item = QListWidgetItem(self._format_post_tile(post))
-            item.setData(Qt.ItemDataRole.UserRole, post)
-            self.favorites_list.addItem(item)
+        self._favorites_loaded_count = 0
+        self._load_more_favorites()
 
         if posts:
-            self._prefetch_images(posts)
+            self._prefetch_images(posts[:20])
 
         should_restore_selection = (
             self.left_tabs.currentWidget() is self.favorites_list
             or previous_current_id is not None
         )
 
-        if should_restore_selection and self.favorites_list.count() > 0:
+        if should_restore_selection and len(posts) > 0:
             target_row = 0
             if previous_current_id is not None:
                 for index, post in enumerate(posts):
                     if post.id == previous_current_id:
                         target_row = index
                         break
+
+            # Load enough items to make sure the target row is rendered
+            self._load_more_favorites(target_index=target_row)
 
             self.favorites_list.setCurrentRow(target_row)
             selected_item = self.favorites_list.item(target_row)
@@ -1356,21 +1363,46 @@ class MainWindow(QMainWindow):
                     )
                 else:
                     self._set_status(
-                        f"Favorites sync returned empty data; showing local cache ({len(posts)} posts)."
+                        "Favorites sync returned empty data; showing local cache ({len(posts)} posts)."
                     )
             else:
                 self._rate_limit.note_success()
                 if pending_add or pending_remove:
-                    self._set_right_status(
+                    self._set_status(
                         f"Favorites loaded ({len(posts)} posts). Pending sync: {pending_add} add, {pending_remove} remove."
                     )
                     from r34_client.ui.favorites.pending import process_pending_remote_mutations
                     process_pending_remote_mutations(self)
                 else:
-                    self._set_right_status(f"Favorites synced ({len(posts)} posts).")
+                    self._set_status(f"Favorites synced ({len(posts)} posts).")
         else:
-            self._set_right_status(f"Local favorites loaded ({len(posts)} posts).")
+            self._set_status(f"Local favorites loaded ({len(posts)} posts).")
         self._update_action_state()
+
+    def _load_more_favorites(self, target_index: int | None = None) -> None:
+        chunk_size = 100
+        total = len(self._all_favorites_posts)
+        if self._favorites_loaded_count >= total:
+            return
+
+        next_count = self._favorites_loaded_count + chunk_size
+        if target_index is not None:
+            next_count = max(next_count, target_index + 1)
+        next_count = min(next_count, total)
+
+        for i in range(self._favorites_loaded_count, next_count):
+            post = self._all_favorites_posts[i]
+            item = QListWidgetItem(self._format_post_tile(post))
+            item.setData(Qt.ItemDataRole.UserRole, post)
+            self.favorites_list.addItem(item)
+
+        self._favorites_loaded_count = next_count
+
+    def _favorites_scroll_changed(self, value: int) -> None:
+        scrollbar = self.favorites_list.verticalScrollBar()
+        max_val = scrollbar.maximum()
+        if max_val > 0 and value >= max_val * 0.85:
+            self._load_more_favorites()
 
     def _on_friend_favorites_updated(self, posts: list[Post]) -> None:
         self.friend_posts_list.clear()
