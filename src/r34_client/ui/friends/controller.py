@@ -230,9 +230,6 @@ def _friend_favorites_fetched(window: MainWindow, token: int, result: object) ->
     if token != window._friend_fetch_token:
         return
 
-    from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QListWidgetItem
-
     if not isinstance(result, list):
         window._set_status("Failed to parse friend favorites")
         return
@@ -242,31 +239,8 @@ def _friend_favorites_fetched(window: MainWindow, token: int, result: object) ->
         if isinstance(obj, Post):
             posts.append(obj)
 
-    # Limit displayed count to reduce lag and API pressure.
-    # Paginate if you want more — the prefetch/hydration only touches
-    # the first 10 posts anyway.
     DISPLAY_LIMIT = 10
     displayed = posts[:DISPLAY_LIMIT]
 
-    window.friend_posts_list.clear()
-    for post in displayed:
-        item = QListWidgetItem(window._format_post_tile(post))
-        item.setData(Qt.ItemDataRole.UserRole, post)
-        window.friend_posts_list.addItem(item)
-
-    window.friend_posts = displayed
-    # Rule34 web view returns 50 items per page. If the raw page had
-    # >= 50 there's likely a next page.
     window._friend_has_more = len(posts) >= 50
-
-    # Update the friend‑specific page label.
-    window._update_friend_page_label()
-
-    # Warm the cache BEFORE selecting the first row so the background
-    # prefetch has a head start before show_post checks the cache.
-    if posts:
-        window._prefetch_images(posts)
-    if posts:
-        if window.left_tabs.currentWidget() is window.friends_tab:
-            window.friend_posts_list.setCurrentRow(0)
-    window._set_status(f"Loaded {len(posts)} favorites")
+    window.friend_posts = displayed
