@@ -30,8 +30,23 @@ def open_settings(window: MainWindow, initial: bool = False) -> None:
         if just_enabled:
             # First render local cache immediately; avoid an expensive first remote sync
             # right after toggling the setting, which can appear as a permanent hang.
-            window._set_right_status("Local favorites loaded. Run Refresh Favorites to sync remote.")
+            window._set_right_status("Local favorites loaded. Starting FlareSolverr...")
             window._refresh_local_favorites()
+
+            def start_solver_task() -> bool:
+                from r34_client.api.flaresolverr_launcher import start_flaresolverr_container
+                return start_flaresolverr_container(window.settings.flaresolverr_url)
+
+            def on_start_finished(success: object) -> None:
+                if success:
+                    window._set_right_status("FlareSolverr running. Click Refresh Favorites to sync.")
+                else:
+                    window._set_right_status("Failed to start FlareSolverr.")
+
+            from r34_client.core.worker import FunctionWorker
+            worker = FunctionWorker(start_solver_task)
+            worker.signals.finished.connect(on_start_finished)
+            window._pool_for_workload("general").start(worker)
             return
     else:
         window._set_status("Settings saved.")
