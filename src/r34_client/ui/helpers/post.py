@@ -1,13 +1,35 @@
 from __future__ import annotations
 
 import os
+import threading
 from urllib.parse import urlparse
 
 import requests
 
 from r34_client.core.models import Post
 
-_HTTP = requests.Session()
+
+class ThreadLocalSessionWrapper:
+    def __init__(self) -> None:
+        self._local = threading.local()
+
+    @property
+    def _session(self) -> requests.Session:
+        if not hasattr(self._local, "session"):
+            self._local.session = requests.Session()
+        return self._local.session
+
+    def head(self, *args, **kwargs) -> requests.Response:
+        return self._session.head(*args, **kwargs)
+
+    def get(self, *args, **kwargs) -> requests.Response:
+        return self._session.get(*args, **kwargs)
+
+    def post(self, *args, **kwargs) -> requests.Response:
+        return self._session.post(*args, **kwargs)
+
+
+_HTTP = ThreadLocalSessionWrapper()
 
 
 def is_video_post(post: Post) -> bool:
