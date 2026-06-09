@@ -146,10 +146,6 @@ class VideoPlayer(QObject):
             self._vlc_player = None
             self._vlc_instance = None
 
-    def __del__(self) -> None:
-        """Destructor — ensures VLC resources are released on garbage collection."""
-        self.release()
-
     def stop(self) -> None:
         if self._vlc_player is not None:
             try:
