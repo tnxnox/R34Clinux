@@ -34,6 +34,7 @@ from r34_client.core.worker import FunctionWorker
 from r34_client.core.settings import AppSettings, SettingsStore
 from r34_client.api.flaresolverr import FlareSolverrFavoritesClient
 from r34_client.core.db import LocalFavoritesStore
+from r34_client.core.state import AppState
 from r34_client.core.models import Post, TagSuggestion
 from r34_client.core.rate_limit import DegradedModeController, TokenBucket
 from r34_client.core.worker_pools import build_worker_pools
@@ -78,12 +79,7 @@ class MainWindow(QMainWindow):
         self.download_manager = DownloadManager(self.local_favorites)
         self._worker_pools = build_worker_pools()
 
-        self.current_posts: list[Post] = []
-        self.favorite_posts: list[Post] = []
-        self.friend_posts: list[Post] = []
-        self.favorite_ids: set[int] = set()
-        self.current_page = 0
-        self.current_query = ""
+        self.state = AppState()
         self._search_history_limit = 12
         self._search_history = self.store.load_search_history(self._search_history_limit)
         self._saved_searches_limit = 12
@@ -251,7 +247,7 @@ class MainWindow(QMainWindow):
         self.video_surface.hide()
 
         from r34_client.ui.widgets.video_player import VideoPlayer
-        self.video_player = VideoPlayer()
+        self.video_player = VideoPlayer(self)
 
         self._base_preview_pixmap: QPixmap | None = None
         self._image_zoom_percent = 100
@@ -1217,6 +1213,13 @@ class MainWindow(QMainWindow):
         if sync_client is not None:
             sync_client._destroy_session()
 
+        # Cancel all active workers to interrupt execution loops and sleeps.
+        for worker in list(self._active_workers):
+            try:
+                worker.cancel()
+            except Exception:
+                pass
+
         # Let in-flight work finish before clearing queued jobs.
         for pool_name, pool in self._worker_pools.items():
             if pool_name == "general":
@@ -1233,3 +1236,51 @@ class MainWindow(QMainWindow):
             # Some worker functions can block on network calls; force process exit so
             # closing the UI always returns control to the launching terminal.
             QTimer.singleShot(1500, lambda: os._exit(0))
+
+    @property
+    def current_posts(self) -> list[Post]:
+        return self.state.current_posts
+
+    @current_posts.setter
+    def current_posts(self, posts: list[Post]) -> None:
+        self.state.current_posts = posts
+
+    @property
+    def favorite_posts(self) -> list[Post]:
+        return self.state.favorite_posts
+
+    @favorite_posts.setter
+    def favorite_posts(self, posts: list[Post]) -> None:
+        self.state.favorite_posts = posts
+
+    @property
+    def friend_posts(self) -> list[Post]:
+        return self.state.friend_posts
+
+    @friend_posts.setter
+    def friend_posts(self, posts: list[Post]) -> None:
+        self.state.friend_posts = posts
+
+    @property
+    def favorite_ids(self) -> set[int]:
+        return self.state.favorite_ids
+
+    @favorite_ids.setter
+    def favorite_ids(self, value: set[int]) -> None:
+        self.state.favorite_ids = value
+
+    @property
+    def current_page(self) -> int:
+        return self.state.current_page
+
+    @current_page.setter
+    def current_page(self, page: int) -> None:
+        self.state.current_page = page
+
+    @property
+    def current_query(self) -> str:
+        return self.state.current_query
+
+    @current_query.setter
+    def current_query(self, query: str) -> None:
+        self.state.current_query = query
