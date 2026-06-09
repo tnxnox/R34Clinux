@@ -282,10 +282,20 @@ run_container() {
 }
 
 start_flaresolverr() {
-  # Skip if FlareSolverr is already running
+  # If FlareSolverr is already running, restart it to clear stale sessions.
   if curl -sf "$FLARESOLVERR_URL/status" -o /dev/null 2>/dev/null; then
-    log_both "FlareSolverr: already running"
-    return 0
+    log_both "FlareSolverr: already running — restarting to clear stale sessions..."
+    if $CONTAINER_CMD restart "$CONTAINER_NAME" >/dev/null 2>>"$LOG_FILE"; then
+      sleep 3
+      if curl -sf "$FLARESOLVERR_URL/status" -o /dev/null 2>/dev/null; then
+        success "FlareSolverr restarted."
+        return 0
+      fi
+      warn "FlareSolverr did not respond after restart."
+    else
+      warn "Failed to restart FlareSolverr container. Removing and recreating..."
+      $CONTAINER_CMD rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+    fi
   fi
 
   # Check if container exists and start it

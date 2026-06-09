@@ -39,6 +39,60 @@ def is_url_local(url: str) -> bool:
     except Exception:
         return False
 
+
+def _is_container_running(cmd: list[str], container_name: str) -> bool:
+    """Check if a container with the given name is currently running."""
+    try:
+        res = subprocess.run(
+            cmd + ["ps", "--format", "{{.Names}}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return container_name in res.stdout.splitlines()
+    except Exception:
+        return False
+
+
+def restart_flaresolverr_container(solver_url: str = "http://127.0.0.1:8191") -> bool:
+    """
+    Restart the FlareSolverr container to clear stale sessions.
+    If the container is running, stop and restart it.
+    If it's not running, start it fresh.
+    Returns True if FlareSolverr is reachable after restart, False otherwise.
+    """
+    if not is_url_local(solver_url):
+        # Can't manage remote containers — just check if it's reachable
+        try:
+            response = requests.get(f"{solver_url.rstrip('/')}/status", timeout=2)
+            return response.status_code == 200
+        except requests.RequestException:
+            return False
+
+    cmd = detect_container_cmd()
+    if not cmd:
+        logger.warning("No container runtime (docker/podman) detected. Cannot restart FlareSolverr.")
+        return False
+
+    container_name = "r34-flaresolverr"
+
+    if _is_container_running(cmd, container_name):
+        logger.info("Restarting FlareSolverr container '%s' to clear stale sessions...", container_name)
+        try:
+            subprocess.run(
+                cmd + ["restart", container_name],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30,
+            )
+            return _wait_for_flaresolverr(solver_url)
+        except Exception as exc:
+            logger.warning("Failed to restart container: %s. Removing and recreating...", exc)
+            try:
+                subprocess.run(cmd + ["rm", "-f", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+
+    # Container not running or restart failed — start fresh
+    return start_flaresolverr_container(solver_url)
+
+
 def start_flaresolverr_container(solver_url: str = "http://127.0.0.1:8191") -> bool:
     """
     Ensure FlareSolverr is running. If solver_url is local and unreachable,
@@ -133,3 +187,4 @@ def _wait_for_flaresolverr(solver_url: str) -> bool:
         time.sleep(1)
     logger.error("FlareSolverr did not respond at %s within 30 seconds.", solver_url)
     return False
+

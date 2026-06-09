@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import logging
 import os
+import shutil
 import signal
 import sys
+import threading
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -13,6 +16,74 @@ from PySide6.QtWidgets import QApplication
 from r34_client import __version__
 from r34_client.core.settings import SettingsStore
 from r34_client.ui.main_window import MainWindow
+
+_log = logging.getLogger(__name__)
+
+
+def _configure_display() -> None:
+    """Force XCB on Wayland sessions — VLC doesn't work with Wayland Qt."""
+    if os.environ.get("QT_QPA_PLATFORM"):
+        return  # user explicitly set it, don't override
+    session_type = os.environ.get("XDG_SESSION_TYPE", "")
+    wayland_display = os.environ.get("WAYLAND_DISPLAY", "")
+    if session_type == "wayland" or wayland_display:
+        os.environ["QT_QPA_PLATFORM"] = "xcb"
+        _log.info("Wayland detected, forced QT_QPA_PLATFORM=xcb for VLC compatibility")
+
+
+def _check_vlc() -> None:
+    """Warn if VLC is not installed — video playback won't work."""
+    if not shutil.which("vlc"):
+        _log.warning(
+            "VLC not found on PATH. Video playback won't work. "
+            "Install VLC from https://videolan.org or your package manager."
+        )
+
+
+def _cleanup_flaresolverr() -> None:
+    """Stop the FlareSolverr container on exit if we started it."""
+    try:
+        from r34_client.api.flaresolverr_launcher import detect_container_cmd
+        cmd = detect_container_cmd()
+        if cmd is None:
+            return
+        import subprocess
+        container_name = "r34-flaresolverr"
+        # Check if the container is running
+        result = subprocess.run(
+            cmd + ["ps", "--format", "{{.Names}}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if container_name in result.stdout.splitlines():
+            _log.info("Stopping FlareSolverr container '%s'...", container_name)
+            subprocess.run(
+                cmd + ["stop", container_name],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10,
+            )
+            _log.info("FlareSolverr container stopped.")
+    except Exception as exc:
+        _log.debug("FlareSolverr cleanup skipped: %s", exc)
+
+
+def _prepare_flaresolverr(store: "SettingsStore") -> None:
+    """Restart or start FlareSolverr on app startup (runs in background thread)."""
+    try:
+        settings = store.load()
+        if not settings.flaresolverr_enabled:
+            _log.debug("FlareSolverr is disabled in settings. Skipping startup check.")
+            return
+
+        solver_url = settings.flaresolverr_url
+        _log.info("FlareSolverr enabled — checking container state...")
+
+        from r34_client.api.flaresolverr_launcher import restart_flaresolverr_container
+        ok = restart_flaresolverr_container(solver_url)
+        if ok:
+            _log.info("FlareSolverr is ready at %s", solver_url)
+        else:
+            _log.warning("FlareSolverr could not be started — sync won't be available.")
+    except Exception as exc:
+        _log.warning("FlareSolverr startup check failed: %s", exc)
 
 
 def main() -> int:
@@ -58,9 +129,13 @@ def main() -> int:
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)
-        logging.getLogger(__name__).info("File logging initialized: %s", verbose_log_file)
+        _log.info("File logging initialized: %s", verbose_log_file)
     except Exception as e:
         sys.stderr.write(f"Failed to initialize file logging: {e}\n")
+
+    # ── Environment setup ──
+    _configure_display()
+    _check_vlc()
 
     # Keep WebEngine flags conservative: swiftshader + disable-gpu combinations can abort on Linux.
     existing_flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
@@ -95,15 +170,28 @@ def main() -> int:
     _sigint_timer.timeout.connect(lambda: None)
     _sigint_timer.start(200)
 
+    # Clean up FlareSolverr container when the process exits.
+    atexit.register(_cleanup_flaresolverr)
+
     # Load and apply the QSS stylesheet
     try:
         qss_path = Path(__file__).parent / "ui" / "style.qss"
         if qss_path.exists():
             app.setStyleSheet(qss_path.read_text(encoding="utf-8"))
     except Exception as e:
-        logging.getLogger(__name__).warning("Failed to load stylesheet: %s", e)
+        _log.warning("Failed to load stylesheet: %s", e)
 
     store = SettingsStore()
+
+    # Restart (or start) FlareSolverr in the background so the GUI isn't
+    # blocked by the container restart wait.  This clears stale sessions.
+    threading.Thread(
+        target=_prepare_flaresolverr,
+        args=(store,),
+        daemon=True,
+        name="flaresolverr-startup",
+    ).start()
+
     window = MainWindow(store)
     window.show()
 
@@ -112,3 +200,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
