@@ -74,8 +74,12 @@ Access via the toolbar (gear icon). Key settings:
   `http://127.0.0.1:8191`; check `~/.config/r34-client/sync-debug.log`
 - **Video won't play** — install VLC; software decode is automatic if VA-API
   isn't available
-- **Large images don't load** — Qt caps image allocation at ~256 MB; images over
-  9–10 MB JPEG may hit this
+
+## Feedback
+
+- If you encounter problems you don't know how to solve, or discover bugs, feel free
+  to either open an [issue](https://github.com/tnxnox/R34Clinux/issues) or add me
+  on discord : thenoix
 
 ## Support
 
