@@ -486,7 +486,13 @@ class FlareSolverrFavoritesClient:
 
         logger.warning("list_favorites: DAPI returned empty, falling back to HTML parsing")
 
-        html_posts = self._list_favorites_from_html(limit)
+        try:
+            html_posts = self._list_favorites_from_html(limit)
+        except (RuntimeError, FlareSolverrError) as exc:
+            logger.warning("list_favorites: HTML fallback failed: %s", exc)
+            self._debug(f"list_favorites: HTML fallback error: {exc}")
+            raise FlareSolverrError(str(exc)) from exc
+
         if html_posts:
             return html_posts
 

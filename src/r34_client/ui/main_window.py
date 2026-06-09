@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 from PySide6.QtCore import QEvent, QThreadPool, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QKeyEvent, QPixmap, QShortcut
 from PySide6.QtGui import QStandardItemModel
