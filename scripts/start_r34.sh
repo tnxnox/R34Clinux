@@ -330,6 +330,16 @@ stop_flaresolverr() {
   fi
 }
 
+check_flaresolverr_enabled() {
+  local conf="${XDG_CONFIG_HOME:-$HOME/.config}/R34LinuxClient/R34LinuxClient.conf"
+  if [[ -f "$conf" ]]; then
+    if grep -iq "^flaresolverr_enabled[[:space:]]*=[[:space:]]*true" "$conf"; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
 # ─── Display ───────────────────────────────────────────────────────────────────
 
 configure_display() {
@@ -381,8 +391,11 @@ main() {
   # ── Optional: FlareSolverr ──
   ensure_container_runtime
   if [[ -n "$CONTAINER_CMD" ]]; then
-    # Only start FlareSolverr if the user has it enabled in settings
-    start_flaresolverr || warn "FlareSolverr failed to start — sync won't be available."
+    if check_flaresolverr_enabled; then
+      start_flaresolverr || warn "FlareSolverr failed to start — sync won't be available."
+    else
+      log_both "FlareSolverr is disabled in settings. Skipping container start."
+    fi
   fi
 
   # ── Launch ──
