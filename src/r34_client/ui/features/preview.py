@@ -73,7 +73,7 @@ def show_post(window: MainWindow, post: Post, allow_hydrate: bool = True) -> Non
     window.preview_label.setText("Loading preview...")
     worker = FunctionWorker(fetch_preview_bytes, post, user_id=window.settings.user_id)
     worker.signals.finished.connect(lambda data: preview_loaded(window, token, data, post))
-    worker.signals.failed.connect(lambda error_text: preview_failed_with_context(window, post, error_text))
+    worker.signals.failed.connect(lambda error_text: preview_failed_with_context(window, token, post, error_text))
     window._start_worker(worker, workload="preview")
 
 
@@ -132,7 +132,9 @@ def show_hydration_failed(window: MainWindow, token: int, fallback: Post, error_
         return
     first_line = error_text.splitlines()[-1] if error_text else "Unable to load post details"
     window._set_status(first_line)
-    show_post(window, fallback, allow_hydrate=False)
+    active_post = window._current_post()
+    if active_post is not None and active_post.id == fallback.id:
+        show_post(window, fallback, allow_hydrate=False)
 
 
 def preview_failed(window: MainWindow, error_text: str) -> None:
@@ -146,7 +148,9 @@ def preview_failed(window: MainWindow, error_text: str) -> None:
     window._set_status(first_line)
 
 
-def preview_failed_with_context(window: MainWindow, post: Post, error_text: str) -> None:
+def preview_failed_with_context(window: MainWindow, token: int, post: Post, error_text: str) -> None:
+    if token != window._preview_token:
+        return
     if window.left_tabs.currentWidget() is window.favorites_list or post.id in window.favorite_ids:
         window._log_sync_debug(
             f"Favorites preview fetch failure for #{post.id}",
