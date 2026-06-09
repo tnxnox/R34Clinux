@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 
+from PySide6.QtCore import QObject
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -11,12 +13,14 @@ except ImportError:  # pragma: no cover
     vlc = None
 
 
-class VideoPlayer:
-    def __init__(self) -> None:
+class VideoPlayer(QObject):
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
         self._vlc_instance = None
         self._vlc_player = None
         self._fallback_active = True
         self._setup_backend(fallback=True)
+        self.destroyed.connect(self.release)
 
     def _argument_profiles(self, fallback: bool) -> list[list[str]]:
         """Return progressively more conservative argument sets to try.
