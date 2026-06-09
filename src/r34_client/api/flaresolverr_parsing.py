@@ -110,7 +110,46 @@ def extract_favorite_tile_ids(html_text: str) -> list[int]:
     return ids
 
 
-def extract_items(html_text: str) -> list[tuple[int, str]]:
+def validate_favorites_html(html_text: str) -> None:
+    if looks_rate_limited(html_text):
+        raise RuntimeError("Rule34 request was rate limited.")
+
+    if not looks_logged_in(html_text):
+        raise RuntimeError("Rule34 session is not logged in / session expired.")
+
+    lowered = html_text.lower()
+    has_signature = (
+        "rule34" in lowered
+        or "rule 34" in lowered
+        or "layout.css" in lowered
+        or "page=account" in lowered
+    )
+    if not has_signature:
+        raise RuntimeError("Invalid response: Not a Rule34 page.")
+
+    if "cloudflare" in lowered and ("checking your browser" in lowered or "enable javascript" in lowered):
+        raise RuntimeError("Rule34 request blocked by Cloudflare challenge.")
+
+
+def validate_favorites_parsed_results(html_text: str, parsed_count: int) -> None:
+    validate_favorites_html(html_text)
+
+    if parsed_count == 0:
+        lowered = html_text.lower()
+        has_post_links = "page=post" in lowered or "/post/view" in lowered
+        has_thumbnails = "/thumbnails/" in lowered or "preview.rule34.xxx" in lowered
+
+        if has_post_links or has_thumbnails:
+            raise RuntimeError(
+                "Failed to parse favorites: Rule34 layout might have changed. "
+                "Found thumbnail or post indicators in HTML, but extracted 0 items."
+            )
+
+
+def extract_items(html_text: str, validate: bool = False) -> list[tuple[int, str]]:
+    if validate:
+        validate_favorites_html(html_text)
+
     normalized = _normalize_html_text(html_text)
 
     tile_matches = re.findall(
@@ -129,6 +168,8 @@ def extract_items(html_text: str) -> list[tuple[int, str]]:
             if preview.startswith("//"):
                 preview = f"https:{preview}"
             items.append((post_id, preview))
+        if validate:
+            validate_favorites_parsed_results(html_text, len(items))
         return items
 
     ids = extract_post_ids(normalized)
@@ -140,4 +181,7 @@ def extract_items(html_text: str) -> list[tuple[int, str]]:
         if preview.startswith("//"):
             preview = f"https:{preview}"
         items.append((post_id, preview))
+
+    if validate:
+        validate_favorites_parsed_results(html_text, len(items))
     return items
