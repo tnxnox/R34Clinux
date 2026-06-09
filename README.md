@@ -83,7 +83,7 @@ Access via the toolbar (gear icon). Key settings:
 
 ## Support
 
-If this helps you out, consider buying me a coffee:
+If you like the app, you can thank me here :
 
 [![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/thenoix)
 
