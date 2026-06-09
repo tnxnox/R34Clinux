@@ -46,7 +46,7 @@ def open_settings(window: MainWindow, initial: bool = False) -> None:
             from r34_client.core.worker import FunctionWorker
             worker = FunctionWorker(start_solver_task)
             worker.signals.finished.connect(on_start_finished)
-            window._pool_for_workload("general").start(worker)
+            window._start_worker(worker, workload="general")
             return
     else:
         window._set_status("Settings saved.")
