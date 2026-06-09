@@ -126,6 +126,7 @@ def start_worker(window: MainWindow, worker: FunctionWorker, workload: str = "ge
 
     worker.signals.finished.connect(release_worker)
     worker.signals.failed.connect(release_worker)
+    worker.signals.cancelled.connect(release_worker)
     window._pool_for_workload(workload).start(worker)
 
 
