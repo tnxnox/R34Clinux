@@ -52,6 +52,15 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("R34 Linux Client")
 
+    # Load and apply the QSS stylesheet
+    try:
+        from pathlib import Path
+        qss_path = Path(__file__).parent / "ui" / "style.qss"
+        if qss_path.exists():
+            app.setStyleSheet(qss_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        logging.getLogger(__name__).warning("Failed to load stylesheet: %s", e)
+
     store = SettingsStore()
     window = MainWindow(store)
     window.show()
