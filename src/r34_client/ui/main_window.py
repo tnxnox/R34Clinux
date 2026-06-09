@@ -112,6 +112,7 @@ class MainWindow(QMainWindow):
         self._pending_endpoint_streaks: dict[str, int] = {"add": 0, "remove": 0}
         self._pending_state_loaded = False
         self._pending_sync_worker_active = False
+        self._sync_active_workers = 0
         self._pending_sync_started_at = 0.0
         self._pending_sync_last_restart_at = 0.0
         import threading
@@ -260,8 +261,11 @@ class MainWindow(QMainWindow):
         self._image_pan_start_scroll: tuple[int, int] = (0, 0)
         self._mutation_token = 0
         self._download_token = 0
+        self._single_download_token = 0
+        self._bulk_download_token = 0
         self._hydrate_token = 0
         self._friend_fetch_token = 0
+        self._prefetch_metadata_token = 0
         self._friend_current_page = 0
         self._friend_user_id: str = ""
         self._friend_has_more = False
@@ -383,8 +387,9 @@ class MainWindow(QMainWindow):
     def _background_sync_tick(self) -> None:
         if not self._sync_enabled():
             return
-        if self._active_workers:
+        if self._sync_active_workers > 0:
             return
+        self._sync_active_workers += 1
         self._refresh_favorites()
 
     def _pending_remote_sync_tick(self) -> None:
@@ -447,7 +452,19 @@ class MainWindow(QMainWindow):
         search_feature.apply_search_query(self, combined_query)
 
     def _on_collection_filter_changed(self, _: int) -> None:
+        # Preserve the current selection across the refresh.
+        saved = self._current_post()
+        saved_id = saved.id if saved is not None else None
         self._refresh_favorites()
+        if saved_id is not None:
+            for row in range(self.favorites_list.count()):
+                item = self.favorites_list.item(row)
+                if item is None:
+                    continue
+                candidate = item.data(Qt.ItemDataRole.UserRole)
+                if isinstance(candidate, Post) and candidate.id == saved_id:
+                    self.favorites_list.setCurrentItem(item)
+                    break
 
     def _open_collection_manager(self) -> None:
         text, accepted = QInputDialog.getText(self, "New collection", "Collection name")
@@ -705,9 +722,11 @@ class MainWindow(QMainWindow):
         return search_feature.sync_remote(self)
 
     def _favorites_loaded(self, token: int, result: object) -> None:
+        self._sync_active_workers = max(0, self._sync_active_workers - 1)
         search_feature.favorites_loaded(self, token, result)
 
     def _favorites_failed(self, token: int, error_text: str) -> None:
+        self._sync_active_workers = max(0, self._sync_active_workers - 1)
         search_feature.favorites_failed(self, token, error_text)
 
     def _open_results_context_menu(self, position) -> None:
@@ -879,7 +898,13 @@ class MainWindow(QMainWindow):
         Warms both the image cache and the metadata for upcoming posts so
         J/K navigation is instant.
         """
-        posts = self.current_posts or self.favorite_posts or self.friend_posts or []
+        # Determine which post list corresponds to the active tab.
+        if self.left_tabs.currentWidget() is self.favorites_list:
+            posts = self.favorite_posts
+        elif self.left_tabs.currentWidget() is self.friends_tab:
+            posts = self.friend_posts
+        else:
+            posts = self.current_posts
         if not posts or not self.settings.user_id:
             return
         worker = FunctionWorker(
@@ -913,6 +938,9 @@ class MainWindow(QMainWindow):
         if not posts or not self.settings.has_credentials:
             return
 
+        self._prefetch_metadata_token += 1
+        token = self._prefetch_metadata_token
+
         # Pick the slice of posts to prefetch.
         if around is not None:
             try:
@@ -942,12 +970,14 @@ class MainWindow(QMainWindow):
             self.client,
             limit=len(todo),
         )
-        worker.signals.finished.connect(self._apply_prefetched_metadata)
+        worker.signals.finished.connect(lambda result, t=token: self._apply_prefetched_metadata(t, result))
         worker.signals.failed.connect(lambda _: None)
         self._start_worker(worker, workload="general")
 
-    def _apply_prefetched_metadata(self, result: object) -> None:
+    def _apply_prefetched_metadata(self, token: int, result: object) -> None:
         """Callback: apply hydrated Post dict to the active list."""
+        if token != self._prefetch_metadata_token:
+            return
         if not isinstance(result, dict):
             return
 

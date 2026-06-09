@@ -206,6 +206,8 @@ def refresh_playback_controls(window: MainWindow) -> None:
     window.seek_slider.blockSignals(True)
     if total_ms > 0:
         window.seek_slider.setRange(0, total_ms)
+    else:
+        window.seek_slider.setRange(0, 0)
     if window._seek_dragging:
         shown_ms = window._pending_seek_ms
         if total_ms > 0:

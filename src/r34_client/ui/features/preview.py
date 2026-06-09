@@ -51,8 +51,7 @@ def show_post(window: MainWindow, post: Post, allow_hydrate: bool = True) -> Non
         window._start_worker(worker, workload="preview")
 
     if is_video_post(post):
-        if not needs_hydrate:
-            window._show_video_preview(post)
+        window._show_video_preview(post)
         return
 
     if not needs_hydrate:

@@ -123,6 +123,11 @@ class SettingsStore:
             settings.sync_conflict_strategy = "merge"
 
     def save(self, settings: AppSettings) -> None:
+        if settings.website_password:
+            logger.warning(
+                "Website password is stored in plaintext. Consider setting up a system keyring "
+                "for secure credential storage instead."
+            )
         self._settings.setValue("api/user_id", settings.user_id)
         self._settings.setValue("api/api_key", settings.api_key)
         self._settings.setValue("sync/website_username", settings.website_username)

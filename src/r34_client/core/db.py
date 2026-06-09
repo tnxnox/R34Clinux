@@ -216,24 +216,29 @@ class LocalFavoritesStore:
 
     def replace_all(self, posts: list[Post]) -> None:
         with self._connect() as connection:
-            keep_ids = {int(post.id) for post in posts}
-            if keep_ids:
-                placeholders = ", ".join("?" for _ in keep_ids)
-                connection.execute(
-                    f"DELETE FROM favorites WHERE id NOT IN ({placeholders})",
-                    tuple(sorted(keep_ids)),
-                )
-                connection.execute(
-                    f"DELETE FROM favorite_collection_items WHERE post_id NOT IN ({placeholders})",
-                    tuple(sorted(keep_ids)),
-                )
-            else:
-                connection.execute("DELETE FROM favorites")
-                connection.execute("DELETE FROM favorite_collection_items")
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                keep_ids = {int(post.id) for post in posts}
+                if keep_ids:
+                    placeholders = ", ".join("?" for _ in keep_ids)
+                    connection.execute(
+                        f"DELETE FROM favorites WHERE id NOT IN ({placeholders})",
+                        tuple(sorted(keep_ids)),
+                    )
+                    connection.execute(
+                        f"DELETE FROM favorite_collection_items WHERE post_id NOT IN ({placeholders})",
+                        tuple(sorted(keep_ids)),
+                    )
+                else:
+                    connection.execute("DELETE FROM favorites")
+                    connection.execute("DELETE FROM favorite_collection_items")
 
-            for post in posts:
-                self._upsert(connection, post)
-            connection.commit()
+                for post in posts:
+                    self._upsert(connection, post)
+                connection.execute("COMMIT")
+            except Exception:
+                connection.execute("ROLLBACK")
+                raise
 
     def remove_favorite(self, post_id: int) -> None:
         self.remove_favorites([post_id])
@@ -381,8 +386,7 @@ class LocalFavoritesStore:
                 preview_url=excluded.preview_url,
                 sample_url=excluded.sample_url,
                 file_url=excluded.file_url,
-                created_at=excluded.created_at,
-                favorited_at=excluded.favorited_at
+                created_at=excluded.created_at
             """,
             (
                 post.id,

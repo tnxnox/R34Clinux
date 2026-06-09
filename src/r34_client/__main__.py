@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 import sys
@@ -7,19 +8,29 @@ import sys
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
+from r34_client import __version__
 from r34_client.core.settings import SettingsStore
 from r34_client.ui.main_window import MainWindow
 
-_LOG_LEVEL = os.environ.get("R34_LOG_LEVEL", "").upper()
-if _LOG_LEVEL:
-    logging.basicConfig(
-        level=getattr(logging, _LOG_LEVEL, logging.INFO),
-        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="R34 Linux Client")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"r34-client {__version__}",
+    )
+    # Parse known args only to avoid conflicts with Qt flags
+    parsed, _ = parser.parse_known_args(sys.argv[1:])
+
+    _LOG_LEVEL = os.environ.get("R34_LOG_LEVEL", "").upper()
+    if _LOG_LEVEL:
+        logging.basicConfig(
+            level=getattr(logging, _LOG_LEVEL, logging.INFO),
+            format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+
     # Keep WebEngine flags conservative: swiftshader + disable-gpu combinations can abort on Linux.
     existing_flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
     flag_parts = [part for part in existing_flags.split() if part]

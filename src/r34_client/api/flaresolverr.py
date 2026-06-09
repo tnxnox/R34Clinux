@@ -182,7 +182,7 @@ class FlareSolverrFavoritesClient:
         if headers:
             payload["headers"] = headers
 
-        for attempt in range(1, 4):
+        for attempt in range(1, 5):
             self._ensure_session()
             try:
                 response = self._session.post(self._solver_endpoint(), json=payload, timeout=self.timeout)
@@ -210,7 +210,7 @@ class FlareSolverrFavoritesClient:
                 return content.strip()
 
             message = str(body.get("message") or body.get("error") or "Unknown FlareSolverr error")
-            if attempt < 4 and self._is_session_error(message):
+            if attempt < 5 and self._is_session_error(message):
                 self._debug(f"request.get: stale session detected, recreating (attempt={attempt}/4)")
                 self._session_ready = False
                 self._web_session_authenticated = False
@@ -241,7 +241,7 @@ class FlareSolverrFavoritesClient:
             "session_ttl_minutes": self.session_ttl_minutes,
         }
 
-        for attempt in range(1, 4):
+        for attempt in range(1, 5):
             self._ensure_session()
             try:
                 response = self._session.post(self._solver_endpoint(), json=payload, timeout=self.timeout)
@@ -269,7 +269,7 @@ class FlareSolverrFavoritesClient:
                 return content.strip()
 
             message = str(body.get("message") or body.get("error") or "Unknown FlareSolverr error")
-            if attempt < 4 and self._is_session_error(message):
+            if attempt < 5 and self._is_session_error(message):
                 self._debug(f"request.post: stale session detected, recreating (attempt={attempt}/4)")
                 self._session_ready = False
                 self._web_session_authenticated = False
@@ -497,12 +497,12 @@ class FlareSolverrFavoritesClient:
         try:
             raw = self._request_via_solver(url)
             payload = decode_payload(raw)
-        except RuntimeError as exc:
-            raise FlareSolverrError("Unable to parse response returned via FlareSolverr.") from exc
         except FlareSolverrError as exc:
             self._debug(f"list_favorites_dapi: fallback_to_html reason={exc}")
             logger.warning("list_favorites_dapi: falling back to HTML due to: %s", exc)
             return []
+        except RuntimeError as exc:
+            raise FlareSolverrError("Unable to parse response returned via FlareSolverr.") from exc
 
         if isinstance(payload, list):
             raw_posts: Any = payload
@@ -554,6 +554,10 @@ class FlareSolverrFavoritesClient:
                             "sample_url": preview_url,
                         }
                     )
+                )
+                logger.debug(
+                    "list_favorites_html: post %s has partial data (id/preview only, no tags/rating/score)",
+                    post_id,
                 )
                 if len(posts) >= max(1, int(limit)):
                     return posts

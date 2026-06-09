@@ -60,7 +60,9 @@ class DownloadManager:
         """Ensure the resolved path stays within the base directory (path traversal guard)."""
         resolved_full = full_path.resolve()
         resolved_base = base_dir.resolve()
-        if not str(resolved_full).startswith(str(resolved_base)):
+        try:
+            resolved_full.relative_to(resolved_base)
+        except ValueError:
             raise ValueError(
                 f"Path traversal detected: {resolved_full} is outside {resolved_base}"
             )
@@ -158,20 +160,26 @@ class DownloadManager:
                     # Check Content-Length to prevent oversized downloads
                     content_length = response.headers.get("content-length")
                     if content_length:
-                        expected_size = int(content_length)
-                        if expected_size > MAX_DOWNLOAD_BYTES:
-                            raise RuntimeError(
-                                f"Download too large: {expected_size / (1024*1024):.1f} MB "
-                                f"(max {MAX_DOWNLOAD_BYTES / (1024*1024):.0f} MB)"
-                            )
-                        # Check disk space beforehand
-                        self._check_disk_space(dest, expected_size * 2)
+                        try:
+                            expected_size = int(content_length)
+                        except ValueError:
+                            logger.warning("Malformed Content-Length header: %r, ignoring size limit", content_length)
+                        else:
+                            if expected_size > MAX_DOWNLOAD_BYTES:
+                                raise RuntimeError(
+                                    f"Download too large: {expected_size / (1024*1024):.1f} MB "
+                                    f"(max {MAX_DOWNLOAD_BYTES / (1024*1024):.0f} MB)"
+                                )
+                            # Check disk space beforehand
+                            self._check_disk_space(dest, expected_size * 2)
 
                     # Check disk space with a reasonable default even without content-length
                     if not content_length:
                         self._check_disk_space(dest, MAX_DOWNLOAD_BYTES)
 
                     bytes_downloaded = 0
+                    read_start = time.monotonic()
+                    max_read_duration = 120  # max seconds for the streaming loop
                     try:
                         with dest.open("wb") as f:
                             for chunk in response.iter_content(chunk_size=1024 * 64):
@@ -181,6 +189,12 @@ class DownloadManager:
                                         raise RuntimeError(
                                             f"Download exceeded maximum size of "
                                             f"{MAX_DOWNLOAD_BYTES / (1024*1024):.0f} MB"
+                                        )
+                                    # Enforce a total read timeout to prevent indefinite hangs
+                                    if time.monotonic() - read_start > max_read_duration:
+                                        raise RuntimeError(
+                                            f"Download timed out after {max_read_duration}s "
+                                            f"({bytes_downloaded / (1024*1024):.1f} MB received)"
                                         )
                                     f.write(chunk)
                     except PermissionError:

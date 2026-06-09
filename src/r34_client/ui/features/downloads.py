@@ -55,8 +55,8 @@ def download_selected_post(window: MainWindow) -> None:
     def download() -> Path:
         return download_post_to_directory(window, post, target_directory)
 
-    window._download_token += 1
-    token = window._download_token
+    window._single_download_token += 1
+    token = window._single_download_token
 
     worker = FunctionWorker(download_post_to_directory, window, post, target_directory)
     worker.signals.finished.connect(lambda result: download_finished(window, token, result))
@@ -88,8 +88,8 @@ def download_multiple_posts(window: MainWindow, posts: list[Post]) -> None:
                 continue
         return successes
 
-    window._download_token += 1
-    token = window._download_token
+    window._bulk_download_token += 1
+    token = window._bulk_download_token
 
     worker = FunctionWorker(download_many, window, unique_posts, target_directory)
     worker.signals.finished.connect(lambda result: download_many_finished(window, token, result))
@@ -130,7 +130,7 @@ def start_worker(window: MainWindow, worker: FunctionWorker, workload: str = "ge
 
 
 def download_finished(window: MainWindow, token: int, result: object) -> None:
-    if token != window._download_token:
+    if token != window._single_download_token:
         return
     if isinstance(result, Path):
         if str(result):
@@ -140,7 +140,7 @@ def download_finished(window: MainWindow, token: int, result: object) -> None:
 
 
 def download_many_finished(window: MainWindow, token: int, result: object) -> None:
-    if token != window._download_token:
+    if token != window._bulk_download_token:
         return
     paths = [item for item in result if isinstance(item, Path) and str(item)] if isinstance(result, list) else []
     window._set_status(f"Saved {len(paths)} files.")

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import random
 import re
 import time
 from typing import TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ..ui.main_window import MainWindow
@@ -26,7 +29,8 @@ def ensure_pending_state_loaded(window: MainWindow) -> None:
 
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to parse pending mutations file '%s': %s", path, exc)
             return
 
         for entry in payload.get("add", []):
@@ -88,7 +92,7 @@ def save_pending_state(window: MainWindow) -> None:
                 }
             )
 
-    path.write_text(json.dumps({"add": add_entries, "remove": remove_entries}, indent=2), encoding="utf-8")
+        path.write_text(json.dumps({"add": add_entries, "remove": remove_entries}, indent=2), encoding="utf-8")
 
 
 def queue_pending_add(window: MainWindow, post_id: int, reason: str, *, persist: bool = True) -> None:

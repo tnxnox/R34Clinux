@@ -46,6 +46,9 @@ class VideoPlayer:
             self._fallback_active = False
             return False
 
+        # Release any prior VLC resources to avoid memory leaks.
+        self.release()
+
         profiles = self._argument_profiles(fallback)
 
         for idx, args in enumerate(profiles):
@@ -123,7 +126,7 @@ class VideoPlayer:
             self._vlc_player.set_nsobject(window_id)
 
         result = self._vlc_player.play()
-        if result == -1:
+        if result != 0:
             raise RuntimeError("VLC could not start playback")
 
     def release(self) -> None:
@@ -138,6 +141,10 @@ class VideoPlayer:
                 pass
             self._vlc_player = None
             self._vlc_instance = None
+
+    def __del__(self) -> None:
+        """Destructor — ensures VLC resources are released on garbage collection."""
+        self.release()
 
     def stop(self) -> None:
         if self._vlc_player is not None:

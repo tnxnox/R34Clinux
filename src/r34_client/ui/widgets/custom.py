@@ -15,7 +15,6 @@ class ClickSeekSlider(QSlider):
                 span = max(self.height(), 1)
 
             value = QStyle.sliderValueFromPosition(self.minimum(), self.maximum(), position, span)
-            self.setValue(value)
             self.sliderMoved.emit(value)
         super().mousePressEvent(event)
 

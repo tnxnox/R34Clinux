@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import urllib.parse
+
 RULE34_WEB_BASE_URL = "https://rule34.xxx"
 RULE34_API_BASE_URL = "https://api.rule34.xxx/index.php"
 RULE34_AUTOCOMPLETE_URL = "https://api.rule34.xxx/autocomplete.php"
@@ -8,7 +10,7 @@ RULE34_IMG_HOST = "img.rule34.xxx"
 
 
 def favorites_view_url(user_id: str, page: int = 0) -> str:
-    return f"{RULE34_WEB_BASE_URL}/index.php?page=favorites&s=view&id={user_id.strip()}&pid={page}"
+    return f"{RULE34_WEB_BASE_URL}/index.php?page=favorites&s=view&id={urllib.parse.quote(user_id.strip(), safe='')}&pid={page}"
 
 
 def favorites_list_url() -> str:
