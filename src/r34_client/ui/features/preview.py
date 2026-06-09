@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
@@ -10,6 +11,8 @@ from r34_client.core.models import Post
 from r34_client.ui.helpers.image_fit import compute_base_render_size
 from r34_client.ui.helpers.post import is_video_post, needs_hydration, probe_file_size
 from r34_client.ui.helpers.preview_fetcher import fetch_preview_bytes
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ..main_window import MainWindow
@@ -29,14 +32,17 @@ def _find_item_by_post_id(list_widget, post_id: int):
 def handle_selection_change(window: MainWindow, current, _previous) -> None:
     window._update_action_state()
     if current is None:
+        logger.debug("Selection changed: no item selected")
         return
     post = current.data(Qt.ItemDataRole.UserRole)
     if isinstance(post, Post):
+        logger.info("Selection changed: Post ID %d", post.id)
         show_post(window, post)
 
 
 def show_post(window: MainWindow, post: Post, allow_hydrate: bool = True) -> None:
     needs_hydrate = allow_hydrate and needs_hydration(post, window._metadata_hydrated_ids)
+    logger.debug("show_post called for ID %d (needs_hydrate=%s, allow_hydrate=%s)", post.id, needs_hydrate, allow_hydrate)
 
     if needs_hydrate:
         window.meta_view.setPlainText("Loading post details...")
@@ -44,6 +50,7 @@ def show_post(window: MainWindow, post: Post, allow_hydrate: bool = True) -> Non
 
         window._hydrate_token += 1
         h_token = window._hydrate_token
+        logger.debug("Starting metadata hydration for ID %d (token=%d)", post.id, h_token)
 
         worker = FunctionWorker(hydrate_post, window, post)
         worker.signals.finished.connect(lambda hydrated, t=h_token: show_hydrated_post(window, t, post, hydrated))
@@ -59,17 +66,21 @@ def show_post(window: MainWindow, post: Post, allow_hydrate: bool = True) -> Non
 
     window._preview_token += 1
     token = window._preview_token
+    logger.debug("Requested preview load for ID %d (token=%d)", post.id, token)
 
     if not post.best_preview_url:
+        logger.warning("Post ID %d has no preview URL", post.id)
         window.preview_label.setText("This post does not expose a preview URL.")
         return
 
     # Check cache first — instant display without a network request.
     cached = window._image_cache.get(post.id)
     if cached is not None:
+        logger.debug("Preview for ID %d found in cache (token=%d)", post.id, token)
         preview_loaded(window, token, cached, post)
         return
 
+    logger.debug("Fetching preview bytes for ID %d from network (token=%d)", post.id, token)
     window.preview_label.setText("Loading preview...")
     worker = FunctionWorker(fetch_preview_bytes, post, user_id=window.settings.user_id)
     worker.signals.finished.connect(lambda data: preview_loaded(window, token, data, post))
@@ -98,7 +109,9 @@ def hydrate_post(window: MainWindow, post: Post) -> Post:
 
 def show_hydrated_post(window: MainWindow, token: int, fallback: Post, hydrated: object) -> None:
     if token != window._hydrate_token:
+        logger.debug("Hydration finished for ID %d but token mismatched (got %d, current %d), discarding", fallback.id, token, window._hydrate_token)
         return
+    logger.info("Successfully hydrated metadata for ID %d", fallback.id)
     chosen = hydrated if isinstance(hydrated, Post) else fallback
     if isinstance(chosen, Post):
         window._metadata_hydrated_ids.add(chosen.id)
@@ -129,12 +142,17 @@ def show_hydrated_post(window: MainWindow, token: int, fallback: Post, hydrated:
 
 def show_hydration_failed(window: MainWindow, token: int, fallback: Post, error_text: str) -> None:
     if token != window._hydrate_token:
+        logger.debug("Hydration failed for ID %d but token mismatched (got %d, current %d), discarding error", fallback.id, token, window._hydrate_token)
         return
+    logger.error("Hydration failed for ID %d: %s", fallback.id, error_text)
     first_line = error_text.splitlines()[-1] if error_text else "Unable to load post details"
     window._set_status(first_line)
     active_post = window._current_post()
     if active_post is not None and active_post.id == fallback.id:
+        logger.debug("Hydration failed post ID %d is still active selection, displaying fallback", fallback.id)
         show_post(window, fallback, allow_hydrate=False)
+    else:
+        logger.debug("Hydration failed post ID %d is no longer active selection, skipping display fallback", fallback.id)
 
 
 def preview_failed(window: MainWindow, error_text: str) -> None:
@@ -150,7 +168,9 @@ def preview_failed(window: MainWindow, error_text: str) -> None:
 
 def preview_failed_with_context(window: MainWindow, token: int, post: Post, error_text: str) -> None:
     if token != window._preview_token:
+        logger.debug("Preview fetch failed for ID %d but token mismatched (got %d, current %d), discarding error", post.id, token, window._preview_token)
         return
+    logger.error("Preview fetch failed for ID %d: %s", post.id, error_text)
     if window.left_tabs.currentWidget() is window.favorites_list or post.id in window.favorite_ids:
         window._log_sync_debug(
             f"Favorites preview fetch failure for #{post.id}",
@@ -169,7 +189,9 @@ def preview_failed_with_context(window: MainWindow, token: int, post: Post, erro
 
 def preview_loaded(window: MainWindow, token: int, data: object, post: Post) -> None:
     if token != window._preview_token or not isinstance(data, (bytes, bytearray)):
+        logger.debug("Preview loaded for ID %d but token mismatched or invalid data (got token %d, current %d)", post.id, token, window._preview_token)
         return
+    logger.info("Preview loaded for ID %d (%d bytes)", post.id, len(data))
 
     image = QImage.fromData(bytes(data))
     if image.isNull():
