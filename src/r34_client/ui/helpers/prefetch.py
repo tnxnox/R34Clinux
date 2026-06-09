@@ -68,9 +68,6 @@ def _best_prefetch_url(post: Post) -> str | None:
     return urls[0] if urls else None
 
 
-_PREFETCH_SESSION = requests.Session()
-
-
 def prefetch_images_batch(
     posts: list[Post],
     user_id: str,
@@ -84,43 +81,47 @@ def prefetch_images_batch(
     background worker, never from the UI thread.
     """
     from r34_client.ui.helpers.preview_fetcher import preview_candidate_urls, preview_referers
+    from r34_client.core.worker import check_cancelled
 
     fetched = 0
-    for post in posts[:limit]:
-        if cache.contains(post.id):
-            continue
+    with requests.Session() as session:
+        for post in posts[:limit]:
+            check_cancelled()
+            if cache.contains(post.id):
+                continue
 
-        urls = preview_candidate_urls(post)
-        if not urls:
-            continue
+            urls = preview_candidate_urls(post)
+            if not urls:
+                continue
 
-        for referer in preview_referers(post, user_id=user_id):
-            for url in urls:
-                try:
-                    resp = _PREFETCH_SESSION.get(
-                        url,
-                        timeout=15,
-                        headers={
-                            "User-Agent": (
-                                "Mozilla/5.0 (X11; Linux x86_64) "
-                                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                                "Chrome/124.0.0.0 Safari/537.36"
-                            ),
-                            "Referer": referer,
-                            "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-                        },
-                    )
-                    if resp.status_code == 200:
-                        cache.put(post.id, resp.content)
-                        fetched += 1
-                        break
-                    if resp.status_code == 403:
-                        continue  # try next referer/URL
-                except requests.RequestException:
-                    continue
-            else:
-                continue  # all URLs failed for this referer; try next referer
-            break  # one URL + referer succeeded; move to next post
+            for referer in preview_referers(post, user_id=user_id):
+                for url in urls:
+                    check_cancelled()
+                    try:
+                        resp = session.get(
+                            url,
+                            timeout=15,
+                            headers={
+                                "User-Agent": (
+                                    "Mozilla/5.0 (X11; Linux x86_64) "
+                                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                    "Chrome/124.0.0.0 Safari/537.36"
+                                ),
+                                "Referer": referer,
+                                "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+                            },
+                        )
+                        if resp.status_code == 200:
+                            cache.put(post.id, resp.content)
+                            fetched += 1
+                            break
+                        if resp.status_code == 403:
+                            continue  # try next referer/URL
+                    except requests.RequestException:
+                        continue
+                else:
+                    continue  # all URLs failed for this referer; try next referer
+                break  # one URL + referer succeeded; move to next post
 
     return fetched
 
