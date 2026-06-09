@@ -151,3 +151,44 @@ class ExtractItemsTests(unittest.TestCase):
     def test_fallback_to_post_ids_and_imgs(self) -> None:
         html = '<img src="fallback.jpg">'
         self.assertEqual(extract_items(html), [])
+
+
+class FlareSolverrValidationTests(unittest.TestCase):
+    def test_validate_logged_out_raises(self) -> None:
+        # Lacks page=account&s=logout or other login signatures
+        html = "<html><body>Some random page</body></html>"
+        with self.assertRaises(RuntimeError) as ctx:
+            extract_items(html, validate=True)
+        self.assertIn("session is not logged in", str(ctx.exception))
+
+    def test_validate_not_rule34_raises(self) -> None:
+        # Has logout signature but no rule34 signature
+        html = "<html><body>s=logout but nothing else</body></html>"
+        with self.assertRaises(RuntimeError) as ctx:
+            extract_items(html, validate=True)
+        self.assertIn("Not a Rule34 page", str(ctx.exception))
+
+    def test_validate_rate_limited_raises(self) -> None:
+        html = "HTTP 429 rate limited"
+        with self.assertRaises(RuntimeError) as ctx:
+            extract_items(html, validate=True)
+        self.assertIn("rate limited", str(ctx.exception))
+
+    def test_validate_cloudflare_raises(self) -> None:
+        html = "rule34 page=account&s=logout cloudflare checking your browser"
+        with self.assertRaises(RuntimeError) as ctx:
+            extract_items(html, validate=True)
+        self.assertIn("blocked by Cloudflare", str(ctx.exception))
+
+    def test_validate_layout_changed_raises(self) -> None:
+        # Rule34, logged in, but contains thumbnail indicator and 0 items parsed
+        html = "rule34 page=account&s=logout /thumbnails/pic.jpg"
+        with self.assertRaises(RuntimeError) as ctx:
+            extract_items(html, validate=True)
+        self.assertIn("Rule34 layout might have changed", str(ctx.exception))
+
+    def test_validate_empty_valid_page_passes(self) -> None:
+        # Rule34, logged in, truly empty (no thumbnails, no posts)
+        html = "rule34 page=account&s=logout No favorites found"
+        # Should not raise, just return empty list
+        self.assertEqual(extract_items(html, validate=True), [])
