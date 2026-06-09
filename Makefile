@@ -6,10 +6,10 @@ RUFF = $(VENV)/bin/ruff
 MYPY = $(VENV)/bin/mypy
 
 test:
-	$(PYTHON) -m unittest discover -s src/tests -p "test_*.py" -v
+	QT_QPA_PLATFORM=offscreen $(PYTHON) -m unittest discover -s src/tests -p "test_*.py" -v
 
 test-quick:
-	$(PYTHON) src/tests/run_all.py
+	QT_QPA_PLATFORM=offscreen $(PYTHON) src/tests/run_all.py
 
 lint:
 	$(RUFF) check src/r34_client/
