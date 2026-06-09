@@ -5,6 +5,9 @@ from PySide6.QtWidgets import QSlider, QStyle, QWidget
 
 
 class ClickSeekSlider(QSlider):
+    def __init__(self, orientation: Qt.Orientation = Qt.Orientation.Horizontal, parent: QWidget | None = None) -> None:
+        super().__init__(orientation, parent)
+
     def mousePressEvent(self, event) -> None:  # type: ignore[override]
         if event.button() == Qt.MouseButton.LeftButton:
             if self.orientation() == Qt.Orientation.Horizontal:
@@ -21,6 +24,9 @@ class ClickSeekSlider(QSlider):
 
 class ClickVideoSurface(QWidget):
     clicked = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
 
     def mousePressEvent(self, event) -> None:  # type: ignore[override]
         if event.button() == Qt.MouseButton.LeftButton:
