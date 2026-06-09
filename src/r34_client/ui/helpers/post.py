@@ -61,8 +61,6 @@ def format_millis(value: int) -> str:
 def needs_hydration(post: Post, hydrated_ids: set[int]) -> bool:
     needs = (
         post.score is None
-        or post.file_size is None
-        or not post.source
         or not post.file_url
         or not post.tags
     )
