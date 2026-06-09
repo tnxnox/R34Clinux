@@ -1,5 +1,10 @@
 # R34 Linux Client
 
+[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python)](https://python.org)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Tests](https://github.com/tnxnox/R34Clinux/actions/workflows/tests.yml/badge.svg)](https://github.com/tnxnox/R34Clinux/actions/workflows/tests.yml)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support-FF5E5B?logo=kofi)](https://ko-fi.com/thenoix)
+
 Python desktop client for rule34.xxx using the official authenticated API and
 Qt6 (PySide6). Built for keyboard-driven browsing, local favorites management,
 and practical Linux desktop use.
@@ -295,3 +300,15 @@ scripts/
   consider pruning unused data.
 - **Large images don't load:** Qt has a default 256 MB image allocation limit.
   Images over ~9–10 MB JPEG may hit this during decompression.
+
+---
+
+## Support
+
+If this project helps you out, consider buying me a coffee:
+
+[![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/thenoix)
+
+## License
+
+MIT — see [LICENSE](LICENSE) for the full text.

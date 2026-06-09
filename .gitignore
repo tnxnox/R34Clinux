@@ -52,6 +52,3 @@ pending-mutations.json
 
 # Project-internal docs (not shipped)
 ROADMAP.md
-
-# Keep repository metadata local-only
-.github/
