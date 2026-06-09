@@ -78,7 +78,7 @@ Access via the toolbar (gear icon). Key settings:
 ## Feedback
 
 - If you encounter problems you don't know how to solve, or discover bugs, feel free
-  to either open an [issue](https://github.com/tnxnox/R34Clinux/issues) or add me
+  to either open an [issue](https://github.com/tnxnox/R34Clinux/issues) or message me
   on discord : thenoix
 
 ## Support
