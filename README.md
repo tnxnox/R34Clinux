@@ -7,6 +7,7 @@
 
 A proper desktop client for rule34.xxx — search, browse, collect, download. Built
 with Python and Qt6 for Linux.
+I'm also planning a windows release soon.
 
 ## Quick Start
 
