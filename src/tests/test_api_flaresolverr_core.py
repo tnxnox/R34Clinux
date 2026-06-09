@@ -216,3 +216,28 @@ class ExtractRetryAfterSecondsTests(unittest.TestCase):
         """The regex captures the absolute value even with a negative sign."""
         result = extract_retry_after_seconds("retry after -5")
         self.assertEqual(result, 5)
+
+
+class EnsureSessionAutoStartTests(unittest.TestCase):
+    """Tests for FlareSolverrFavoritesClient._ensure_session auto-start behavior."""
+
+    @patch("r34_client.api.flaresolverr.requests.Session")
+    @patch("r34_client.api.flaresolverr_launcher.start_flaresolverr_container")
+    def test_ensure_session_calls_launcher_on_first_connection_failure(
+        self, mock_launcher, mock_session_class
+    ) -> None:
+        import requests
+        mock_session = mock_session_class.return_value
+        mock_session.post.side_effect = requests.RequestException("connection refused")
+
+        client = FlareSolverrFavoritesClient(
+            user_id="user123",
+            api_key="key",
+            solver_url="http://127.0.0.1:8191",
+        )
+
+        with self.assertRaises(FlareSolverrError):
+            client._ensure_session()
+
+        mock_launcher.assert_called_once_with("http://127.0.0.1:8191")
+

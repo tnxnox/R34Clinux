@@ -95,6 +95,18 @@ class FlareSolverrFavoritesClient:
                 break
             except requests.RequestException as exc:
                 last_exc = exc
+                if attempt == 1:
+                    self._debug("ensure_session: connection failed, attempting to auto-start FlareSolverr container")
+                    try:
+                        from r34_client.api.flaresolverr_launcher import start_flaresolverr_container
+                        started = start_flaresolverr_container(self.solver_url)
+                        if started:
+                            self._debug("ensure_session: FlareSolverr container auto-started successfully")
+                        else:
+                            self._debug("ensure_session: failed to auto-start FlareSolverr container")
+                    except Exception as launch_exc:
+                        self._debug(f"ensure_session: failed to import or run launcher: {launch_exc}")
+
                 if attempt < 3:
                     delay = float(attempt)
                     self._debug(f"ensure_session: transient failure attempt={attempt}/3 wait={delay:.1f}s")
