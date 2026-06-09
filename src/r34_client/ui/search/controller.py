@@ -54,14 +54,8 @@ def run_search(window: MainWindow) -> None:
         window.open_settings(initial=True)
         return
 
-    window.page_label.setText(f"Page {window.current_page + 1}")
-    window.results_list.clear()
-    if window.left_tabs.currentWidget() is window.results_list:
-        window.preview_label.setText("Loading results...")
-        window.meta_view.clear()
+    # Let the AppState reset and let UI slots clear list reactively
     window.current_posts = []
-    window._refresh_related_tags([])
-    window._update_action_state()
     window._set_status("Searching...")
 
     window._search_token += 1
@@ -80,29 +74,6 @@ def search_finished(window: MainWindow, token: int, result: object) -> None:
         return
     posts = list(result) if isinstance(result, list) else []
     window.current_posts = posts
-    window.results_list.clear()
-
-    for post in posts:
-        item = QListWidgetItem(window._format_post_tile(post))
-        item.setData(Qt.ItemDataRole.UserRole, post)
-        window.results_list.addItem(item)
-
-    update_related_tags(window, posts)
-    window._update_action_state()
-
-    # Warm the cache BEFORE selecting the first row so the background
-    # prefetch has a head start before show_post checks the cache.
-    if posts:
-        window._prefetch_images(posts)
-
-    if posts:
-        if window.left_tabs.currentWidget() is window.results_list:
-            window.results_list.setCurrentRow(0)
-        window._set_status(f"Loaded {len(posts)} posts.")
-    else:
-        window.preview_label.setText("No posts matched the search query.")
-        window.meta_view.setPlainText("No results.")
-        window._set_status("Search completed with no results.")
 
 
 def refresh_favorites(window: MainWindow) -> None:
@@ -173,13 +144,6 @@ def favorites_loaded(window: MainWindow, token: int, result: object) -> None:
     if token != window._favorites_token:
         return
 
-    previous_current_id: int | None = None
-    previous_current_item = window.favorites_list.currentItem()
-    if previous_current_item is not None:
-        previous_post = previous_current_item.data(Qt.ItemDataRole.UserRole)
-        if isinstance(previous_post, Post):
-            previous_current_id = previous_post.id
-
     loaded_posts: list[Post]
     if isinstance(result, tuple) and len(result) == 2 and isinstance(result[0], list):
         loaded_posts = result[0]
@@ -195,65 +159,6 @@ def favorites_loaded(window: MainWindow, token: int, result: object) -> None:
         loaded_posts = window.local_favorites.list_favorites(collection_name=selected_collection)
 
     window.favorite_posts = [item for item in loaded_posts if isinstance(item, Post)]
-    window.favorite_ids = {post.id for post in window.favorite_posts}
-    window._refresh_collection_filter()
-
-    window.favorites_list.clear()
-    for post in window.favorite_posts:
-        item = QListWidgetItem(window._format_post_tile(post))
-        item.setData(Qt.ItemDataRole.UserRole, post)
-        window.favorites_list.addItem(item)
-
-    # Warm the cache BEFORE restoring the selection so the background
-    # prefetch has a head start before show_post checks the cache.
-    if window.favorite_posts:
-        window._prefetch_images(window.favorite_posts)
-
-    should_restore_selection = (
-        window.left_tabs.currentWidget() is window.favorites_list
-        or previous_current_id is not None
-    )
-
-    if should_restore_selection and window.favorites_list.count() > 0:
-        target_row = 0
-        if previous_current_id is not None:
-            for index, post in enumerate(window.favorite_posts):
-                if post.id == previous_current_id:
-                    target_row = index
-                    break
-
-        window.favorites_list.setCurrentRow(target_row)
-        selected_item = window.favorites_list.item(target_row)
-        if selected_item is not None:
-            selected_item.setSelected(True)
-            if window.left_tabs.currentWidget() is window.favorites_list:
-                window._handle_selection_change(selected_item, None)
-
-    if window._sync_enabled():
-        pending_add = len(window._pending_remote_add_ids)
-        pending_remove = len(window._pending_remote_remove_ids)
-        if window._favorites_sync_fallback_used:
-            if window._degraded_mode_active():
-                window._set_status(
-                    "Favorites sync temporarily degraded due to rate limiting; "
-                    f"showing local cache ({len(window.favorite_posts)} posts)."
-                )
-            else:
-                window._set_status(
-                    f"Favorites sync returned empty data; showing local cache ({len(window.favorite_posts)} posts)."
-                )
-        else:
-            window._rate_limit.note_success()
-            if pending_add or pending_remove:
-                window._set_right_status(
-                    f"Favorites loaded ({len(window.favorite_posts)} posts). Pending sync: {pending_add} add, {pending_remove} remove."
-                )
-                process_pending_remote_mutations(window)
-            else:
-                window._set_right_status(f"Favorites synced ({len(window.favorite_posts)} posts).")
-    else:
-        window._set_right_status(f"Local favorites loaded ({len(window.favorite_posts)} posts).")
-    window._update_action_state()
 
 
 def favorites_failed(window: MainWindow, token: int, error_text: str) -> None:
