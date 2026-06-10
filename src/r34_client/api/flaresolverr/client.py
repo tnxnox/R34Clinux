@@ -407,11 +407,23 @@ class FlareSolverrFavoritesClient:
                     post_id,
                 )
                 if len(posts) >= max(1, int(limit)):
-                    return posts
+                    break
 
             self._debug(f"list_favorites_html: total_unique_items={len(posts)}")
             if posts:
                 break
+
+        if posts:
+            from r34_client.api.client import Rule34Client
+            from r34_client.api.hydration import hydrate_posts
+
+            api_client = Rule34Client(
+                user_id=self.user_id,
+                api_key=self.api_key,
+                base_url=self.api_base_url,
+            )
+            hydrate_posts(api_client, posts, max_workers=10)
+
         return posts
 
     def add_favorite(self, post_id: int) -> None:

@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
-import json
 from typing import TYPE_CHECKING
 
-import requests
-
-from r34_client.api.flaresolverr.parsing import extract_body_text, extract_items
-from r34_client.api.urls import favorites_view_url
+from r34_client.api.hydration import hydrate_posts, hydrate_posts_copy
+from r34_client.api.scraping import fetch_friend_favorites
 from r34_client.core.models import Post
 from r34_client.core.worker import FunctionWorker
 
@@ -15,122 +11,17 @@ if TYPE_CHECKING:
     from ..main_window import MainWindow
 
 
-
-def _fetch_page(url: str, flare_solver_url: str = "") -> str | None:
-    if not flare_solver_url:
-        try:
-            headers = {
-                "User-Agent": (
-                    "Mozilla/5.0 (X11; Linux x86_64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
-                ),
-            }
-            resp = requests.get(url, headers=headers, timeout=15)
-            resp.raise_for_status()
-            return resp.text
-        except requests.RequestException:
-            return None
-
-    try:
-        payload = {
-            "cmd": "request.get",
-            "url": url,
-            "maxTimeout": 30000,
-        }
-        resp = requests.post(
-            f"{flare_solver_url.rstrip('/')}/v1",
-            json=payload,
-            timeout=35,
-        )
-        resp.raise_for_status()
-        body = resp.json()
-        solution = body.get("solution", {})
-        return solution.get("response")
-    except (requests.RequestException, json.JSONDecodeError):
-        return None
-
-
-def _parse_friend_favorites(html: str) -> list[Post]:
-    body = extract_body_text(html)
-    items = extract_items(body)
-
-    posts: list[Post] = []
-    seen: set[int] = set()
-    for post_id, preview_url in items:
-        if post_id in seen:
-            continue
-        seen.add(post_id)
-        post = Post(
-            id=post_id,
-            tags=[],
-            rating="",
-            score=None,
-            width=None,
-            height=None,
-            file_size=None,
-            source="",
-            md5="",
-            preview_url=preview_url,
-            sample_url="",
-            file_url="",
-            created_at="",
-        )
-        posts.append(post)
-    return posts
-
-
-def _hydrate_posts_from_api(client, posts: list[Post], *, start: int = 0, limit: int = 10) -> None:
-    """Fetch full metadata for each post via the authenticated client in-place."""
-    to_hydrate = posts[start : start + limit]
-    if not to_hydrate:
-        return
-
-    def hydrate_single(index: int, post: Post) -> tuple[int, Post | None]:
-        try:
-            candidates = client.search_posts(f"id:{post.id}", 0, 1)
-            if candidates:
-                return index, candidates[0]
-        except Exception:
-            pass
-        return index, None
-
-    max_workers = min(len(to_hydrate), 10)
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(hydrate_single, start + i, post)
-            for i, post in enumerate(to_hydrate)
-        ]
-        for fut in futures:
-            try:
-                idx, hydrated_post = fut.result()
-                if hydrated_post is not None:
-                    posts[idx] = hydrated_post
-            except Exception:
-                continue
-
-
 def _fetch_friend_favorites_impl(client, user_id: str, solver_url: str, page: int = 0) -> list[Post]:
-    # page here is the UI page requested
-    api_page = page // 5
-    pid = api_page * 50
-    url = favorites_view_url(user_id, page=pid)
-    html = _fetch_page(url, flare_solver_url=solver_url)
-    if html is None:
-        msg = f"Failed to fetch favorites for user {user_id} (page {page})"
-        raise RuntimeError(msg)
-    posts = _parse_friend_favorites(html)
+    posts = fetch_friend_favorites(client, user_id, solver_url, page)
     # Hydrate only the slice needed for the requested UI page
     start_idx = (page % 5) * 10
-    _hydrate_posts_from_api(client, posts, start=start_idx, limit=10)
+    hydrate_posts(client, posts, start=start_idx, limit=10)
     return posts
 
 
 def _hydrate_cached_slice_impl(client, posts: list[Post], page: int) -> list[Post]:
-    posts_copy = list(posts)
     start_idx = (page % 5) * 10
-    _hydrate_posts_from_api(client, posts_copy, start=start_idx, limit=10)
-    return posts_copy
+    return hydrate_posts_copy(client, posts, start=start_idx, limit=10)
 
 
 def add_friend_dialog(window: MainWindow) -> None:
@@ -341,34 +232,7 @@ def _trigger_background_prehydration(window: MainWindow, token: int) -> None:
 
 
 def _prehydrate_remaining_impl(client, posts: list[Post]) -> list[Post]:
-    posts_copy = list(posts)
-    unhydrated_indices = [i for i, p in enumerate(posts_copy) if not p.file_url]
-    if not unhydrated_indices:
-        return posts_copy
-
-    def hydrate_single(index: int, post: Post) -> tuple[int, Post | None]:
-        try:
-            candidates = client.search_posts(f"id:{post.id}", 0, 1)
-            if candidates:
-                return index, candidates[0]
-        except Exception:
-            pass
-        return index, None
-
-    # Limit max workers to 10 to not slam Rule34 API
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = [
-            executor.submit(hydrate_single, idx, posts_copy[idx])
-            for idx in unhydrated_indices
-        ]
-        for fut in futures:
-            try:
-                idx, hydrated_post = fut.result()
-                if hydrated_post is not None:
-                    posts_copy[idx] = hydrated_post
-            except Exception:
-                continue
-    return posts_copy
+    return hydrate_posts_copy(client, posts)
 
 
 def _friend_prehydrate_finished(window: MainWindow, token: int, result: object) -> None:
