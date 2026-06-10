@@ -93,6 +93,8 @@ def process_pending_remote_mutations_impl(window: MainWindow) -> dict[str, int |
             "token_exhausted": 0,
             "tokens_available": round(window._remote_mutation_bucket.available_tokens(time.monotonic()), 1),
             "token_wait_seconds": math.ceil(window._remote_mutation_bucket.seconds_until_available(1.0, time.monotonic())),
+            "degraded_remaining": window._degraded_mode_remaining(),
+            "next_retry_remaining": 0,
         }
 
     budget = 12
@@ -100,6 +102,23 @@ def process_pending_remote_mutations_impl(window: MainWindow) -> dict[str, int |
     tokens_spent = 0
     token_exhausted = False
     now_ts = time.time()
+    next_retry_remaining: float | None = None
+
+    for post_id in remove_ids:
+        meta = remove_meta.get(post_id, {})
+        next_attempt = float(meta.get("next_attempt_at", 0.0))
+        if next_attempt > now_ts:
+            rem = next_attempt - now_ts
+            if next_retry_remaining is None or rem < next_retry_remaining:
+                next_retry_remaining = rem
+
+    for post_id in add_ids:
+        meta = add_meta.get(post_id, {})
+        next_attempt = float(meta.get("next_attempt_at", 0.0))
+        if next_attempt > now_ts:
+            rem = next_attempt - now_ts
+            if next_retry_remaining is None or rem < next_retry_remaining:
+                next_retry_remaining = rem
 
     for post_id in remove_ids:
         if processed >= budget or window._degraded_mode_active():
@@ -132,6 +151,8 @@ def process_pending_remote_mutations_impl(window: MainWindow) -> dict[str, int |
             })
             with window._pending_state_lock:
                 window._pending_remote_remove_meta[post_id] = updated_meta
+            if next_retry_remaining is None or delay < next_retry_remaining:
+                next_retry_remaining = delay
             if is_rate_limited_error_message(message):
                 break
             processed += 1
@@ -167,6 +188,8 @@ def process_pending_remote_mutations_impl(window: MainWindow) -> dict[str, int |
             })
             with window._pending_state_lock:
                 window._pending_remote_add_meta[post_id] = updated_meta
+            if next_retry_remaining is None or delay < next_retry_remaining:
+                next_retry_remaining = delay
             if is_rate_limited_error_message(message):
                 break
             processed += 1
@@ -185,6 +208,8 @@ def process_pending_remote_mutations_impl(window: MainWindow) -> dict[str, int |
         "token_exhausted": int(token_exhausted),
         "tokens_spent": tokens_spent,
         "processed": processed,
+        "degraded_remaining": window._degraded_mode_remaining(),
+        "next_retry_remaining": math.ceil(next_retry_remaining) if next_retry_remaining is not None else 0,
     }
 
 
@@ -202,18 +227,30 @@ def pending_remote_mutations_finished(window: MainWindow, result: object) -> Non
     token_exhausted = bool(int(result.get("token_exhausted", 0)))
     tokens_spent = int(result.get("tokens_spent", 0))
     processed = int(result.get("processed", 0))
+    degraded_remaining = int(result.get("degraded_remaining", 0))
+    next_retry_remaining = int(result.get("next_retry_remaining", 0))
 
     window._log_sync_debug(
         "Pending sync worker finished",
         f"processed={processed} token_exhausted={int(token_exhausted)} token_wait={token_wait_seconds}s "
         f"remaining_add={remaining_add} remaining_remove={remaining_remove} "
-        f"tokens={tokens_available:.1f} spent={tokens_spent}",
+        f"tokens={tokens_available:.1f} spent={tokens_spent} "
+        f"degraded_remaining={degraded_remaining} next_retry_remaining={next_retry_remaining}",
     )
     
     if remaining_add or remaining_remove:
-        window._set_right_status(
-            f"Pending sync: {remaining_add} add, {remaining_remove} remove (processed {processed}, spent {tokens_spent}, tokens {tokens_available:.1f})."
-        )
+        if processed == 0:
+            if degraded_remaining > 0:
+                msg = f"Pending sync: {remaining_add} add, {remaining_remove} remove (rate limited, cooldown {degraded_remaining}s)."
+            elif token_exhausted or tokens_available < 1.0:
+                msg = f"Pending sync: {remaining_add} add, {remaining_remove} remove (waiting for tokens, retry in {token_wait_seconds}s)."
+            elif next_retry_remaining > 0:
+                msg = f"Pending sync: {remaining_add} add, {remaining_remove} remove (waiting for backoff retry in {next_retry_remaining}s)."
+            else:
+                msg = f"Pending sync: {remaining_add} add, {remaining_remove} remove (retrying...)."
+        else:
+            msg = f"Pending sync: {remaining_add} add, {remaining_remove} remove (processed {processed}, spent {tokens_spent}, tokens {tokens_available:.1f})."
+        window._set_right_status(msg)
     else:
         window._set_right_status("Pending sync complete.")
 

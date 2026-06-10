@@ -11,6 +11,7 @@ from r34_client.ui.search import history as history_feature
 from r34_client.ui.search import related as related_feature
 from r34_client.ui.favorites.pending import process_pending_remote_mutations
 from r34_client.sync.favorites_sync import sync_remote_favorites
+from r34_client.sync.pending_mutations import save_pending_state
 
 if TYPE_CHECKING:
     from r34_client.ui.main_window import MainWindow
@@ -87,11 +88,17 @@ def refresh_local_favorites(window: MainWindow) -> None:
 def refresh_favorites_impl(window: MainWindow, local_only: bool) -> None:
     window._favorites_token += 1
     token = window._favorites_token
+    
+    with window._pending_state_lock:
+        has_pending = bool(window._pending_remote_add_ids or window._pending_remote_remove_ids)
+    
     if window._sync_enabled() and not local_only:
         window._set_right_status("Syncing favorites via FlareSolverr...")
         worker = FunctionWorker(sync_remote, window)
     else:
-        window._set_right_status("Refreshing local favorites...")
+        # Don't overwrite the status if a pending mutations sync is active or has pending mutations!
+        if not has_pending and not getattr(window, "_pending_sync_worker_active", False):
+            window._set_right_status("Refreshing local favorites...")
         worker = FunctionWorker(
             window.local_favorites.list_favorites, collection_name=window._selected_collection_name()
         )
@@ -136,6 +143,8 @@ def sync_remote(window: MainWindow) -> tuple[list[Post], bool]:
     confirmed_add_ids = pending_add_before - pending_add_snapshot
     with window._pending_state_lock:
         window._pending_remote_add_ids.difference_update(confirmed_add_ids)
+        
+    save_pending_state(window)
 
     return result
 
@@ -160,11 +169,16 @@ def favorites_loaded(window: MainWindow, token: int, result: object) -> None:
 
     window.favorite_posts = [item for item in loaded_posts if isinstance(item, Post)]
 
-    # Reset/clear right status message when favorites load completes
-    if window.settings.flaresolverr_enabled:
-        window._set_right_status("FlareSolverr running.")
-    else:
-        window._set_right_status("")
+    # Reset/clear right status message when favorites load completes,
+    # but ONLY if there are no pending remote mutations and the pending sync worker is inactive!
+    with window._pending_state_lock:
+        has_pending = bool(window._pending_remote_add_ids or window._pending_remote_remove_ids)
+        
+    if not has_pending and not getattr(window, "_pending_sync_worker_active", False):
+        if window.settings.flaresolverr_enabled:
+            window._set_right_status("FlareSolverr running.")
+        else:
+            window._set_right_status("")
 
 
 def favorites_failed(window: MainWindow, token: int, error_text: str) -> None:
