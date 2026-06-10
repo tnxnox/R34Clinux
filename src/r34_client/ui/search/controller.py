@@ -160,6 +160,15 @@ def favorites_loaded(window: MainWindow, token: int, result: object) -> None:
 
     window.favorite_posts = [item for item in loaded_posts if isinstance(item, Post)]
 
+    # Update status message at the bottom right when sync/refresh finishes successfully
+    if isinstance(result, tuple):
+        if window._favorites_sync_fallback_used:
+            window._set_right_status("Favorites sync failed (using local cache).")
+        else:
+            window._set_right_status("Favorites sync complete.")
+    else:
+        window._set_right_status("Local favorites refreshed.")
+
 
 def favorites_failed(window: MainWindow, token: int, error_text: str) -> None:
     if token != window._favorites_token:
