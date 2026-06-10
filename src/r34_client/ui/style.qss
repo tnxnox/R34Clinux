@@ -139,14 +139,14 @@ QListWidget::item:selected {
 }
 
 /* Text Views / Metadata View */
-QTextEdit, QPlainTextEdit {
+QTextEdit, QPlainTextEdit, QTextBrowser {
     background-color: #1e293b;
     border: 1px solid #334155;
     border-radius: 6px;
     padding: 8px;
     color: #e2e8f0;
 }
-QTextEdit:focus, QPlainTextEdit:focus {
+QTextEdit:focus, QPlainTextEdit:focus, QTextBrowser:focus {
     border: 1px solid #6366f1;
 }
 

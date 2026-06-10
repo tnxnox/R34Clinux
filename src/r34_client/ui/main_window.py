@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QPushButton,
     QPlainTextEdit,
+    QTextBrowser,
     QScrollArea,
     QSizePolicy,
     QSplitter,
@@ -284,8 +285,10 @@ class MainWindow(QMainWindow):
         # Keep remote mutation flow paced even under large pending queues.
         self._remote_mutation_bucket = TokenBucket(capacity=8.0, refill_rate_per_second=1.25)
 
-        self.meta_view = QPlainTextEdit()
+        self.meta_view = QTextBrowser()
         self.meta_view.setReadOnly(True)
+        self.meta_view.setOpenLinks(False)
+        self.meta_view.anchorClicked.connect(self._handle_meta_link_clicked)
 
         self.download_button = QPushButton("Download")
         self.download_button.clicked.connect(self.download_selected_post)
@@ -735,6 +738,25 @@ class MainWindow(QMainWindow):
 
     def _update_friend_page_label(self) -> None:
         self._update_page_controls_state()
+
+    def _handle_meta_link_clicked(self, url) -> None:
+        url_str = url.toString()
+        if url_str.startswith("tag:"):
+            tag = url_str[len("tag:"):]
+            self._add_tag_to_search(tag)
+        else:
+            # It's an external link (Page, Download, Source). Open it in browser!
+            from PySide6.QtGui import QDesktopServices
+            QDesktopServices.openUrl(url)
+
+    def _add_tag_to_search(self, tag: str) -> None:
+        current_text = self.search_input.text().strip()
+        tags = current_text.split() if current_text else []
+        if tag not in tags and f"-{tag}" not in tags:
+            tags.append(tag)
+            new_text = " ".join(tags) + " "
+            self.search_input.setText(new_text)
+            self.search_input.setFocus()
 
     def search(self) -> None:
         search_feature.search(self)

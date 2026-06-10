@@ -100,6 +100,13 @@ class FormatPostMetadataTests(unittest.TestCase):
         metadata = format_post_metadata(post)
         self.assertIn("n/a", metadata)
 
+    def test_metadata_contains_html_links(self) -> None:
+        post = Post.from_payload({"id": 42, "rating": "s", "tags": "solo girl", "file_url": "https://ex.com/f.jpg"})
+        metadata = format_post_metadata(post)
+        self.assertIn('<a href="tag:solo"', metadata)
+        self.assertIn('<a href="tag:girl"', metadata)
+        self.assertIn('href="https://rule34.xxx/index.php?page=post&s=view&id=42"', metadata)
+
 
 class FormatPostTileTests(unittest.TestCase):
     def test_tile_format(self) -> None:
@@ -158,3 +165,46 @@ class ProbeFileSizeTests(unittest.TestCase):
             with patch("r34_client.ui.helpers.post._HTTP.get", side_effect=RuntimeError("fail")):
                 size = probe_file_size("https://ex.com/file.jpg", "https://ex.com/")
                 self.assertIsNone(size)
+
+
+class MockSearchWindow:
+    def __init__(self, initial_text: str):
+        from unittest.mock import MagicMock
+        self.search_input = MagicMock()
+        self.search_input.text.return_value = initial_text
+        self.search_input_text = initial_text
+        
+        def set_text(val):
+            self.search_input_text = val
+        self.search_input.setText = set_text
+
+    def _add_tag_to_search(self, tag: str) -> None:
+        current_text = self.search_input.text().strip()
+        tags = current_text.split() if current_text else []
+        if tag not in tags and f"-{tag}" not in tags:
+            tags.append(tag)
+            new_text = " ".join(tags) + " "
+            self.search_input.setText(new_text)
+            self.search_input.setFocus()
+
+
+class AddTagToSearchTests(unittest.TestCase):
+    def test_adds_tag_to_empty_search(self) -> None:
+        window = MockSearchWindow("")
+        window._add_tag_to_search("solo")
+        self.assertEqual(window.search_input_text, "solo ")
+
+    def test_appends_tag_to_existing_search(self) -> None:
+        window = MockSearchWindow("girl")
+        window._add_tag_to_search("solo")
+        self.assertEqual(window.search_input_text, "girl solo ")
+
+    def test_does_not_add_duplicate_tag(self) -> None:
+        window = MockSearchWindow("girl solo")
+        window._add_tag_to_search("solo")
+        self.assertEqual(window.search_input_text, "girl solo")
+
+    def test_does_not_add_duplicate_negative_tag(self) -> None:
+        window = MockSearchWindow("girl -solo")
+        window._add_tag_to_search("solo")
+        self.assertEqual(window.search_input_text, "girl -solo")

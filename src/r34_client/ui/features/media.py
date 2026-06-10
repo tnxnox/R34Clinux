@@ -46,7 +46,7 @@ def show_video_preview(window: MainWindow, post: Post) -> None:
     window._base_preview_pixmap = None
     window._is_long_strip_image = False
     window._image_zoom_percent = 100
-    window.meta_view.setPlainText(window._format_post_metadata(post))
+    window.meta_view.setHtml(window._format_post_metadata(post))
     source_url = _media_source_url(post)
     if not source_url:
         hide_video_view(window)

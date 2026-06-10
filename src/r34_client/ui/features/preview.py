@@ -63,7 +63,7 @@ def show_post(window: MainWindow, post: Post, allow_hydrate: bool = True) -> Non
         return
 
     if not needs_hydrate:
-        window.meta_view.setPlainText(window._format_post_metadata(post))
+        window.meta_view.setHtml(window._format_post_metadata(post))
 
     window._preview_token += 1
     token = window._preview_token

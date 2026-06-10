@@ -109,6 +109,26 @@ def probe_file_size(url: str, referer: str) -> int | None:
 
 
 def format_post_metadata(post: Post) -> str:
+    # Format URLs as links
+    page_link = f'<a href="{post.page_url}">{post.page_url}</a>' if post.page_url else 'n/a'
+    download_link = f'<a href="{post.download_url}">{post.download_url}</a>' if post.download_url else 'n/a'
+    
+    if post.source:
+        if post.source.startswith("http://") or post.source.startswith("https://"):
+            source_link = f'<a href="{post.source}">{post.source}</a>'
+        else:
+            source_link = post.source
+    else:
+        source_link = 'n/a'
+
+    if post.tags:
+        tags_html = " ".join(
+            f'<a href="tag:{tag}" style="color: #818cf8; text-decoration: none;">{tag}</a>'
+            for tag in post.tags
+        )
+    else:
+        tags_html = 'n/a'
+
     lines = [
         f"ID: {post.id}",
         f"Rating: {post.rating or 'unknown'}",
@@ -116,14 +136,14 @@ def format_post_metadata(post: Post) -> str:
         f"Dimensions: {post.dimensions}",
         f"File name: {post.file_name}",
         f"Created: {post.created_at or 'n/a'}",
-        f"Page: {post.page_url}",
-        f"Download: {post.download_url or 'n/a'}",
-        f"Source: {post.source or 'n/a'}",
+        f"Page: {page_link}",
+        f"Download: {download_link}",
+        f"Source: {source_link}",
         "",
         "Tags:",
-        post.tags_text or 'n/a',
+        tags_html,
     ]
-    return "\n".join(lines)
+    return "<br>".join(lines)
 
 
 def format_post_tile(post: Post) -> str:
