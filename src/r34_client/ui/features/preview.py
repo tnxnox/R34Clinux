@@ -279,6 +279,8 @@ def update_preview_scaling(window: MainWindow) -> None:
     window.preview_label.resize(scaled.size())
     window.preview_label.setMinimumSize(scaled.size())
     window.preview_label.setPixmap(scaled)
+    window.preview_label.adjustSize()  # Force parent scroll area layout update synchronously
+    window.preview_container.updateGeometry()  # Notify parent layout system of geometry change
     window._set_preview_cursor()
 
 
