@@ -44,7 +44,12 @@ def set_fit_mode(window: MainWindow, mode: FitMode) -> None:
     window._image_zoom_percent = 100
     window._update_preview_scaling()
     
-    # Defer resetting the scrollbar values to 0 to ensure the QScrollArea layout has updated
+    # Reset widget position and scrollbars synchronously to prevent out-of-bounds invisibility
+    window.preview_label.move(0, 0)
+    window.preview_container.horizontalScrollBar().setValue(0)
+    window.preview_container.verticalScrollBar().setValue(0)
+    
+    # Defer resetting scrollbar values to 0 to ensure the QScrollArea layout has completed its update
     QTimer.singleShot(0, lambda: _reset_scrollbars_after_layout(window))
     
     set_status(window, f"Image fit mode: {mode.value}")
