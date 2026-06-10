@@ -278,6 +278,8 @@ class MainWindow(QMainWindow):
         self._friend_current_page = 0
         self._friend_user_id: str = ""
         self._friend_has_more = False
+        self._friend_cached_api_page = -1
+        self._friend_cached_posts: list[Post] = []
         self._rate_limit = DegradedModeController()
         # Keep remote mutation flow paced even under large pending queues.
         self._remote_mutation_bucket = TokenBucket(capacity=8.0, refill_rate_per_second=1.25)

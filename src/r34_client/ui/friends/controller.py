@@ -80,9 +80,9 @@ def _parse_friend_favorites(html: str) -> list[Post]:
     return posts
 
 
-def _hydrate_posts_from_api(client, posts: list[Post], *, limit: int = 10) -> None:
+def _hydrate_posts_from_api(client, posts: list[Post], *, start: int = 0, limit: int = 10) -> None:
     """Fetch full metadata for each post via the authenticated client in-place."""
-    to_hydrate = posts[:limit]
+    to_hydrate = posts[start : start + limit]
     if not to_hydrate:
         return
 
@@ -98,7 +98,7 @@ def _hydrate_posts_from_api(client, posts: list[Post], *, limit: int = 10) -> No
     max_workers = min(len(to_hydrate), 10)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
-            executor.submit(hydrate_single, i, post)
+            executor.submit(hydrate_single, start + i, post)
             for i, post in enumerate(to_hydrate)
         ]
         for fut in futures:
@@ -111,15 +111,26 @@ def _hydrate_posts_from_api(client, posts: list[Post], *, limit: int = 10) -> No
 
 
 def _fetch_friend_favorites_impl(client, user_id: str, solver_url: str, page: int = 0) -> list[Post]:
-    pid = page * 50
+    # page here is the UI page requested
+    api_page = page // 5
+    pid = api_page * 50
     url = favorites_view_url(user_id, page=pid)
     html = _fetch_page(url, flare_solver_url=solver_url)
     if html is None:
         msg = f"Failed to fetch favorites for user {user_id} (page {page})"
         raise RuntimeError(msg)
     posts = _parse_friend_favorites(html)
-    _hydrate_posts_from_api(client, posts)
+    # Hydrate only the slice needed for the requested UI page
+    start_idx = (page % 5) * 10
+    _hydrate_posts_from_api(client, posts, start=start_idx, limit=10)
     return posts
+
+
+def _hydrate_cached_slice_impl(client, posts: list[Post], page: int) -> list[Post]:
+    posts_copy = list(posts)
+    start_idx = (page % 5) * 10
+    _hydrate_posts_from_api(client, posts_copy, start=start_idx, limit=10)
+    return posts_copy
 
 
 def add_friend_dialog(window: MainWindow) -> None:
@@ -219,6 +230,8 @@ def load_friend_favorites(window: MainWindow, item: object = None) -> None:
 
     window._friend_current_page = 0
     window._friend_user_id = user_id
+    window._friend_cached_api_page = -1
+    window._friend_cached_posts = []
     _fetch_friend_page(window, user_id, solver_url, page=0)
 
 
@@ -228,8 +241,27 @@ def _fetch_friend_page(window: MainWindow, user_id: str, solver_url: str, page: 
 
     window.friend_posts_list.clear()
     window.friend_posts = []
-    window._set_status(f"Loading favorites for user {user_id} (page {page + 1})...")
 
+    api_page = page // 5
+    start_idx = (page % 5) * 10
+    end_idx = start_idx + 10
+
+    if window._friend_cached_api_page == api_page and window._friend_cached_posts:
+        slice_posts = window._friend_cached_posts[start_idx:end_idx]
+        needs_hydration = any(not p.file_url for p in slice_posts) if slice_posts else False
+
+        if not needs_hydration:
+            _friend_favorites_fetched(window, token, window._friend_cached_posts)
+            return
+
+        window._set_status(f"Hydrating favorites for user {user_id} (page {page + 1})...")
+        worker = FunctionWorker(_hydrate_cached_slice_impl, window.client, window._friend_cached_posts, page)
+        worker.signals.finished.connect(lambda result: _friend_favorites_fetched(window, token, result))
+        worker.signals.failed.connect(window._operation_failed)
+        window._start_worker(worker, workload="general")
+        return
+
+    window._set_status(f"Loading favorites for user {user_id} (page {page + 1})...")
     worker = FunctionWorker(_fetch_friend_favorites_impl, window.client, user_id, solver_url, page)
     worker.signals.finished.connect(lambda result: _friend_favorites_fetched(window, token, result))
     worker.signals.failed.connect(window._operation_failed)
@@ -275,9 +307,77 @@ def _friend_favorites_fetched(window: MainWindow, token: int, result: object) ->
         if isinstance(obj, Post):
             posts.append(obj)
 
-    DISPLAY_LIMIT = 10
-    displayed = posts[:DISPLAY_LIMIT]
+    window._friend_cached_posts = posts
+    window._friend_cached_api_page = window._friend_current_page // 5
 
-    window._friend_has_more = len(posts) >= 50
+    page = window._friend_current_page
+    start_idx = (page % 5) * 10
+    end_idx = start_idx + 10
+    displayed = posts[start_idx:end_idx]
+
+    has_more = False
+    if len(posts) > end_idx:
+        has_more = True
+    elif len(posts) >= 50:
+        has_more = True
+
+    window._friend_has_more = has_more
     window.friend_posts = displayed
-    window._set_status(f"Loaded page {window._friend_current_page + 1} of friend's favorites ({len(posts)} posts fetched).")
+    window._set_status(f"Loaded page {page + 1} of friend's favorites ({len(posts)} posts in cache).")
+
+    # Trigger background pre-hydration for the rest of the 50-post API page
+    _trigger_background_prehydration(window, token)
+
+
+def _trigger_background_prehydration(window: MainWindow, token: int) -> None:
+    posts = window._friend_cached_posts
+    unhydrated_indices = [i for i, p in enumerate(posts) if not p.file_url]
+    if not unhydrated_indices:
+        return
+
+    worker = FunctionWorker(_prehydrate_remaining_impl, window.client, posts)
+    worker.signals.finished.connect(lambda result: _friend_prehydrate_finished(window, token, result))
+    window._start_worker(worker, workload="general")
+
+
+def _prehydrate_remaining_impl(client, posts: list[Post]) -> list[Post]:
+    posts_copy = list(posts)
+    unhydrated_indices = [i for i, p in enumerate(posts_copy) if not p.file_url]
+    if not unhydrated_indices:
+        return posts_copy
+
+    def hydrate_single(index: int, post: Post) -> tuple[int, Post | None]:
+        try:
+            candidates = client.search_posts(f"id:{post.id}", 0, 1)
+            if candidates:
+                return index, candidates[0]
+        except Exception:
+            pass
+        return index, None
+
+    # Limit max workers to 10 to not slam Rule34 API
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [
+            executor.submit(hydrate_single, idx, posts_copy[idx])
+            for idx in unhydrated_indices
+        ]
+        for fut in futures:
+            try:
+                idx, hydrated_post = fut.result()
+                if hydrated_post is not None:
+                    posts_copy[idx] = hydrated_post
+            except Exception:
+                continue
+    return posts_copy
+
+
+def _friend_prehydrate_finished(window: MainWindow, token: int, result: object) -> None:
+    if token != window._friend_fetch_token:
+        return
+    if not isinstance(result, list):
+        return
+    posts: list[Post] = []
+    for obj in result:
+        if isinstance(obj, Post):
+            posts.append(obj)
+    window._friend_cached_posts = posts

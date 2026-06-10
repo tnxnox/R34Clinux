@@ -75,6 +75,8 @@ class MockMainWindow(QWidget):
         self._friend_user_id = ""
         self._friend_current_page = 0
         self._friend_has_more = False
+        self._friend_cached_api_page = -1
+        self._friend_cached_posts: list = []
         self.friend_posts: list = []
         
         self.settings = MagicMock()
