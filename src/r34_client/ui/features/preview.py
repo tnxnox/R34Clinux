@@ -45,6 +45,7 @@ def show_post(window: MainWindow, post: Post, allow_hydrate: bool = True) -> Non
     logger.debug("show_post called for ID %d (needs_hydrate=%s, allow_hydrate=%s)", post.id, needs_hydrate, allow_hydrate)
 
     if needs_hydrate:
+        window._set_status(f"Post #{post.id} selected (loading details...).")
         window.meta_view.setPlainText("Loading post details...")
         window.preview_label.setText("Loading preview...")
 
@@ -71,17 +72,20 @@ def show_post(window: MainWindow, post: Post, allow_hydrate: bool = True) -> Non
     if not post.best_preview_url:
         logger.warning("Post ID %d has no preview URL", post.id)
         window.preview_label.setText("This post does not expose a preview URL.")
+        window._set_status(f"Post #{post.id} selected (no preview URL).")
         return
 
     # Check cache first — instant display without a network request.
     cached = window._image_cache.get(post.id)
     if cached is not None:
         logger.debug("Preview for ID %d found in cache (token=%d)", post.id, token)
+        window._set_status(f"Post #{post.id} selected.")
         preview_loaded(window, token, cached, post)
         return
 
     logger.debug("Fetching preview bytes for ID %d from network (token=%d)", post.id, token)
     window.preview_label.setText("Loading preview...")
+    window._set_status(f"Post #{post.id} selected (loading preview...).")
     worker = FunctionWorker(fetch_preview_bytes, post, user_id=window.settings.user_id)
     worker.signals.finished.connect(lambda data: preview_loaded(window, token, data, post))
     worker.signals.failed.connect(lambda error_text: preview_failed_with_context(window, token, post, error_text))
@@ -145,8 +149,9 @@ def show_hydration_failed(window: MainWindow, token: int, fallback: Post, error_
         logger.debug("Hydration failed for ID %d but token mismatched (got %d, current %d), discarding error", fallback.id, token, window._hydrate_token)
         return
     logger.error("Hydration failed for ID %d: %s", fallback.id, error_text)
-    first_line = error_text.splitlines()[-1] if error_text else "Unable to load post details"
-    window._set_status(first_line)
+    reason = error_text.splitlines()[-1] if error_text else ""
+    msg = f"Failed to load details: {reason}" if reason else "Unable to load post details."
+    window._set_status(msg)
     active_post = window._current_post()
     if active_post is not None and active_post.id == fallback.id:
         logger.debug("Hydration failed post ID %d is still active selection, displaying fallback", fallback.id)
@@ -156,14 +161,16 @@ def show_hydration_failed(window: MainWindow, token: int, fallback: Post, error_
 
 
 def preview_failed(window: MainWindow, error_text: str) -> None:
-    first_line = error_text.splitlines()[-1] if error_text else "Preview unavailable"
     window._base_preview_pixmap = None
     window._is_long_strip_image = False
     window._image_zoom_percent = 100
     window._image_pan_active = False
     window._hide_video_view()
     window.preview_label.setText("Preview unavailable for this item.")
-    window._set_status(first_line)
+    
+    reason = error_text.splitlines()[-1] if error_text else ""
+    msg = f"Preview unavailable: {reason}" if reason else "Preview unavailable."
+    window._set_status(msg)
 
 
 def preview_failed_with_context(window: MainWindow, token: int, post: Post, error_text: str) -> None:
@@ -233,6 +240,7 @@ def preview_loaded(window: MainWindow, token: int, data: object, post: Post) -> 
     else:
         window.preview_container.setAlignment(Qt.AlignmentFlag.AlignCenter)
     window.preview_label.setToolTip(post.file_name)
+    window._set_status(f"Post #{post.id} selected.")
 
 
 def update_preview_scaling(window: MainWindow) -> None:
