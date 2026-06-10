@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 from typing import TYPE_CHECKING
 
@@ -66,15 +67,32 @@ def _parse_friend_favorites(html: str) -> list[Post]:
 
 def _hydrate_posts_from_api(client, posts: list[Post], *, limit: int = 10) -> None:
     """Fetch full metadata for each post via the authenticated client in-place."""
-    for i, post in enumerate(posts):
-        if i >= limit:
-            break
+    to_hydrate = posts[:limit]
+    if not to_hydrate:
+        return
+
+    def hydrate_single(index: int, post: Post) -> tuple[int, Post | None]:
         try:
             candidates = client.search_posts(f"id:{post.id}", 0, 1)
             if candidates:
-                posts[i] = candidates[0]
+                return index, candidates[0]
         except Exception:
-            continue
+            pass
+        return index, None
+
+    max_workers = min(len(to_hydrate), 10)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+            executor.submit(hydrate_single, i, post)
+            for i, post in enumerate(to_hydrate)
+        ]
+        for fut in futures:
+            try:
+                idx, hydrated_post = fut.result()
+                if hydrated_post is not None:
+                    posts[idx] = hydrated_post
+            except Exception:
+                continue
 
 
 def _fetch_friend_favorites_impl(client, user_id: str, solver_url: str, page: int = 0) -> list[Post]:
