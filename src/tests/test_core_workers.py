@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from PySide6.QtCore import QCoreApplication
+from PySide6.QtWidgets import QApplication
 
 from r34_client.core.worker import FunctionWorker
 
@@ -10,7 +10,7 @@ from r34_client.core.worker import FunctionWorker
 class WorkerLifecycleTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls._app = QCoreApplication.instance() or QCoreApplication([])
+        cls._app = QApplication.instance() or QApplication([])
 
     def test_worker_run_ignores_finished_emit_after_signals_deleted(self) -> None:
         worker = FunctionWorker(lambda: 123)

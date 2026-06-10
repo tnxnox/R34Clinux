@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
-from PySide6.QtCore import QCoreApplication
+from PySide6.QtWidgets import QApplication
 
 from r34_client.ui.widgets.video_player import VideoPlayer
 
@@ -11,7 +11,7 @@ from r34_client.ui.widgets.video_player import VideoPlayer
 class VideoPlayerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls._app = QCoreApplication.instance() or QCoreApplication([])
+        cls._app = QApplication.instance() or QApplication([])
 
     def test_initialization_with_vlc_none(self) -> None:
         """When vlc is None, the player is not available."""

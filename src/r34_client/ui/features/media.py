@@ -196,7 +196,11 @@ def refresh_playback_controls(window: MainWindow) -> None:
     current_ms = window.video_player.get_time()
 
     if window._seek_ui_locked and not window._seek_dragging:
-        if time.monotonic() >= window._seek_ui_unlock_deadline:
+        seek_completed = (
+            total_ms > 0
+            and abs(current_ms - window._seek_ui_hold_ms) < 1500
+        )
+        if seek_completed or time.monotonic() >= window._seek_ui_unlock_deadline:
             window._pending_seek_target_ms = None
             window._seek_ui_locked = False
             window._seek_ui_hold_ms = 0
@@ -206,20 +210,20 @@ def refresh_playback_controls(window: MainWindow) -> None:
     window.seek_slider.blockSignals(True)
     if total_ms > 0:
         window.seek_slider.setRange(0, total_ms)
+    elif window._seek_ui_locked or window._seek_dragging:
+        # Keep the previous maximum range, do not reset to 0
+        pass
     else:
         window.seek_slider.setRange(0, 0)
+
     if window._seek_dragging:
         shown_ms = window._pending_seek_ms
-        if total_ms > 0:
-            window.seek_slider.setValue(min(shown_ms, total_ms))
-        else:
-            window.seek_slider.setValue(max(0, shown_ms))
+        max_val = window.seek_slider.maximum()
+        window.seek_slider.setValue(min(shown_ms, max_val) if max_val > 0 else shown_ms)
     elif window._seek_ui_locked:
         shown_ms = window._seek_ui_hold_ms
-        if total_ms > 0:
-            window.seek_slider.setValue(min(shown_ms, total_ms))
-        else:
-            window.seek_slider.setValue(max(0, shown_ms))
+        max_val = window.seek_slider.maximum()
+        window.seek_slider.setValue(min(shown_ms, max_val) if max_val > 0 else shown_ms)
     else:
         shown_ms = min(current_ms, total_ms) if total_ms > 0 else current_ms
         if total_ms > 0:
