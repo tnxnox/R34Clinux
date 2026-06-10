@@ -391,12 +391,6 @@ class FlareSolverrFavoritesClient:
             if looks_logged_in(html_text):
                 self._debug(f"ensure_web_login: probe matched logged-in markers url={url}")
                 return True
-            if "page=account&s=home" in url and self._looks_account_home_authenticated(html_text):
-                self._debug("ensure_web_login: account home indicates authenticated session")
-                return True
-            if "page=favorites&s=view" in url and self._looks_favorites_view_authenticated(html_text):
-                self._debug("ensure_web_login: favorites view indicates authenticated session")
-                return True
         return False
 
     @staticmethod
@@ -561,7 +555,7 @@ class FlareSolverrFavoritesClient:
 
         for url in candidates:
             html = self._request_via_solver(url)
-            items = extract_items(html, validate=True)
+            items = extract_items(html, validate=True, check_login=False)
             self._debug(f"list_favorites_html: url={url} extracted_items={len(items)}")
             for post_id, preview_url in items:
                 if post_id in seen_ids:
@@ -584,6 +578,8 @@ class FlareSolverrFavoritesClient:
                     return posts
 
             self._debug(f"list_favorites_html: total_unique_items={len(posts)}")
+            if posts:
+                break
         return posts
 
     def add_favorite(self, post_id: int) -> None:

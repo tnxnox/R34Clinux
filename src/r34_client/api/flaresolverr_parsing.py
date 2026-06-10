@@ -110,11 +110,11 @@ def extract_favorite_tile_ids(html_text: str) -> list[int]:
     return ids
 
 
-def validate_favorites_html(html_text: str) -> None:
+def validate_favorites_html(html_text: str, check_login: bool = True) -> None:
     if looks_rate_limited(html_text):
         raise RuntimeError("Rule34 request was rate limited.")
 
-    if not looks_logged_in(html_text):
+    if check_login and not looks_logged_in(html_text):
         raise RuntimeError("Rule34 session is not logged in / session expired.")
 
     lowered = html_text.lower()
@@ -131,8 +131,8 @@ def validate_favorites_html(html_text: str) -> None:
         raise RuntimeError("Rule34 request blocked by Cloudflare challenge.")
 
 
-def validate_favorites_parsed_results(html_text: str, parsed_count: int) -> None:
-    validate_favorites_html(html_text)
+def validate_favorites_parsed_results(html_text: str, parsed_count: int, check_login: bool = True) -> None:
+    validate_favorites_html(html_text, check_login=check_login)
 
     if parsed_count == 0:
         lowered = html_text.lower()
@@ -146,9 +146,9 @@ def validate_favorites_parsed_results(html_text: str, parsed_count: int) -> None
             )
 
 
-def extract_items(html_text: str, validate: bool = False) -> list[tuple[int, str]]:
+def extract_items(html_text: str, validate: bool = False, check_login: bool = True) -> list[tuple[int, str]]:
     if validate:
-        validate_favorites_html(html_text)
+        validate_favorites_html(html_text, check_login=check_login)
 
     normalized = _normalize_html_text(html_text)
 
@@ -169,7 +169,7 @@ def extract_items(html_text: str, validate: bool = False) -> list[tuple[int, str
                 preview = f"https:{preview}"
             items.append((post_id, preview))
         if validate:
-            validate_favorites_parsed_results(html_text, len(items))
+            validate_favorites_parsed_results(html_text, len(items), check_login=check_login)
         return items
 
     ids = extract_post_ids(normalized)
@@ -183,5 +183,5 @@ def extract_items(html_text: str, validate: bool = False) -> list[tuple[int, str
         items.append((post_id, preview))
 
     if validate:
-        validate_favorites_parsed_results(html_text, len(items))
+        validate_favorites_parsed_results(html_text, len(items), check_login=check_login)
     return items
