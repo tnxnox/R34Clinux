@@ -548,6 +548,9 @@ class FlareSolverrFavoritesClient:
         return posts
 
     def _list_favorites_from_html(self, limit: int) -> list[Post]:
+        # The HTML favorites page requires an authenticated web session.
+        self._ensure_web_login()
+
         candidates = [
             favorites_view_url(self.user_id),
             favorites_list_url(),
