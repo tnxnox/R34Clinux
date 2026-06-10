@@ -26,6 +26,14 @@ section()   { printf "\n\033[1;34m━━━ %s ━━━\033[0m\n\n" "$*"; }
 has_cmd()   { command -v "$1" >/dev/null 2>&1; }
 safe_run()  { "$@" 2>/dev/null || true; }
 
+# Probe FlareSolverr health. Tries /health (v3.5.0+) then / (all versions).
+# The old /status endpoint was removed in v3.5.0.
+flaresolverr_ready() {
+  curl -sf "$FLARESOLVERR_URL/health" -o /dev/null 2>/dev/null && return 0
+  curl -sf "$FLARESOLVERR_URL/" -o /dev/null 2>/dev/null && return 0
+  return 1
+}
+
 log_file() {
   printf "[r34] %s %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >>"$LOG_FILE"
 }
@@ -269,7 +277,7 @@ run_container() {
   # Wait for it to be ready
   local waited=0
   while [[ "$waited" -lt 30 ]]; do
-    if curl -sf "$FLARESOLVERR_URL/status" -o /dev/null 2>/dev/null; then
+    if flaresolverr_ready; then
       return 0
     fi
     sleep 1
@@ -283,11 +291,11 @@ run_container() {
 
 start_flaresolverr() {
   # If FlareSolverr is already running, restart it to clear stale sessions.
-  if curl -sf "$FLARESOLVERR_URL/status" -o /dev/null 2>/dev/null; then
+  if flaresolverr_ready; then
     log_both "FlareSolverr: already running — restarting to clear stale sessions..."
     if $CONTAINER_CMD restart "$CONTAINER_NAME" >/dev/null 2>>"$LOG_FILE"; then
       sleep 3
-      if curl -sf "$FLARESOLVERR_URL/status" -o /dev/null 2>/dev/null; then
+      if flaresolverr_ready; then
         success "FlareSolverr restarted."
         return 0
       fi
@@ -307,7 +315,7 @@ start_flaresolverr() {
       return 1
     }
     sleep 3
-    if curl -sf "$FLARESOLVERR_URL/status" -o /dev/null 2>/dev/null; then
+    if flaresolverr_ready; then
       success "FlareSolverr started."
       return 0
     fi

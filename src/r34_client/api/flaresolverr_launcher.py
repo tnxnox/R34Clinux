@@ -40,6 +40,23 @@ def is_url_local(url: str) -> bool:
         return False
 
 
+def _probe_flaresolverr(solver_url: str, timeout: float = 2) -> bool:
+    """Check if FlareSolverr is reachable.
+
+    Tries /health first (v3.5.0+), then / (all versions).
+    The old /status endpoint was removed in v3.5.0.
+    """
+    base = solver_url.rstrip("/")
+    for path in ("/health", "/"):
+        try:
+            resp = requests.get(f"{base}{path}", timeout=timeout)
+            if resp.status_code == 200:
+                return True
+        except requests.RequestException:
+            pass
+    return False
+
+
 def _is_container_running(cmd: list[str], container_name: str) -> bool:
     """Check if a container with the given name is currently running."""
     try:
@@ -61,11 +78,7 @@ def restart_flaresolverr_container(solver_url: str = "http://127.0.0.1:8191") ->
     """
     if not is_url_local(solver_url):
         # Can't manage remote containers — just check if it's reachable
-        try:
-            response = requests.get(f"{solver_url.rstrip('/')}/status", timeout=2)
-            return response.status_code == 200
-        except requests.RequestException:
-            return False
+        return _probe_flaresolverr(solver_url)
 
     cmd = detect_container_cmd()
     if not cmd:
@@ -100,13 +113,9 @@ def start_flaresolverr_container(solver_url: str = "http://127.0.0.1:8191") -> b
     Returns True if FlareSolverr is reachable, False otherwise.
     """
     # 1. First probe if it's already running
-    try:
-        response = requests.get(f"{solver_url.rstrip('/')}/status", timeout=2)
-        if response.status_code == 200:
-            logger.info("FlareSolverr is already running at %s", solver_url)
-            return True
-    except requests.RequestException:
-        pass
+    if _probe_flaresolverr(solver_url):
+        logger.info("FlareSolverr is already running at %s", solver_url)
+        return True
 
     # 2. If it's not a local URL, we can't start a local container for it
     if not is_url_local(solver_url):
@@ -175,15 +184,10 @@ def _run_new_container(cmd: list[str], image: str, fallback_image: str, containe
         return False
 
 def _wait_for_flaresolverr(solver_url: str) -> bool:
-    status_url = f"{solver_url.rstrip('/')}/status"
     for _ in range(30):
-        try:
-            response = requests.get(status_url, timeout=1)
-            if response.status_code == 200:
-                logger.info("FlareSolverr started successfully at %s", solver_url)
-                return True
-        except requests.RequestException:
-            pass
+        if _probe_flaresolverr(solver_url, timeout=1):
+            logger.info("FlareSolverr started successfully at %s", solver_url)
+            return True
         time.sleep(1)
     logger.error("FlareSolverr did not respond at %s within 30 seconds.", solver_url)
     return False
