@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from PySide6.QtCore import Qt, QPointF, QEvent
 from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 
 from r34_client.ui.widgets.custom import ClickSeekSlider
 from r34_client.ui.features.media import refresh_playback_controls
@@ -29,10 +29,11 @@ class MockVideoPlayer:
         return self.playing
 
 
-class MockMainWindow:
+class MockMainWindow(QWidget):
     def __init__(self) -> None:
+        super().__init__()
         self.video_player = MockVideoPlayer()
-        self.seek_slider = ClickSeekSlider(Qt.Orientation.Horizontal)
+        self.seek_slider = ClickSeekSlider(Qt.Orientation.Horizontal, self)
         self.seek_slider.setRange(0, 10000)
         self.seek_slider.setValue(2000)
         self.seek_time_label = MagicMock()
@@ -44,6 +45,21 @@ class MockMainWindow:
         self._seek_ui_hold_ms = 0
         self._seek_ui_unlock_deadline = 0.0
         self._pending_seek_target_ms: int | None = None
+        self._rate_limit = MagicMock()
+        self._rate_limit.remaining_seconds.return_value = 0.0
+        self._active_workers: list = []
+        self.current_query = ""
+        self.current_page = 1
+        self.current_posts: list = []
+        self.favorite_posts: list = []
+        self._last_favorite_sync_failed = False
+        self._last_favorite_sync_error = ""
+        self._sync_debug_log_path = "/tmp/sync.log"
+        self._fit_mode = MagicMock()
+        self._fit_mode.value = "smart"
+
+    def _sync_enabled(self) -> bool:
+        return True
 
     def _current_post(self) -> MagicMock | None:
         return self._current_post_val
@@ -136,3 +152,27 @@ class MediaControlsTests(unittest.TestCase):
         self.assertFalse(window._seek_ui_locked)
         self.assertEqual(window.seek_slider.value(), 5100)
         window.seek_time_label.setText.assert_called_with("5100 / 15000")
+
+    @patch("PySide6.QtWidgets.QDialog.exec")
+    def test_open_about(self, mock_exec: MagicMock) -> None:
+        """open_about creates and executes the About dialog without throwing error."""
+        window = MockMainWindow()
+        from r34_client.ui.dialogs.controls import open_about
+        open_about(window)
+        mock_exec.assert_called_once()
+
+    @patch("PySide6.QtWidgets.QDialog.exec")
+    def test_open_controls(self, mock_exec: MagicMock) -> None:
+        """open_controls creates and executes the Controls dialog."""
+        window = MockMainWindow()
+        from r34_client.ui.dialogs.controls import open_controls
+        open_controls(window)
+        mock_exec.assert_called_once()
+
+    @patch("PySide6.QtWidgets.QDialog.exec")
+    def test_open_diagnostics(self, mock_exec: MagicMock) -> None:
+        """open_diagnostics creates and executes the Diagnostics dialog."""
+        window = MockMainWindow()
+        from r34_client.ui.dialogs.controls import open_diagnostics
+        open_diagnostics(window)
+        mock_exec.assert_called_once()

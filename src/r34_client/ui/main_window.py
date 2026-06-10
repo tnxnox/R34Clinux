@@ -638,6 +638,12 @@ class MainWindow(QMainWindow):
         diagnostics_action.triggered.connect(self._open_diagnostics)
         toolbar.addAction(diagnostics_action)
 
+        toolbar.addSeparator()
+
+        about_action = QAction("About", self)
+        about_action.triggered.connect(self._open_about)
+        toolbar.addAction(about_action)
+
         self.addToolBar(toolbar)
 
     def _register_global_shortcuts(self) -> None:
@@ -672,6 +678,9 @@ class MainWindow(QMainWindow):
 
     def _open_controls(self) -> None:
         dialogs_feature.open_controls(self)
+
+    def _open_about(self) -> None:
+        dialogs_feature.open_about(self)
 
     def _mark_rate_limited_if_needed(self, context: str, error_message: str) -> None:
         status_feature.mark_rate_limited_if_needed(self, context, error_message)

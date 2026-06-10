@@ -3,7 +3,8 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from PySide6.QtWidgets import QDialog, QPlainTextEdit, QPushButton, QVBoxLayout
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QDialog, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout
 
 from r34_client.ui.dialogs.diagnostics import DiagnosticsSnapshot, format_diagnostics_report
 
@@ -84,6 +85,33 @@ def open_controls(window: MainWindow) -> None:
         "- Diagnostics shows sync state, last errors, and current activity\n"
     )
     layout.addWidget(report, 1)
+
+    close_button = QPushButton("Close", dialog)
+    close_button.clicked.connect(dialog.accept)
+    layout.addWidget(close_button)
+
+    dialog.exec()
+
+
+def open_about(window: MainWindow) -> None:
+    dialog = QDialog(window)
+    dialog.setWindowTitle("About")
+    dialog.resize(400, 220)
+
+    layout = QVBoxLayout(dialog)
+
+    label = QLabel(dialog)
+    label.setTextFormat(Qt.TextFormat.RichText)
+    label.setOpenExternalLinks(True)
+    label.setWordWrap(True)
+    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    label.setText(
+        "<h3>R34 Linux Client</h3>"
+        "<p>A lightweight, modern client for browsing and managing media content.</p>"
+        "<p>If you enjoy using this client, please consider supporting the developer:<br/>"
+        "<a href='https://ko-fi.com/thenoix' style='color: #00adb5; font-weight: bold; text-decoration: none;'>Support on Ko-fi</a></p>"
+    )
+    layout.addWidget(label, 1)
 
     close_button = QPushButton("Close", dialog)
     close_button.clicked.connect(dialog.accept)
