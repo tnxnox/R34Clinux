@@ -39,12 +39,20 @@ def set_status(window: MainWindow, message: str) -> None:
 
 
 def set_fit_mode(window: MainWindow, mode: FitMode) -> None:
+    from PySide6.QtCore import QTimer
     window._fit_mode = mode
     window._image_zoom_percent = 100
     window._update_preview_scaling()
+    
+    # Defer resetting the scrollbar values to 0 to ensure the QScrollArea layout has updated
+    QTimer.singleShot(0, lambda: _reset_scrollbars_after_layout(window))
+    
+    set_status(window, f"Image fit mode: {mode.value}")
+
+
+def _reset_scrollbars_after_layout(window: MainWindow) -> None:
     window.preview_container.horizontalScrollBar().setValue(0)
     window.preview_container.verticalScrollBar().setValue(0)
-    set_status(window, f"Image fit mode: {mode.value}")
 
 
 def cancel_current_operations(window: MainWindow) -> None:
