@@ -44,8 +44,21 @@ def set_fit_mode(window: MainWindow, mode: FitMode) -> None:
     window._image_zoom_percent = 100
     window._update_preview_scaling()
     
-    # Reset widget position and scrollbars synchronously to prevent out-of-bounds invisibility
-    window.preview_label.move(0, 0)
+    # Calculate the correct default position based on viewport centering/alignment
+    viewport_size = window.preview_container.viewport().size()
+    widget_size = window.preview_label.size()
+    vw = viewport_size.width()
+    vh = viewport_size.height()
+    ww = widget_size.width()
+    wh = widget_size.height()
+    
+    x = max(0, (vw - ww) // 2)
+    if getattr(window, "_is_long_strip_image", False):
+        y = 0
+    else:
+        y = max(0, (vh - wh) // 2)
+        
+    window.preview_label.move(x, y)
     window.preview_container.horizontalScrollBar().setValue(0)
     window.preview_container.verticalScrollBar().setValue(0)
     
