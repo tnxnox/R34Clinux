@@ -134,6 +134,7 @@ class MainWindow(QMainWindow):
         self.seek_slider = self.media_panel.seek_slider
         self.seek_time_label = self.media_panel.seek_time_label
         self.preview_container = self.media_panel.preview_container
+        self.preview_container.viewport().installEventFilter(self)
 
         # Wire up compatibility properties to friends panel child widgets
         self.add_friend_button = self.friends_panel.add_friend_button

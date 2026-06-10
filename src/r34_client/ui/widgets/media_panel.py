@@ -61,7 +61,6 @@ class MediaPanel(QWidget):
         self.preview_container.setWidgetResizable(False)
         self.preview_container.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_container.setWidget(self.preview_label)
-        self.preview_container.viewport().installEventFilter(parent)
 
         self._build_layout()
 
