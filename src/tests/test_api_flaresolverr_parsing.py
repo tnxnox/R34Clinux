@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from xml.etree import ElementTree as ET
 
-from r34_client.api.flaresolverr_parsing import (
+from r34_client.api.flaresolverr.parsing import (
     _normalize_html_text,
     decode_payload,
     extract_body_text,

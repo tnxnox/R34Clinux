@@ -7,10 +7,11 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlencode
 from xml.etree import ElementTree as ET
-
 import requests
 
-from r34_client.api.flaresolverr_parsing import (
+from r34_client.api.flaresolverr.errors import FlareSolverrError
+from r34_client.api.flaresolverr.session import FlareSolverrSession
+from r34_client.api.flaresolverr.parsing import (
     decode_payload,
     extract_body_text,
     extract_favorite_tile_ids,
@@ -33,10 +34,6 @@ from r34_client.api.urls import (
 logger = logging.getLogger(__name__)
 
 
-class FlareSolverrError(RuntimeError):
-    pass
-
-
 @dataclass(slots=True)
 class FlareSolverrFavoritesClient:
     user_id: str
@@ -48,10 +45,36 @@ class FlareSolverrFavoritesClient:
     max_timeout_ms: int = 60000
     api_base_url: str = RULE34_API_BASE_URL
     session_ttl_minutes: int = 30
-    _session_ready: bool = False
     _web_session_authenticated: bool = False
     _debug_events: list[str] = field(default_factory=list)
-    _session: requests.Session = field(default_factory=requests.Session)
+    _solver_session: FlareSolverrSession = field(init=False)
+
+    def __post_init__(self) -> None:
+        self._solver_session = FlareSolverrSession(
+            session_name=self._session_name(),
+            solver_url=self.solver_url,
+            timeout=self.timeout,
+            max_timeout_ms=self.max_timeout_ms,
+            session_ttl_minutes=self.session_ttl_minutes,
+            debug_callback=self._debug,
+        )
+
+    # Backward compatibility properties for direct mocks in tests
+    @property
+    def _session(self) -> requests.Session:
+        return self._solver_session._session
+
+    @_session.setter
+    def _session(self, value: requests.Session) -> None:
+        self._solver_session._session = value
+
+    @property
+    def _session_ready(self) -> bool:
+        return self._solver_session.session_ready
+
+    @_session_ready.setter
+    def _session_ready(self, value: bool) -> None:
+        self._solver_session.session_ready = value
 
     def _debug(self, message: str) -> None:
         self._debug_events.append(message)
@@ -69,228 +92,37 @@ class FlareSolverrFavoritesClient:
         return {"user_id": self.user_id.strip(), "api_key": self.api_key.strip()}
 
     def _solver_endpoint(self) -> str:
-        return f"{self.solver_url.rstrip('/')}/v1"
+        return self._solver_session._solver_endpoint()
 
     def _session_name(self) -> str:
         cleaned = re.sub(r"[^a-zA-Z0-9_-]", "", self.user_id.strip())
         return f"r34-{cleaned or 'default'}"
 
     def _ensure_session(self) -> None:
-        if self._session_ready:
-            self._debug("ensure_session: cached")
-            return
-        self._debug(f"ensure_session: creating/reusing session={self._session_name()}")
-        payload = {
-            "cmd": "sessions.create",
-            "session": self._session_name(),
-        }
-
-        body: dict[str, object] | None = None
-        last_exc: Exception | None = None
-        for attempt in range(1, 4):
-            try:
-                response = self._session.post(self._solver_endpoint(), json=payload, timeout=self.timeout)
-                response.raise_for_status()
-                body = response.json()
-                break
-            except requests.RequestException as exc:
-                last_exc = exc
-                if attempt == 1:
-                    self._debug("ensure_session: connection failed, attempting to auto-start FlareSolverr container")
-                    try:
-                        from r34_client.api.flaresolverr_launcher import start_flaresolverr_container
-                        started = start_flaresolverr_container(self.solver_url)
-                        if started:
-                            self._debug("ensure_session: FlareSolverr container auto-started successfully")
-                        else:
-                            self._debug("ensure_session: failed to auto-start FlareSolverr container")
-                    except Exception as launch_exc:
-                        self._debug(f"ensure_session: failed to import or run launcher: {launch_exc}")
-
-                if attempt < 3:
-                    delay = float(attempt)
-                    self._debug(f"ensure_session: transient failure attempt={attempt}/3 wait={delay:.1f}s")
-                    time.sleep(delay)
-                    continue
-                raise FlareSolverrError(f"Unable to create FlareSolverr session: {exc}") from exc
-            except ValueError as exc:
-                raise FlareSolverrError("FlareSolverr returned invalid JSON while creating session.") from exc
-
-        if body is None:
-            if last_exc is not None:
-                raise FlareSolverrError(f"Unable to create FlareSolverr session: {last_exc}") from last_exc
-            raise FlareSolverrError("Unable to create FlareSolverr session.")
-
-        status = str(body.get("status", "")).lower()
-        if status == "ok":
-            self._session_ready = True
-            self._debug("ensure_session: ok")
-            return
-
-        message = str(body.get("message") or body.get("error") or "")
-        if "already exists" in message.lower():
-            self._session_ready = True
-            self._debug("ensure_session: already exists")
-            return
-
-        raise FlareSolverrError(message or "Unable to create FlareSolverr session.")
+        self._solver_session._ensure_session()
 
     def _destroy_session(self) -> None:
-        payload = {
-            "cmd": "sessions.destroy",
-            "session": self._session_name(),
-        }
-        try:
-            response = self._session.post(self._solver_endpoint(), json=payload, timeout=self.timeout)
-            response.raise_for_status()
-            body = response.json()
-        except (requests.RequestException, ValueError) as exc:
-            self._debug(f"destroy_session: ignored error={exc}")
-            return
-
-        status = str(body.get("status", "")).lower()
-        if status == "ok":
-            self._debug("destroy_session: ok")
-            return
-
-        message = str(body.get("message") or body.get("error") or "")
-        if "not found" in message.lower() or "doesn't exist" in message.lower() or "does not exist" in message.lower():
-            self._debug("destroy_session: already absent")
-            return
-        self._debug(f"destroy_session: ignored status={status} message={message}")
+        self._solver_session._destroy_session()
 
     def close(self) -> None:
         """Close the underlying requests session and destroy the FlareSolverr session."""
-        try:
-            self._destroy_session()
-        finally:
-            self._session.close()
+        self._solver_session.close()
 
     def __enter__(self) -> FlareSolverrFavoritesClient:
-        """Context manager entry."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:  # type: ignore[no-untyped-def]
-        """Context manager exit; close session resources."""
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.close()
 
     @staticmethod
     def _is_session_error(message: str) -> bool:
-        lowered = (message or "").lower()
-        return "session" in lowered and (
-            "not found" in lowered or "doesn't exist" in lowered or "does not exist" in lowered or "invalid" in lowered
-        )
+        return FlareSolverrSession.is_session_error(message)
 
     def _request_via_solver(self, url: str, headers: dict[str, str] | None = None) -> str:
-        self._debug(f"request.get: {url}")
-
-        payload = {
-            "cmd": "request.get",
-            "url": url,
-            "maxTimeout": self.max_timeout_ms,
-            "session": self._session_name(),
-            "session_ttl_minutes": self.session_ttl_minutes,
-        }
-        if headers:
-            payload["headers"] = headers
-
-        for attempt in range(1, 5):
-            self._ensure_session()
-            try:
-                response = self._session.post(self._solver_endpoint(), json=payload, timeout=self.timeout)
-                response.raise_for_status()
-            except requests.RequestException:
-                delay = 0.35 * attempt
-                logger.warning("FlareSolverr request.get failed (attempt %d/4): retrying in %.2fs", attempt, delay)
-                self._debug(f"request.get: transient failure attempt={attempt}/4 wait={delay:.2f}s")
-                self._session_ready = False
-                time.sleep(delay)
-                continue
-
-            try:
-                body = response.json()
-            except ValueError as exc:
-                raise FlareSolverrError("FlareSolverr returned invalid JSON.") from exc
-
-            status = str(body.get("status", "")).lower()
-            if status == "ok":
-                solution = body.get("solution") or {}
-                content = solution.get("response")
-                if not isinstance(content, str):
-                    raise FlareSolverrError("FlareSolverr response payload is missing page content.")
-                self._debug(f"request.get: ok bytes={len(content)}")
-                return content.strip()
-
-            message = str(body.get("message") or body.get("error") or "Unknown FlareSolverr error")
-            if attempt < 5 and self._is_session_error(message):
-                self._debug(f"request.get: stale session detected, recreating (attempt={attempt}/4)")
-                self._session_ready = False
-                self._web_session_authenticated = False
-                time.sleep(0.2)
-                continue
-            self._debug(f"request.get: failed status={status} message={message}")
-            raise FlareSolverrError(message)
-
-        raise FlareSolverrError("FlareSolverr request failed after retries.")
+        return self._solver_session.request_via_solver(url, headers)
 
     def _post_via_solver(self, url: str, post_data: str, referer: str | None = None) -> str:
-        safe_post_data = re.sub(r"(pass=)[^&]*", r"\1***", post_data, flags=re.IGNORECASE)
-        self._debug(f"request.post: {url} payload={safe_post_data[:200]}")
-
-        headers: dict[str, str] = {
-            "Content-Type": "application/x-www-form-urlencoded",
-        }
-        if referer:
-            headers["Referer"] = referer
-
-        payload = {
-            "cmd": "request.post",
-            "url": url,
-            "postData": post_data,
-            "headers": headers,
-            "maxTimeout": self.max_timeout_ms,
-            "session": self._session_name(),
-            "session_ttl_minutes": self.session_ttl_minutes,
-        }
-
-        for attempt in range(1, 5):
-            self._ensure_session()
-            try:
-                response = self._session.post(self._solver_endpoint(), json=payload, timeout=self.timeout)
-                response.raise_for_status()
-            except requests.RequestException:
-                delay = 0.35 * attempt
-                logger.warning("FlareSolverr request.post failed (attempt %d/4): retrying in %.2fs", attempt, delay)
-                self._debug(f"request.post: transient failure attempt={attempt}/4 wait={delay:.2f}s")
-                self._session_ready = False
-                time.sleep(delay)
-                continue
-
-            try:
-                body = response.json()
-            except ValueError as exc:
-                raise FlareSolverrError("FlareSolverr returned invalid JSON.") from exc
-
-            status = str(body.get("status", "")).lower()
-            if status == "ok":
-                solution = body.get("solution") or {}
-                content = solution.get("response")
-                if not isinstance(content, str):
-                    raise FlareSolverrError("FlareSolverr response payload is missing page content.")
-                self._debug(f"request.post: ok bytes={len(content)}")
-                return content.strip()
-
-            message = str(body.get("message") or body.get("error") or "Unknown FlareSolverr error")
-            if attempt < 5 and self._is_session_error(message):
-                self._debug(f"request.post: stale session detected, recreating (attempt={attempt}/4)")
-                self._session_ready = False
-                self._web_session_authenticated = False
-                time.sleep(0.2)
-                continue
-            self._debug(f"request.post: failed status={status} message={message}")
-            raise FlareSolverrError(message)
-
-        raise FlareSolverrError("FlareSolverr POST request failed after retries.")
+        return self._solver_session.post_via_solver(url, post_data, referer)
 
     def _api_url(self, extra: dict[str, object]) -> str:
         query = {**self._auth_params(), **extra}
@@ -612,7 +444,7 @@ class FlareSolverrFavoritesClient:
                     if auth_attempt == 1:
                         self._debug("mutate_favorite: add endpoint reported not logged in, resetting session and re-login")
                         self._destroy_session()
-                        self._session_ready = False
+                        self._solver_session.session_ready = False
                         self._web_session_authenticated = False
                         self._ensure_web_login()
                         continue
@@ -631,7 +463,7 @@ class FlareSolverrFavoritesClient:
                             "Favorites mutation requires a logged rule34 web session in FlareSolverr (server replied not logged in)."
                         )
 
-                # Verification fetch is required because mutation endpoints can return 200 OK 
+                # Verification fetch is required because mutation endpoints can return 200 OK
                 # even if the mutation didn't stick due to session issues FlareSolverr missed.
                 after_present = self._favorite_exists_in_view_with_retries(
                     target_id,
@@ -641,7 +473,7 @@ class FlareSolverrFavoritesClient:
                 self._debug(f"mutate_favorite: after_present={after_present}")
                 if after_present is True:
                     return
-                
+
                 raise FlareSolverrError(
                     f"Unable to add account favorite #{target_id}. Latest server response: {effective_body or 'empty response'}"
                 )
@@ -671,7 +503,7 @@ class FlareSolverrFavoritesClient:
                 raise FlareSolverrError(
                     "Favorites mutation requires a logged rule34 web session in FlareSolverr (server replied not logged in)."
                 )
-            
+
             # Post-mutation check to confirm deletion
             after_present = self._favorite_exists_in_view_with_retries(
                 target_id,
@@ -685,8 +517,7 @@ class FlareSolverrFavoritesClient:
                 # If we can't verify due to rate limit, we assume it's pending
                 self._debug("mutate_favorite: delete verification deferred due to temporary rate limit")
                 return
-            
+
             raise FlareSolverrError(
                 f"Unable to remove account favorite #{target_id}. Latest server response: {last_body or 'empty response'}"
             )
-

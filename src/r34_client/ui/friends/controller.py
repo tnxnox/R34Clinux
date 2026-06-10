@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import requests
 
-from r34_client.api.flaresolverr_parsing import extract_body_text, extract_items
+from r34_client.api.flaresolverr.parsing import extract_body_text, extract_items
 from r34_client.api.urls import favorites_view_url
 from r34_client.core.models import Post
 from r34_client.core.worker import FunctionWorker

@@ -42,6 +42,7 @@ from r34_client.core.state import AppState
 from r34_client.core.models import Post, TagSuggestion
 from r34_client.core.rate_limit import DegradedModeController, TokenBucket
 from r34_client.core.worker_pools import build_worker_pools
+from r34_client.ui.widgets import SearchPanel, MediaPanel, FriendsPanel
 from r34_client.ui.dialogs.diagnostics import DiagnosticsSnapshot
 from r34_client.ui.helpers.image_fit import FitMode
 from r34_client.ui.helpers.post import (
@@ -90,50 +91,59 @@ class MainWindow(QMainWindow):
         self.state.page_changed.connect(self._on_page_changed)
         self.state.query_changed.connect(self._on_query_changed)
         self._search_history_limit = 12
-        self._search_history = self.store.load_search_history(self._search_history_limit)
+        self.state.search.search_history = self.store.load_search_history(self._search_history_limit)
         self._saved_searches_limit = 12
-        self._saved_searches = self.store.load_saved_searches(self._saved_searches_limit)
+        self.state.search.saved_searches = self.store.load_saved_searches(self._saved_searches_limit)
         self._pinned_filters_limit = 8
-        self._pinned_filters = self.store.load_pinned_filters(self._pinned_filters_limit)
-        self._search_token = 0
-        self._preview_token = 0
-        self._favorites_token = 0
-        self._autocomplete_token = 0
-        self._last_autocomplete_prefix = ""
-        self._autocomplete_cache: dict[str, list[TagSuggestion]] = {}
-        self._autocomplete_token_start = 0
-        self._autocomplete_token_end = 0
-        self._autocomplete_query_snapshot = ""
+        self.state.search.pinned_filters = self.store.load_pinned_filters(self._pinned_filters_limit)
+
         self._active_workers: set[FunctionWorker] = set()
-        self._favorites_sync_fallback_used = False
         self._metadata_hydrated_ids: set[int] = set()
-        self._last_favorite_sync_failed = False
-        self._last_favorite_sync_error = ""
-        self._last_favorite_sync_debug = ""
-        self._pending_remote_add_ids: set[int] = set()
-        self._pending_remote_remove_ids: set[int] = set()
-        self._pending_remote_add_meta: dict[int, dict] = {}
-        self._pending_remote_remove_meta: dict[int, dict] = {}
-        self._pending_endpoint_streaks: dict[str, int] = {"add": 0, "remove": 0}
-        self._pending_state_loaded = False
-        self._pending_sync_worker_active = False
-        self._sync_active_workers = 0
-        self._pending_sync_started_at = 0.0
-        self._pending_sync_last_restart_at = 0.0
-        import threading
-        self._pending_state_lock = threading.Lock()
         self._sync_debug_log_path = self.local_favorites.database_path.parent / "sync-debug.log"
         self._is_long_strip_image = False
 
         # Image preview cache for prefetching
-        self._image_cache = ImageCache(max_size=20)
+        self.state.search.image_cache = ImageCache(max_size=20)
 
-        # Favorites pagination/lazy loading
-        self._all_favorites_posts = []
-        self._favorites_loaded_count = 0
+        # Instantiate widgets/panels
+        self.search_panel = SearchPanel(self)
+        self.media_panel = MediaPanel(self)
+        self.friends_panel = FriendsPanel(self)
 
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search tags, e.g. character rating:safe")
+        # Wire up compatibility properties to search panel child widgets
+        self.search_input = self.search_panel.search_input
+        self.search_button = self.search_panel.search_button
+        self.search_history_combo = self.search_panel.search_history_combo
+        self.saved_searches_combo = self.search_panel.saved_searches_combo
+        self.pinned_filters_combo = self.search_panel.pinned_filters_combo
+        self.save_search_button = self.search_panel.save_search_button
+        self.pin_filter_button = self.search_panel.pin_filter_button
+        self.prev_button = self.search_panel.prev_button
+        self.next_button = self.search_panel.next_button
+        self.page_label = self.search_panel.page_label
+
+        # Wire up compatibility properties to media panel child widgets
+        self.preview_label = self.media_panel.preview_label
+        self.video_surface = self.media_panel.video_surface
+        self.video_player = self.media_panel.video_player
+        self.meta_view = self.media_panel.meta_view
+        self.download_button = self.media_panel.download_button
+        self.open_button = self.media_panel.open_button
+        self.volume_slider = self.media_panel.volume_slider
+        self.copy_button = self.media_panel.copy_button
+        self.seek_slider = self.media_panel.seek_slider
+        self.seek_time_label = self.media_panel.seek_time_label
+        self.preview_container = self.media_panel.preview_container
+
+        # Wire up compatibility properties to friends panel child widgets
+        self.add_friend_button = self.friends_panel.add_friend_button
+        self.remove_friend_button = self.friends_panel.remove_friend_button
+        self.friends_list = self.friends_panel.friends_list
+        self.friend_posts_list = self.friends_panel.friend_posts_list
+        self.friend_page_label = self.friends_panel.friend_page_label
+        self.friends_tab = self.friends_panel
+
+        # Wire events and configs for search widgets
         self.search_input.returnPressed.connect(self.search)
         self.search_input.textEdited.connect(self._schedule_autocomplete)
         self.search_input.textChanged.connect(self._update_action_state)
@@ -152,35 +162,16 @@ class MainWindow(QMainWindow):
         self.completer.activated[str].connect(self._insert_completion)
         self.search_input.setCompleter(self.completer)
 
-        self.search_button = QPushButton("Search")
         self.search_button.clicked.connect(self.search)
-
-        self.search_history_combo = QComboBox()
-        self.search_history_combo.setMinimumWidth(220)
         self.search_history_combo.activated[int].connect(self._on_search_history_selected)
-
-        self.saved_searches_combo = QComboBox()
-        self.saved_searches_combo.setMinimumWidth(220)
         self.saved_searches_combo.activated[int].connect(self._on_saved_search_selected)
-
-        self.pinned_filters_combo = QComboBox()
-        self.pinned_filters_combo.setMinimumWidth(220)
         self.pinned_filters_combo.activated[int].connect(self._on_pinned_filter_selected)
-
-        self.save_search_button = QPushButton("Save search")
         self.save_search_button.clicked.connect(self._save_current_search)
-
-        self.pin_filter_button = QPushButton("Pin filter")
         self.pin_filter_button.clicked.connect(self._toggle_current_pinned_filter)
-
-        self.prev_button = QPushButton("Previous")
         self.prev_button.clicked.connect(self.previous_page)
-
-        self.next_button = QPushButton("Next")
         self.next_button.clicked.connect(self.next_page)
 
-        self.page_label = QLabel("Page 1")
-
+        # Wire events for list widgets (Search, Favorites, Friends)
         self.results_list = QListWidget()
         self.results_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.results_list.currentItemChanged.connect(self._handle_selection_change)
@@ -194,20 +185,10 @@ class MainWindow(QMainWindow):
         self.favorites_list.customContextMenuRequested.connect(self._open_favorites_context_menu)
         self.favorites_list.verticalScrollBar().valueChanged.connect(self._favorites_scroll_changed)
 
-        self.friends_list = QListWidget()
-        self.friends_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.friends_list.itemClicked.connect(self._on_friend_selected)
-
-        self.add_friend_button = QPushButton("Add Friend")
         self.add_friend_button.clicked.connect(self._add_friend_dialog)
-
-        self.remove_friend_button = QPushButton("Remove Friend")
         self.remove_friend_button.clicked.connect(self._remove_friend_dialog)
-
-        self.friend_posts_list = QListWidget()
-        self.friend_posts_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.friend_posts_list.currentItemChanged.connect(self._handle_selection_change)
-        self.friend_posts_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.friend_posts_list.customContextMenuRequested.connect(self._open_friend_posts_context_menu)
 
         self.collection_filter = QComboBox()
@@ -223,45 +204,16 @@ class MainWindow(QMainWindow):
         self.related_tags_list.itemClicked.connect(self._related_tag_selected)
         self.related_tags_list.setEnabled(False)
 
-        self.friends_tab = QWidget()
-        friends_layout = QVBoxLayout(self.friends_tab)
-        friends_layout.setContentsMargins(0, 0, 0, 0)
-
-        friend_buttons = QHBoxLayout()
-        friend_buttons.addWidget(self.add_friend_button)
-        friend_buttons.addWidget(self.remove_friend_button)
-        friends_layout.addLayout(friend_buttons)
-
-        friends_layout.addWidget(QLabel("Friends"))
-        friends_layout.addWidget(self.friends_list, 1)
-
-        friends_layout.addWidget(QLabel("Friend's Favorites"))
-        self.friend_page_label = QLabel("")
-        friends_layout.addWidget(self.friend_page_label)
-        friends_layout.addWidget(self.friend_posts_list, 2)
-
+        # Setup left tabs widget
         self.left_tabs = QTabWidget()
         self.left_tabs.addTab(self.results_list, "Search Results")
         self.left_tabs.addTab(self.favorites_list, "Favorites")
         self.left_tabs.addTab(self.friends_tab, "Friends")
         self.left_tabs.currentChanged.connect(self._on_tab_changed)
 
-        self.preview_label = QLabel("Search for a post to preview it here.")
-        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_label.setMinimumHeight(320)
-        self.preview_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.preview_label.setWordWrap(True)
-        self.preview_label.setScaledContents(False)
-
-        self.video_surface = ClickVideoSurface(self)
-        self.video_surface.setMinimumHeight(320)
-        self.video_surface.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        # Other playback/preview state
         self.video_surface.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
         self.video_surface.clicked.connect(self.toggle_video_playback)
-        self.video_surface.hide()
-
-        from r34_client.ui.widgets.video_player import VideoPlayer
-        self.video_player = VideoPlayer(self)
 
         self._base_preview_pixmap: QPixmap | None = None
         self._image_zoom_percent = 100
@@ -282,35 +234,14 @@ class MainWindow(QMainWindow):
         self._friend_cached_api_page = -1
         self._friend_cached_posts: list[Post] = []
         self._rate_limit = DegradedModeController()
-        # Keep remote mutation flow paced even under large pending queues.
         self._remote_mutation_bucket = TokenBucket(capacity=8.0, refill_rate_per_second=1.25)
 
-        self.meta_view = QTextBrowser()
-        self.meta_view.setReadOnly(True)
-        self.meta_view.setOpenLinks(False)
         self.meta_view.anchorClicked.connect(self._handle_meta_link_clicked)
-
-        self.download_button = QPushButton("Download")
-        self.download_button.clicked.connect(self.download_selected_post)
-
-        self.open_button = QPushButton("Open in Browser")
-        self.open_button.clicked.connect(self.open_selected_post)
-
-        self.volume_slider = ClickSeekSlider(Qt.Orientation.Horizontal)
-        self.volume_slider.setRange(0, 100)
-        self.volume_slider.setValue(80)
-        self.volume_slider.setFixedWidth(140)
         self.volume_slider.valueChanged.connect(self._on_volume_changed)
 
-        self.seek_slider = ClickSeekSlider(Qt.Orientation.Horizontal)
-        self.seek_slider.setRange(0, 0)
-        self.seek_slider.setEnabled(False)
-        self.seek_slider.setFixedHeight(22)
         self.seek_slider.sliderPressed.connect(self._on_seek_slider_pressed)
         self.seek_slider.sliderReleased.connect(self._on_seek_slider_released)
         self.seek_slider.sliderMoved.connect(self._on_seek_slider_moved)
-
-        self.seek_time_label = QLabel("00:00 / 00:00")
 
         self._seek_dragging = False
         self._seek_was_playing = False
@@ -334,7 +265,6 @@ class MainWindow(QMainWindow):
         self.pending_remote_sync_timer = QTimer(self)
         self.pending_remote_sync_timer.timeout.connect(self._pending_remote_sync_tick)
 
-        self.copy_button = QPushButton("Copy Link")
         self.copy_button.clicked.connect(self.copy_selected_link)
 
         self._global_shortcuts: list[QShortcut] = []
@@ -498,24 +428,8 @@ class MainWindow(QMainWindow):
         root = QWidget()
         layout = QVBoxLayout(root)
 
-        search_row = QHBoxLayout()
-        search_row.addWidget(self.search_input, 1)
-        search_row.addWidget(self.search_button)
-        search_row.addWidget(QLabel("Recent"))
-        search_row.addWidget(self.search_history_combo)
-        search_row.addWidget(self.prev_button)
-        search_row.addWidget(self.next_button)
-        search_row.addWidget(self.page_label)
-        layout.addLayout(search_row)
-
-        preset_row = QHBoxLayout()
-        preset_row.addWidget(QLabel("Pinned"))
-        preset_row.addWidget(self.pinned_filters_combo)
-        preset_row.addWidget(QLabel("Saved"))
-        preset_row.addWidget(self.saved_searches_combo)
-        preset_row.addWidget(self.save_search_button)
-        preset_row.addWidget(self.pin_filter_button)
-        layout.addLayout(preset_row)
+        # Add SearchPanel widget
+        layout.addWidget(self.search_panel)
 
         splitter = QSplitter()
         splitter.setOrientation(Qt.Orientation.Horizontal)
@@ -531,53 +445,15 @@ class MainWindow(QMainWindow):
 
         left_layout.addWidget(self.related_tags_label)
         left_layout.addWidget(self.related_tags_list)
-
         left_layout.addWidget(self.left_tabs)
 
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-
-        media_panel = QWidget()
-        media_layout = QVBoxLayout(media_panel)
-
-        self.preview_container = QScrollArea()
-        self.preview_container.setWidgetResizable(False)
-        self.preview_container.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_container.setWidget(self.preview_label)
-        self.preview_container.viewport().installEventFilter(self)
-        media_layout.addWidget(self.preview_container, 3)
-
-        media_layout.addWidget(self.video_surface, 3)
-
-        meta_row = QHBoxLayout()
-        meta_row.addWidget(self.download_button)
-        meta_row.addWidget(self.open_button)
-        meta_row.addWidget(QLabel("Volume"))
-        meta_row.addWidget(self.volume_slider)
-        meta_row.addWidget(self.copy_button)
-        meta_row.addStretch(1)
-        media_layout.addLayout(meta_row)
-
-        playback_row = QHBoxLayout()
-        playback_row.addWidget(QLabel("Position"))
-        playback_row.addWidget(self.seek_slider, 1)
-        playback_row.addWidget(self.seek_time_label)
-        media_layout.addLayout(playback_row)
-
-        right_splitter = QSplitter()
-        right_splitter.setOrientation(Qt.Orientation.Vertical)
-        right_splitter.addWidget(media_panel)
-        right_splitter.addWidget(self.meta_view)
-        right_splitter.setSizes([620, 220])
-        right_layout.addWidget(right_splitter, 1)
-
         splitter.addWidget(left_panel)
-        splitter.addWidget(right_panel)
+        splitter.addWidget(self.media_panel)
         splitter.setSizes([460, 860])
         layout.addWidget(splitter, 1)
 
         self.setCentralWidget(root)
-        
+
         # Setup status bar with left (client info) and right (sync info) sections
         status_bar = QStatusBar()
         self.left_status_label = QLabel("Ready.")
@@ -1489,3 +1365,246 @@ class MainWindow(QMainWindow):
 
     def _on_query_changed(self, query: str) -> None:
         self.search_input.setText(query)
+
+    # Search State Delegation
+    @property
+    def _search_history(self) -> list[str]:
+        return self.state.search.search_history
+
+    @_search_history.setter
+    def _search_history(self, val: list[str]) -> None:
+        self.state.search.search_history = val
+
+    @property
+    def _saved_searches(self) -> list[str]:
+        return self.state.search.saved_searches
+
+    @_saved_searches.setter
+    def _saved_searches(self, val: list[str]) -> None:
+        self.state.search.saved_searches = val
+
+    @property
+    def _pinned_filters(self) -> list[str]:
+        return self.state.search.pinned_filters
+
+    @_pinned_filters.setter
+    def _pinned_filters(self, val: list[str]) -> None:
+        self.state.search.pinned_filters = val
+
+    @property
+    def _search_token(self) -> int:
+        return self.state.search.search_token
+
+    @_search_token.setter
+    def _search_token(self, val: int) -> None:
+        self.state.search.search_token = val
+
+    @property
+    def _preview_token(self) -> int:
+        return self.state.search.preview_token
+
+    @_preview_token.setter
+    def _preview_token(self, val: int) -> None:
+        self.state.search.preview_token = val
+
+    @property
+    def _favorites_token(self) -> int:
+        return self.state.search.favorites_token
+
+    @_favorites_token.setter
+    def _favorites_token(self, val: int) -> None:
+        self.state.search.favorites_token = val
+
+    @property
+    def _autocomplete_token(self) -> int:
+        return self.state.search.autocomplete_token
+
+    @_autocomplete_token.setter
+    def _autocomplete_token(self, val: int) -> None:
+        self.state.search.autocomplete_token = val
+
+    @property
+    def _last_autocomplete_prefix(self) -> str:
+        return self.state.search.last_autocomplete_prefix
+
+    @_last_autocomplete_prefix.setter
+    def _last_autocomplete_prefix(self, val: str) -> None:
+        self.state.search.last_autocomplete_prefix = val
+
+    @property
+    def _autocomplete_cache(self) -> dict[str, list[TagSuggestion]]:
+        return self.state.search.autocomplete_cache
+
+    @_autocomplete_cache.setter
+    def _autocomplete_cache(self, val: dict[str, list[TagSuggestion]]) -> None:
+        self.state.search.autocomplete_cache = val
+
+    @property
+    def _autocomplete_token_start(self) -> int:
+        return self.state.search.autocomplete_token_start
+
+    @_autocomplete_token_start.setter
+    def _autocomplete_token_start(self, val: int) -> None:
+        self.state.search.autocomplete_token_start = val
+
+    @property
+    def _autocomplete_token_end(self) -> int:
+        return self.state.search.autocomplete_token_end
+
+    @_autocomplete_token_end.setter
+    def _autocomplete_token_end(self, val: int) -> None:
+        self.state.search.autocomplete_token_end = val
+
+    @property
+    def _autocomplete_query_snapshot(self) -> str:
+        return self.state.search.autocomplete_query_snapshot
+
+    @_autocomplete_query_snapshot.setter
+    def _autocomplete_query_snapshot(self, val: str) -> None:
+        self.state.search.autocomplete_query_snapshot = val
+
+    @property
+    def _image_cache(self) -> ImageCache:
+        return self.state.search.image_cache
+
+    @_image_cache.setter
+    def _image_cache(self, val: ImageCache) -> None:
+        self.state.search.image_cache = val
+
+    @property
+    def _all_favorites_posts(self) -> list[Post]:
+        return self.state.search.all_favorites_posts
+
+    @_all_favorites_posts.setter
+    def _all_favorites_posts(self, val: list[Post]) -> None:
+        self.state.search.all_favorites_posts = val
+
+    @property
+    def _favorites_loaded_count(self) -> int:
+        return self.state.search.favorites_loaded_count
+
+    @_favorites_loaded_count.setter
+    def _favorites_loaded_count(self, val: int) -> None:
+        self.state.search.favorites_loaded_count = val
+
+    # Sync State Delegation
+    @property
+    def _favorites_sync_fallback_used(self) -> bool:
+        return self.state.sync.favorites_sync_fallback_used
+
+    @_favorites_sync_fallback_used.setter
+    def _favorites_sync_fallback_used(self, val: bool) -> None:
+        self.state.sync.favorites_sync_fallback_used = val
+
+    @property
+    def _last_favorite_sync_failed(self) -> bool:
+        return self.state.sync.last_favorite_sync_failed
+
+    @_last_favorite_sync_failed.setter
+    def _last_favorite_sync_failed(self, val: bool) -> None:
+        self.state.sync.last_favorite_sync_failed = val
+
+    @property
+    def _last_favorite_sync_error(self) -> str:
+        return self.state.sync.last_favorite_sync_error
+
+    @_last_favorite_sync_error.setter
+    def _last_favorite_sync_error(self, val: str) -> None:
+        self.state.sync.last_favorite_sync_error = val
+
+    @property
+    def _last_favorite_sync_debug(self) -> str:
+        return self.state.sync.last_favorite_sync_debug
+
+    @_last_favorite_sync_debug.setter
+    def _last_favorite_sync_debug(self, val: str) -> None:
+        self.state.sync.last_favorite_sync_debug = val
+
+    @property
+    def _pending_remote_add_ids(self) -> set[int]:
+        return self.state.sync.pending_remote_add_ids
+
+    @_pending_remote_add_ids.setter
+    def _pending_remote_add_ids(self, val: set[int]) -> None:
+        self.state.sync.pending_remote_add_ids = val
+
+    @property
+    def _pending_remote_remove_ids(self) -> set[int]:
+        return self.state.sync.pending_remote_remove_ids
+
+    @_pending_remote_remove_ids.setter
+    def _pending_remote_remove_ids(self, val: set[int]) -> None:
+        self.state.sync.pending_remote_remove_ids = val
+
+    @property
+    def _pending_remote_add_meta(self) -> dict[int, dict]:
+        return self.state.sync.pending_remote_add_meta
+
+    @_pending_remote_add_meta.setter
+    def _pending_remote_add_meta(self, val: dict[int, dict]) -> None:
+        self.state.sync.pending_remote_add_meta = val
+
+    @property
+    def _pending_remote_remove_meta(self) -> dict[int, dict]:
+        return self.state.sync.pending_remote_remove_meta
+
+    @_pending_remote_remove_meta.setter
+    def _pending_remote_remove_meta(self, val: dict[int, dict]) -> None:
+        self.state.sync.pending_remote_remove_meta = val
+
+    @property
+    def _pending_endpoint_streaks(self) -> dict[str, int]:
+        return self.state.sync.pending_endpoint_streaks
+
+    @_pending_endpoint_streaks.setter
+    def _pending_endpoint_streaks(self, val: dict[str, int]) -> None:
+        self.state.sync.pending_endpoint_streaks = val
+
+    @property
+    def _pending_state_loaded(self) -> bool:
+        return self.state.sync.pending_state_loaded
+
+    @_pending_state_loaded.setter
+    def _pending_state_loaded(self, val: bool) -> None:
+        self.state.sync.pending_state_loaded = val
+
+    @property
+    def _pending_sync_worker_active(self) -> bool:
+        return self.state.sync.pending_sync_worker_active
+
+    @_pending_sync_worker_active.setter
+    def _pending_sync_worker_active(self, val: bool) -> None:
+        self.state.sync.pending_sync_worker_active = val
+
+    @property
+    def _sync_active_workers(self) -> int:
+        return self.state.sync.sync_active_workers
+
+    @_sync_active_workers.setter
+    def _sync_active_workers(self, val: int) -> None:
+        self.state.sync.sync_active_workers = val
+
+    @property
+    def _pending_sync_started_at(self) -> float:
+        return self.state.sync.pending_sync_started_at
+
+    @_pending_sync_started_at.setter
+    def _pending_sync_started_at(self, val: float) -> None:
+        self.state.sync.pending_sync_started_at = val
+
+    @property
+    def _pending_sync_last_restart_at(self) -> float:
+        return self.state.sync.pending_sync_last_restart_at
+
+    @_pending_sync_last_restart_at.setter
+    def _pending_sync_last_restart_at(self, val: float) -> None:
+        self.state.sync.pending_sync_last_restart_at = val
+
+    @property
+    def _pending_state_lock(self) -> threading.Lock:
+        return self.state.sync.pending_state_lock
+
+    @_pending_state_lock.setter
+    def _pending_state_lock(self, val: threading.Lock) -> None:
+        self.state.sync.pending_state_lock = val
+

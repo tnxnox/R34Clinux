@@ -1,7 +1,55 @@
 from __future__ import annotations
 
+import threading
+from typing import TYPE_CHECKING
 from PySide6.QtCore import QObject, Signal
 from r34_client.core.models import Post
+
+if TYPE_CHECKING:
+    from r34_client.ui.helpers.prefetch import ImageCache
+    from r34_client.core.models import TagSuggestion
+
+
+class SyncState:
+    """State related to Rule34 favorites remote synchronization."""
+
+    def __init__(self) -> None:
+        self.pending_remote_add_ids: set[int] = set()
+        self.pending_remote_remove_ids: set[int] = set()
+        self.pending_remote_add_meta: dict[int, dict] = {}
+        self.pending_remote_remove_meta: dict[int, dict] = {}
+        self.pending_endpoint_streaks: dict[str, int] = {"add": 0, "remove": 0}
+        self.pending_state_loaded: bool = False
+        self.pending_sync_worker_active: bool = False
+        self.sync_active_workers: int = 0
+        self.pending_sync_started_at: float = 0.0
+        self.pending_sync_last_restart_at: float = 0.0
+        self.last_favorite_sync_failed: bool = False
+        self.last_favorite_sync_error: str = ""
+        self.last_favorite_sync_debug: str = ""
+        self.favorites_sync_fallback_used: bool = False
+        self.pending_state_lock = threading.Lock()
+
+
+class SearchState:
+    """State related to query searching and autocomplete caches."""
+
+    def __init__(self) -> None:
+        self.search_token: int = 0
+        self.preview_token: int = 0
+        self.favorites_token: int = 0
+        self.autocomplete_token: int = 0
+        self.last_autocomplete_prefix: str = ""
+        self.autocomplete_cache: dict[str, list[TagSuggestion]] = {}
+        self.autocomplete_token_start: int = 0
+        self.autocomplete_token_end: int = 0
+        self.autocomplete_query_snapshot: str = ""
+        self.search_history: list[str] = []
+        self.saved_searches: list[str] = []
+        self.pinned_filters: list[str] = []
+        self.all_favorites_posts: list[Post] = []
+        self.favorites_loaded_count: int = 0
+        self.image_cache: ImageCache | None = None
 
 
 class AppState(QObject):
@@ -21,6 +69,10 @@ class AppState(QObject):
         self._favorite_ids: set[int] = set()
         self._current_page = 0
         self._current_query = ""
+
+        # Sub-states
+        self.sync = SyncState()
+        self.search = SearchState()
 
     @property
     def current_posts(self) -> list[Post]:

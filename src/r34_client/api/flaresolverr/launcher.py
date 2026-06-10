@@ -191,4 +191,3 @@ def _wait_for_flaresolverr(solver_url: str) -> bool:
         time.sleep(1)
     logger.error("FlareSolverr did not respond at %s within 30 seconds.", solver_url)
     return False
-

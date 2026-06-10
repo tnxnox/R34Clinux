@@ -34,7 +34,7 @@ def open_settings(window: MainWindow, initial: bool = False) -> None:
             window._refresh_local_favorites()
 
             def start_solver_task() -> bool:
-                from r34_client.api.flaresolverr_launcher import start_flaresolverr_container
+                from r34_client.api.flaresolverr.launcher import start_flaresolverr_container
                 return start_flaresolverr_container(window.settings.flaresolverr_url)
 
             def on_start_finished(success: object) -> None:

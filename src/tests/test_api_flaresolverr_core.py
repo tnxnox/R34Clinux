@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from r34_client.api.flaresolverr import FlareSolverrFavoritesClient, FlareSolverrError
-from r34_client.api.flaresolverr_parsing import _normalize_html_text, decode_payload
+from r34_client.api.flaresolverr.parsing import _normalize_html_text, decode_payload
 from r34_client.sync.pending_mutations import extract_retry_after_seconds
 
 
@@ -221,8 +221,8 @@ class ExtractRetryAfterSecondsTests(unittest.TestCase):
 class EnsureSessionAutoStartTests(unittest.TestCase):
     """Tests for FlareSolverrFavoritesClient._ensure_session auto-start behavior."""
 
-    @patch("r34_client.api.flaresolverr.time.sleep")
-    @patch("r34_client.api.flaresolverr_launcher.start_flaresolverr_container")
+    @patch("r34_client.api.flaresolverr.session.time.sleep")
+    @patch("r34_client.api.flaresolverr.session.start_flaresolverr_container")
     def test_ensure_session_calls_launcher_on_first_connection_failure(
         self, mock_launcher, mock_sleep
     ) -> None:
