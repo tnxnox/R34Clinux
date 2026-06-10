@@ -115,7 +115,6 @@ def format_post_metadata(post: Post) -> str:
         f"Score: {post.score if post.score is not None else 'n/a'}",
         f"Dimensions: {post.dimensions}",
         f"File name: {post.file_name}",
-        f"File size: {post.file_size if post.file_size is not None else 'n/a'}",
         f"Created: {post.created_at or 'n/a'}",
         f"Page: {post.page_url}",
         f"Download: {post.download_url or 'n/a'}",

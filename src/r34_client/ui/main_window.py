@@ -597,33 +597,10 @@ class MainWindow(QMainWindow):
 
         toolbar.addSeparator()
 
-        fit_group = QActionGroup(self)
-        fit_group.setExclusive(True)
-
-        fit_smart_action = QAction("Fit: Smart", self)
-        fit_smart_action.setCheckable(True)
-        fit_smart_action.setChecked(True)
-        fit_smart_action.triggered.connect(lambda: self._set_fit_mode(FitMode.SMART))
-        fit_group.addAction(fit_smart_action)
-        toolbar.addAction(fit_smart_action)
-
-        fit_width_action = QAction("Fit: Width", self)
-        fit_width_action.setCheckable(True)
-        fit_width_action.triggered.connect(lambda: self._set_fit_mode(FitMode.FIT_WIDTH))
-        fit_group.addAction(fit_width_action)
-        toolbar.addAction(fit_width_action)
-
-        fit_height_action = QAction("Fit: Height", self)
-        fit_height_action.setCheckable(True)
-        fit_height_action.triggered.connect(lambda: self._set_fit_mode(FitMode.FIT_HEIGHT))
-        fit_group.addAction(fit_height_action)
-        toolbar.addAction(fit_height_action)
-
-        fit_original_action = QAction("Fit: 1:1", self)
-        fit_original_action.setCheckable(True)
-        fit_original_action.triggered.connect(lambda: self._set_fit_mode(FitMode.ORIGINAL))
-        fit_group.addAction(fit_original_action)
-        toolbar.addAction(fit_original_action)
+        self.fit_combo = QComboBox(self)
+        self.fit_combo.addItems(["Fit: Smart", "Fit: Width", "Fit: Height", "Fit: 1:1"])
+        self.fit_combo.currentIndexChanged.connect(self._on_fit_mode_changed)
+        toolbar.addWidget(self.fit_combo)
 
         toolbar.addSeparator()
 
@@ -669,6 +646,27 @@ class MainWindow(QMainWindow):
 
     def _set_fit_mode(self, mode: FitMode) -> None:
         status_feature.set_fit_mode(self, mode)
+        if hasattr(self, "fit_combo"):
+            self.fit_combo.blockSignals(True)
+            if mode == FitMode.SMART:
+                self.fit_combo.setCurrentIndex(0)
+            elif mode == FitMode.FIT_WIDTH:
+                self.fit_combo.setCurrentIndex(1)
+            elif mode == FitMode.FIT_HEIGHT:
+                self.fit_combo.setCurrentIndex(2)
+            elif mode == FitMode.ORIGINAL:
+                self.fit_combo.setCurrentIndex(3)
+            self.fit_combo.blockSignals(False)
+
+    def _on_fit_mode_changed(self, index: int) -> None:
+        mode = FitMode.SMART
+        if index == 1:
+            mode = FitMode.FIT_WIDTH
+        elif index == 2:
+            mode = FitMode.FIT_HEIGHT
+        elif index == 3:
+            mode = FitMode.ORIGINAL
+        self._set_fit_mode(mode)
 
     def _cancel_current_operations(self) -> None:
         status_feature.cancel_current_operations(self)
