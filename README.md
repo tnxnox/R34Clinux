@@ -40,9 +40,10 @@ FlareSolverr sync — both optional, local favorites work without either.
 ## What It Does
 
 - Search by tag with autocomplete, pagination, search history, and saved searches
-- Browse image previews with zoom/pan, watch videos with seek controls
-- Manage favorites locally — collections, bulk operations, keyboard shortcuts
-- Sync your account favorites via FlareSolverr (optional)
+- Browse image previews with zoom/pan, watch videos with seek controls (including click-to-seek)
+- Interactive details panel with clickable metadata tags (for quick searching) and source links (to open in browser)
+- Manage favorites locally — collections, bulk operations, and keyboard shortcuts
+- Sync your account favorites via FlareSolverr (optional) with automatic local container management (Docker/Podman support)
 - Download posts individually or in batches
 - Add friends and browse their public favorites
 
@@ -79,7 +80,7 @@ Access via the toolbar (gear icon). Key settings:
 
 - **Search returns nothing** — check your API credentials in Settings
 - **FlareSolverr fails** — make sure the container is running and reachable at
-  `http://127.0.0.1:8191`; check `~/.config/r34-client/sync-debug.log`
+  `http://127.0.0.1:8191`; check `~/.local/share/R34LinuxClient/sync-debug.log`
 - **Video won't play** — install VLC; software decode is automatic if VA-API
   isn't available
 
