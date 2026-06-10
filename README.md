@@ -22,10 +22,17 @@ pip install -e .
 Get your API credentials from rule34.xxx (Account → My Settings → API), then:
 
 ```bash
+# Recommended — handles FlareSolverr, VLC checks, and cleanup automatically
+./scripts/start_r34.sh
+```
+
+Or if you manage FlareSolverr yourself (or don't need sync):
+
+```bash
 r34-linux-client
 ```
 
-The app will prompt you to enter them on first launch.
+The app will prompt you to enter credentials on first launch.
 
 **Requirements:** Python 3.11+. VLC is needed for video playback, Docker/Podman for
 FlareSolverr sync — both optional, local favorites work without either.
