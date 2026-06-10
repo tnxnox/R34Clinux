@@ -40,7 +40,10 @@ def set_status(window: MainWindow, message: str) -> None:
 
 def set_fit_mode(window: MainWindow, mode: FitMode) -> None:
     window._fit_mode = mode
+    window._image_zoom_percent = 100
     window._update_preview_scaling()
+    window.preview_container.horizontalScrollBar().setValue(0)
+    window.preview_container.verticalScrollBar().setValue(0)
     set_status(window, f"Image fit mode: {mode.value}")
 
 
