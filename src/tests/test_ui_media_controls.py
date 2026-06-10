@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from PySide6.QtCore import Qt, QPointF, QEvent
 from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QWidget, QTabWidget, QLabel, QPushButton
 
 from r34_client.ui.widgets.custom import ClickSeekSlider
 from r34_client.ui.features.media import refresh_playback_controls
@@ -57,6 +57,42 @@ class MockMainWindow(QWidget):
         self._sync_debug_log_path = "/tmp/sync.log"
         self._fit_mode = MagicMock()
         self._fit_mode.value = "smart"
+
+        # Page controls additions
+        self.results_list = QWidget(self)
+        self.friends_tab = QWidget(self)
+        self.favorites_list = QWidget(self)
+        self.left_tabs = QTabWidget(self)
+        self.left_tabs.addTab(self.results_list, "Results")
+        self.left_tabs.addTab(self.favorites_list, "Favorites")
+        self.left_tabs.addTab(self.friends_tab, "Friends")
+        
+        self.page_label = QLabel(self)
+        self.prev_button = QPushButton(self)
+        self.next_button = QPushButton(self)
+        self.friend_page_label = QLabel(self)
+        
+        self._friend_user_id = ""
+        self._friend_current_page = 0
+        self._friend_has_more = False
+        self.friend_posts: list = []
+        
+        self.settings = MagicMock()
+        self.settings.page_size = 50
+        
+        # Mocking window methods that status_feature might call
+        self.download_button = QPushButton(self)
+        self.open_button = QPushButton(self)
+        self.copy_button = QPushButton(self)
+        self.volume_slider = ClickSeekSlider(Qt.Orientation.Horizontal, self)
+        self.save_search_button = QPushButton(self)
+        self.pin_filter_button = QPushButton(self)
+        self.search_input = QLabel(self) # mocked input as QLabel to have .text()
+        self.search_input.text = lambda: ""
+        self._pinned_filters: set[str] = set()
+
+    def _current_post_is_video(self) -> bool:
+        return False
 
     def _sync_enabled(self) -> bool:
         return True

@@ -654,6 +654,7 @@ class MainWindow(QMainWindow):
 
     def _update_action_state(self) -> None:
         status_feature.update_action_state(self)
+        self._update_page_controls_state()
 
     def _set_left_status(self, message: str) -> None:
         status_feature.set_left_status(self, message)
@@ -694,17 +695,46 @@ class MainWindow(QMainWindow):
     def _log_sync_debug(self, title: str, details: str) -> None:
         status_feature.log_sync_debug(self, title, details)
 
-    def _update_friend_page_label(self) -> None:
-        if self._friend_user_id:
-            page_num = self._friend_current_page + 1
-            label = f"Page {page_num}"
-            if not self._friend_has_more and self.friend_posts:
-                label += " (last)"
-            elif self._friend_has_more:
-                label += "+"
-            self.friend_page_label.setText(label)
+    def _update_page_controls_state(self) -> None:
+        active_tab = self.left_tabs.currentWidget()
+        if active_tab is self.results_list:
+            page_num = self.current_page + 1
+            self.page_label.setText(f"Page {page_num}")
+            self.prev_button.setEnabled(self.current_page > 0)
+            self.next_button.setEnabled(len(self.current_posts) > 0)
+            self.prev_button.show()
+            self.next_button.show()
+            self.page_label.show()
+        elif active_tab is self.friends_tab:
+            if self._friend_user_id:
+                page_num = self._friend_current_page + 1
+                label = f"Page {page_num}"
+                if not self._friend_has_more and self.friend_posts:
+                    label += " (last)"
+                elif self._friend_has_more:
+                    label += "+"
+                self.page_label.setText(label)
+                self.friend_page_label.setText(label)
+                self.prev_button.setEnabled(self._friend_current_page > 0)
+                self.next_button.setEnabled(self._friend_has_more)
+            else:
+                self.page_label.setText("")
+                self.friend_page_label.setText("")
+                self.prev_button.setEnabled(False)
+                self.next_button.setEnabled(False)
+            self.prev_button.show()
+            self.next_button.show()
+            self.page_label.show()
         else:
-            self.friend_page_label.setText("")
+            self.page_label.setText("")
+            self.prev_button.setEnabled(False)
+            self.next_button.setEnabled(False)
+            self.prev_button.hide()
+            self.next_button.hide()
+            self.page_label.hide()
+
+    def _update_friend_page_label(self) -> None:
+        self._update_page_controls_state()
 
     def search(self) -> None:
         search_feature.search(self)
@@ -1433,7 +1463,7 @@ class MainWindow(QMainWindow):
         self._set_status(f"Loaded {len(posts)} favorites")
 
     def _on_page_changed(self, page: int) -> None:
-        self.page_label.setText(f"Page {page + 1}")
+        self._update_action_state()
 
     def _on_query_changed(self, query: str) -> None:
         self.search_input.setText(query)

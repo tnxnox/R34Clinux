@@ -17,6 +17,21 @@ if TYPE_CHECKING:
 
 
 def _fetch_page(url: str, flare_solver_url: str = "") -> str | None:
+    if not flare_solver_url:
+        try:
+            headers = {
+                "User-Agent": (
+                    "Mozilla/5.0 (X11; Linux x86_64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+            }
+            resp = requests.get(url, headers=headers, timeout=15)
+            resp.raise_for_status()
+            return resp.text
+        except requests.RequestException:
+            return None
+
     try:
         payload = {
             "cmd": "request.get",
@@ -96,7 +111,8 @@ def _hydrate_posts_from_api(client, posts: list[Post], *, limit: int = 10) -> No
 
 
 def _fetch_friend_favorites_impl(client, user_id: str, solver_url: str, page: int = 0) -> list[Post]:
-    url = favorites_view_url(user_id, page=page)
+    pid = page * 50
+    url = favorites_view_url(user_id, page=pid)
     html = _fetch_page(url, flare_solver_url=solver_url)
     if html is None:
         msg = f"Failed to fetch favorites for user {user_id} (page {page})"
@@ -199,7 +215,7 @@ def load_friend_favorites(window: MainWindow, item: object = None) -> None:
         return
 
     user_id = str(friend["user_id"])
-    solver_url = window.settings.flaresolverr_url
+    solver_url = window.settings.flaresolverr_url if window.settings.flaresolverr_enabled else ""
 
     window._friend_current_page = 0
     window._friend_user_id = user_id
@@ -224,10 +240,11 @@ def next_friend_page(window: MainWindow) -> None:
     if not window._friend_user_id:
         return
     window._friend_current_page += 1
+    solver_url = window.settings.flaresolverr_url if window.settings.flaresolverr_enabled else ""
     _fetch_friend_page(
         window,
         window._friend_user_id,
-        window.settings.flaresolverr_url,
+        solver_url,
         window._friend_current_page,
     )
 
@@ -236,10 +253,11 @@ def prev_friend_page(window: MainWindow) -> None:
     if not window._friend_user_id or window._friend_current_page <= 0:
         return
     window._friend_current_page -= 1
+    solver_url = window.settings.flaresolverr_url if window.settings.flaresolverr_enabled else ""
     _fetch_friend_page(
         window,
         window._friend_user_id,
-        window.settings.flaresolverr_url,
+        solver_url,
         window._friend_current_page,
     )
 
