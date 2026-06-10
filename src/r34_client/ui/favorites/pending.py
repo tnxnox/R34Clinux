@@ -222,3 +222,5 @@ def pending_remote_mutations_failed(window: MainWindow, error_text: str) -> None
     window._pending_sync_worker_active = False
     window._pending_sync_started_at = 0.0
     window._log_sync_debug("Pending sync worker failure", error_text)
+    first_line = error_text.splitlines()[0] if error_text else "unknown error"
+    window._set_right_status(f"Pending remote sync failed: {first_line}")

@@ -244,3 +244,4 @@ def _friend_favorites_fetched(window: MainWindow, token: int, result: object) ->
 
     window._friend_has_more = len(posts) >= 50
     window.friend_posts = displayed
+    window._set_status(f"Loaded page {window._friend_current_page + 1} of friend's favorites ({len(posts)} posts fetched).")
