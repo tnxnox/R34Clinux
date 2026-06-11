@@ -8,11 +8,10 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QLabel,
     QSizePolicy,
-    QPushButton,
     QTextBrowser,
     QSplitter,
 )
-from r34_client.ui.widgets.custom import ClickSeekSlider, ClickVideoSurface
+from r34_client.ui.widgets.custom import ClickSeekSlider, ClickVideoSurface, AnimatedButton
 from r34_client.ui.widgets.video_player import VideoPlayer
 
 
@@ -41,14 +40,18 @@ class MediaPanel(QWidget):
         self.meta_view.setReadOnly(True)
         self.meta_view.setOpenLinks(False)
 
-        self.download_button = QPushButton("Download")
-        self.open_button = QPushButton("Open in Browser")
-        self.copy_button = QPushButton("Copy Link")
+        self.download_button = AnimatedButton("Download", icon_name="download")
+        self.open_button = AnimatedButton("Open in Browser", icon_name="open")
+        self.copy_button = AnimatedButton("Copy Link", icon_name="copy")
 
         self.volume_slider = ClickSeekSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(80)
         self.volume_slider.setFixedWidth(140)
+
+        # Added Play/Pause button to the bottom playback controls
+        self.play_button = AnimatedButton("", icon_name="play")
+        self.play_button.setFixedSize(36, 36)
 
         self.seek_slider = ClickSeekSlider(Qt.Orientation.Horizontal)
         self.seek_slider.setRange(0, 0)
@@ -56,6 +59,7 @@ class MediaPanel(QWidget):
         self.seek_slider.setFixedHeight(22)
 
         self.seek_time_label = QLabel("00:00 / 00:00")
+        self.seek_time_label.setStyleSheet("font-weight: 500; color: #94a3b8;")
 
         self.preview_container = QScrollArea()
         self.preview_container.setWidgetResizable(False)
@@ -66,26 +70,37 @@ class MediaPanel(QWidget):
 
     def _build_layout(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
 
         media_widget = QWidget()
         media_layout = QVBoxLayout(media_widget)
         media_layout.setContentsMargins(0, 0, 0, 0)
+        media_layout.setSpacing(10)
 
         media_layout.addWidget(self.preview_container, 3)
         media_layout.addWidget(self.video_surface, 3)
 
         meta_row = QHBoxLayout()
+        meta_row.setSpacing(10)
         meta_row.addWidget(self.download_button)
         meta_row.addWidget(self.open_button)
-        meta_row.addWidget(QLabel("Volume"))
-        meta_row.addWidget(self.volume_slider)
         meta_row.addWidget(self.copy_button)
         meta_row.addStretch(1)
+        
+        lbl_volume = QLabel("Volume")
+        lbl_volume.setStyleSheet("color: #94a3b8; font-weight: 500;")
+        meta_row.addWidget(lbl_volume)
+        meta_row.addWidget(self.volume_slider)
         media_layout.addLayout(meta_row)
 
         playback_row = QHBoxLayout()
-        playback_row.addWidget(QLabel("Position"))
+        playback_row.setSpacing(10)
+        playback_row.addWidget(self.play_button)
+        
+        lbl_pos = QLabel("Position")
+        lbl_pos.setStyleSheet("color: #94a3b8; font-weight: 500;")
+        playback_row.addWidget(lbl_pos)
         playback_row.addWidget(self.seek_slider, 1)
         playback_row.addWidget(self.seek_time_label)
         media_layout.addLayout(playback_row)

@@ -182,6 +182,14 @@ def on_seek_slider_released(window: MainWindow) -> None:
 
 
 def refresh_playback_controls(window: MainWindow) -> None:
+    # Update play/pause button icon dynamically
+    if hasattr(window, "play_button"):
+        if window.video_player.is_available and window.video_player.is_playing():
+            window.play_button.icon_name = "pause"
+        else:
+            window.play_button.icon_name = "play"
+        window.play_button._update_icon()
+
     if not window.video_player.is_available:
         window.seek_slider.setEnabled(False)
         return

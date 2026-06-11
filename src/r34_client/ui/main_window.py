@@ -42,7 +42,7 @@ from r34_client.core.state import AppState
 from r34_client.core.models import Post, TagSuggestion
 from r34_client.core.rate_limit import DegradedModeController, TokenBucket
 from r34_client.core.worker_pools import build_worker_pools
-from r34_client.ui.widgets import SearchPanel, MediaPanel, FriendsPanel
+from r34_client.ui.widgets import SearchPanel, MediaPanel, FriendsPanel, LeftTabs
 from r34_client.ui.dialogs.diagnostics import DiagnosticsSnapshot
 from r34_client.ui.helpers.image_fit import FitMode
 from r34_client.ui.helpers.post import (
@@ -205,8 +205,8 @@ class MainWindow(QMainWindow):
         self.related_tags_list.itemClicked.connect(self._related_tag_selected)
         self.related_tags_list.setEnabled(False)
 
-        # Setup left tabs widget
-        self.left_tabs = QTabWidget()
+        # Setup left tabs widget using our custom modern LeftTabs sidebar
+        self.left_tabs = LeftTabs(self)
         self.left_tabs.addTab(self.results_list, "Search Results")
         self.left_tabs.addTab(self.favorites_list, "Favorites")
         self.left_tabs.addTab(self.friends_tab, "Friends")
@@ -215,6 +215,8 @@ class MainWindow(QMainWindow):
         # Other playback/preview state
         self.video_surface.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
         self.video_surface.clicked.connect(self.toggle_video_playback)
+        self.play_button = self.media_panel.play_button
+        self.play_button.clicked.connect(self.toggle_video_playback)
 
         self._base_preview_pixmap: QPixmap | None = None
         self._image_zoom_percent = 100
