@@ -2,6 +2,14 @@
 
 Thanks for considering contributing to the R34 Linux Client!
 
+## Repository Rules & Hygiene
+
+To maintain the security and cleanliness of this repository:
+
+1. **No Secrets/Credentials**: Never commit or push personal access keys, user credentials (`id.txt`, `apikey.txt`), passwords, or configuration files containing credentials.
+2. **No Development-Only Trackers**: Do not commit internal bug audits, concurrency trackers, or personal task lists (such as `AUDIT_REPORT.md`). These should stay ignored locally.
+3. **No Private/Internal Documentation**: Public documentation must only cover user-facing setup, help guides, and contributing procedures. Detailed internal cheatsheets, credentials templates, and development notes must go into the private submodule (`docs/private/`).
+
 ## Getting Started
 
 1. Fork and clone the repo
