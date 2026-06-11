@@ -32,7 +32,6 @@ dist/
 .z*
 .profile
 .gitconfig
-.gitmodules
 .ripgreprc
 
 # Logs and local runtime files
