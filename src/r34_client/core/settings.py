@@ -97,7 +97,8 @@ class SettingsStore:
             logger.warning("page_size is %d, resetting to default 50", settings.page_size)
             settings.page_size = 50
         elif settings.page_size > 1000:
-            logger.warning("page_size is %d (very large), may cause performance issues", settings.page_size)
+            logger.warning("page_size is %d, clamping to API limit of 1000", settings.page_size)
+            settings.page_size = 1000
 
         # Validate download_max_retries
         if settings.download_max_retries < 0:

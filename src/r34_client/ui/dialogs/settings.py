@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QPushButton,
     QSpinBox,
@@ -73,6 +74,13 @@ class SettingsDialog(QDialog):
         self.flaresolverr_enabled_check = QCheckBox("Enable account favorites sync via FlareSolverr")
         self.flaresolverr_enabled_check.setChecked(settings.flaresolverr_enabled)
 
+        self.flaresolverr_warning_label = QLabel(
+            "Warning: Automated favorites sync via FlareSolverr bypasses Cloudflare and "
+            "technically violates the website's Terms of Service. Use at your own risk."
+        )
+        self.flaresolverr_warning_label.setStyleSheet("color: #888888; font-size: 10px;")
+        self.flaresolverr_warning_label.setWordWrap(True)
+
         self.flaresolverr_url_edit = QLineEdit(settings.flaresolverr_url)
         self.flaresolverr_url_edit.setPlaceholderText("http://127.0.0.1:8191")
         self.flaresolverr_url_edit.setEnabled(settings.flaresolverr_enabled)
@@ -111,6 +119,7 @@ class SettingsDialog(QDialog):
         form.addRow("Max download retries", self.download_max_retries_spin)
         form.addRow("Results per page", self.page_size_spin)
         form.addRow(self.flaresolverr_enabled_check)
+        form.addRow(self.flaresolverr_warning_label)
         form.addRow("FlareSolverr URL", self.flaresolverr_url_edit)
         form.addRow("Sync conflict strategy", self.conflict_strategy_combo)
         form.addRow("Background sync interval (minutes)", self.background_sync_interval_spin)

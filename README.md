@@ -47,6 +47,10 @@ FlareSolverr sync — both optional, local favorites work without either.
 - Download posts individually or in batches
 - Add friends and browse their public favorites
 
+> [!WARNING]
+> **TOS Disclaimer regarding FlareSolverr Sync**: 
+> Managing account-bound favorites is not supported by the official Rule34 Developer API (DAPI). To sync favorites, the application interacts with the standard web interface using a local FlareSolverr instance. Under the website's Terms of Service, using automated processes to retrieve or modify web pages is technically prohibited. While the sync feature enforces rate limits to mimic human browsing behavior and runs entirely locally, it is disabled by default. **Use this feature at your own risk and discretion.**
+
 ## Settings
 
 Access via the toolbar (gear icon). Key settings:

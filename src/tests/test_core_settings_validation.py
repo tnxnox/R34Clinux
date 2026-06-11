@@ -11,16 +11,15 @@ class ValidateSettingsTests(unittest.TestCase):
     """Tests for SettingsStore._validate_settings."""
 
     @patch("r34_client.core.settings.QSettings")
-    def test_page_size_above_1000_logs_warning(self, mock_qsettings: object) -> None:
-        """page_size > 1000 should log a warning (the code warns, not clamps)."""
+    def test_page_size_above_1000_clamps_to_1000(self, mock_qsettings: object) -> None:
+        """page_size > 1000 should log a warning and clamp to 1000."""
         store = SettingsStore()
         settings = AppSettings(page_size=2000)
         with self.assertLogs("r34_client.core.settings", level="WARNING") as logs:
             store._validate_settings(settings)
         any_warn = any("page_size is 2000" in msg for msg in logs.output)
         self.assertTrue(any_warn, "Expected a warning about large page_size")
-        # The current implementation warns but does not clamp
-        self.assertEqual(settings.page_size, 2000)
+        self.assertEqual(settings.page_size, 1000)
 
     @patch("r34_client.core.settings.QSettings")
     def test_page_size_below_1_resets_to_50(self, mock_qsettings: object) -> None:
