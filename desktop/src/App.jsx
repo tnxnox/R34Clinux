@@ -55,6 +55,7 @@ function App() {
 
   // Sync state
   const [syncStatus, setSyncStatus] = useState({ is_running: false, debug: "", error: "", success: false });
+  const [mutationProgress, setMutationProgress] = useState({ total_mutations: 0, completed_mutations: 0, current_pending: 0 });
 
   // Detail view state
   const [selectedPost, setSelectedPost] = useState(null);
@@ -69,6 +70,7 @@ function App() {
     fetchCollections();
     fetchFriends();
     fetchSyncStatus();
+    fetchMutationProgress();
   }, []);
 
   // Fetch favorites when selected collection changes
@@ -114,14 +116,18 @@ function App() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Poll sync status if running
+  // Poll sync status and mutation progress
   useEffect(() => {
     let interval;
-    if (syncStatus.is_running) {
-      interval = setInterval(fetchSyncStatus, 2000);
+    const shouldPoll = syncStatus.is_running || mutationProgress.current_pending > 0;
+    if (shouldPoll) {
+      interval = setInterval(() => {
+        fetchSyncStatus();
+        fetchMutationProgress();
+      }, 2000);
     }
     return () => clearInterval(interval);
-  }, [syncStatus.is_running]);
+  }, [syncStatus.is_running, mutationProgress.current_pending]);
 
   // Fetch favorites and collections when sync completes
   const prevIsRunningRef = useRef(false);
@@ -204,6 +210,15 @@ function App() {
     }
   };
 
+  const fetchMutationProgress = async () => {
+    try {
+      const data = await invoke("get_mutation_progress");
+      setMutationProgress(data);
+    } catch (err) {
+      console.error("Failed to load mutation progress", err);
+    }
+  };
+
   const triggerSync = async () => {
     try {
       await invoke("start_sync");
@@ -259,6 +274,7 @@ function App() {
         setFavorites(prev => [post, ...prev]);
         showToast("Post added to favorites.");
       }
+      fetchMutationProgress();
     } catch (err) {
       showToast("Error updating favorites: " + err, "error");
     }
@@ -551,6 +567,27 @@ function App() {
         </header>
 
         <div className="content-body">
+          {mutationProgress.current_pending > 0 && (
+            <div className="mutation-progress-banner">
+              <div className="mutation-progress-info">
+                <span className="mutation-progress-title">
+                  <RefreshCw className="spinner" size={14} style={{ marginRight: '6px' }} />
+                  Syncing favorites remotely...
+                </span>
+                <span className="mutation-progress-count">
+                  {mutationProgress.completed_mutations} / {mutationProgress.total_mutations} synced ({mutationProgress.current_pending} left)
+                </span>
+              </div>
+              <div className="mutation-progress-bar-bg">
+                <div 
+                  className="mutation-progress-bar-fill" 
+                  style={{ 
+                    width: `${mutationProgress.total_mutations > 0 ? (mutationProgress.completed_mutations / mutationProgress.total_mutations) * 100 : 0}%` 
+                  }}
+                />
+              </div>
+            </div>
+          )}
           {error && (
             <div style={{
               background: "rgba(239, 68, 68, 0.1)",

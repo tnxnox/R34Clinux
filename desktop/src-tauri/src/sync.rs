@@ -9,6 +9,7 @@ pub async fn sync_remote_favorites(
     local_store: &LocalFavoritesStore,
     debug_logs: &mut String,
     error_logs: &mut String,
+    progress_opt: Option<&std::sync::Mutex<crate::models::MutationProgress>>,
 ) -> Result<Vec<Post>, String> {
     
     let solver_client = FlareSolverrFavoritesClient::new(
@@ -51,9 +52,41 @@ pub async fn sync_remote_favorites(
         return Ok(local_posts);
     }
 
+    // Load pending mutations
+    let mut pending_file = crate::mutations::load_pending_mutations().unwrap_or_default();
+    let pending_remove_ids: std::collections::HashSet<i64> = pending_file.remove.iter().map(|m| m.id).collect();
+
+    // Filter out pending removes from the remote list
+    let effective_remote_posts: Vec<Post> = remote_posts.into_iter()
+        .filter(|p| !pending_remove_ids.contains(&p.id))
+        .collect();
+
+    let remote_ids: std::collections::HashSet<i64> = effective_remote_posts.iter().map(|p| p.id).collect();
+
+    // Confirm pending adds that are now present on remote
+    let mut confirmed_add_count = 0;
+    pending_file.add.retain(|m| {
+        let confirmed = remote_ids.contains(&m.id);
+        if confirmed {
+            confirmed_add_count += 1;
+        }
+        !confirmed
+    });
+
+    if confirmed_add_count > 0 {
+        if let Ok(_) = crate::mutations::save_pending_mutations(&pending_file) {
+            debug_logs.push_str(&format!("\nConfirmed {} pending adds on remote rule34 account.", confirmed_add_count));
+            if let Some(mutex) = progress_opt {
+                let mut prog = mutex.lock().unwrap();
+                prog.completed_mutations += confirmed_add_count;
+                prog.current_pending = pending_file.add.len() + pending_file.remove.len();
+            }
+        }
+    }
+
     let strategy = settings.sync_conflict_strategy.trim().to_lowercase();
 
-    if remote_posts.is_empty() {
+    if effective_remote_posts.is_empty() {
         if strategy == "local_wins" {
             debug_logs.push_str("\nFavorites sync remote empty (local_wins). Keeping local cache.");
             return Ok(local_posts);
@@ -76,14 +109,14 @@ pub async fn sync_remote_favorites(
 
     if strategy == "remote_wins" {
         debug_logs.push_str("\nFavorites sync strategy remote_wins. Replacing local cache with remote posts.");
-        local_store.replace_all(&remote_posts)
+        local_store.replace_all(&effective_remote_posts)
             .map_err(|e| format!("Failed to update database: {}", e))?;
-        return Ok(local_store.list_favorites(None, None).unwrap_or(remote_posts));
+        return Ok(local_store.list_favorites(None, None).unwrap_or(effective_remote_posts));
     }
 
     // Merge strategy
     debug_logs.push_str("\nFavorites sync strategy merge. Merging local and remote favorites...");
-    let merged = merge_favorites(&local_posts, &remote_posts);
+    let merged = merge_favorites(&local_posts, &effective_remote_posts);
 
     local_store.replace_all(&merged)
         .map_err(|e| format!("Failed to update database with merged posts: {}", e))?;

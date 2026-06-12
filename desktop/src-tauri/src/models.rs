@@ -142,3 +142,10 @@ pub struct SyncStatus {
     pub success: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MutationProgress {
+    pub total_mutations: usize,
+    pub completed_mutations: usize,
+    pub current_pending: usize,
+}
+

@@ -19,6 +19,9 @@ pub struct AppStateInner {
     pub downloader: DownloadManager,
     pub sync_lock: TokioMutex<()>,
     pub sync_status: StdMutex<SyncStatus>,
+    pub mutation_notify: tokio::sync::Notify,
+    pub mutation_progress: StdMutex<crate::models::MutationProgress>,
+    pub mutation_streaks: StdMutex<std::collections::HashMap<String, i32>>,
 }
 
 #[derive(Clone)]
@@ -144,6 +147,34 @@ pub fn add_favorite(
     post: Post,
 ) -> Result<Value, String> {
     state.0.db.add_favorite(&post).map_err(|e| e.to_string())?;
+    
+    let settings = state.0.settings.load();
+    if settings.has_credentials() && !settings.website_username.is_empty() && !settings.website_password.is_empty() {
+        let mut prog = state.0.mutation_progress.lock().unwrap();
+        let old_pending = prog.current_pending;
+        
+        crate::mutations::queue_pending_add(post.id, "user request")?;
+        
+        let new_pending = if let Ok(pending_file) = crate::mutations::load_pending_mutations() {
+            pending_file.add.len() + pending_file.remove.len()
+        } else {
+            old_pending + 1
+        };
+        
+        if new_pending == 0 {
+            prog.total_mutations = 0;
+            prog.completed_mutations = 0;
+        } else if old_pending == 0 {
+            prog.total_mutations = new_pending;
+            prog.completed_mutations = 0;
+        } else if new_pending > old_pending {
+            prog.total_mutations += new_pending - old_pending;
+        }
+        prog.current_pending = new_pending;
+        
+        state.0.mutation_notify.notify_one();
+    }
+    
     Ok(serde_json::json!({ "status": "ok" }))
 }
 
@@ -153,7 +184,43 @@ pub fn remove_favorite(
     postId: i64,
 ) -> Result<Value, String> {
     state.0.db.remove_favorite(postId).map_err(|e| e.to_string())?;
+    
+    let settings = state.0.settings.load();
+    if settings.has_credentials() && !settings.website_username.is_empty() && !settings.website_password.is_empty() {
+        let mut prog = state.0.mutation_progress.lock().unwrap();
+        let old_pending = prog.current_pending;
+        
+        crate::mutations::queue_pending_remove(postId, "user request")?;
+        
+        let new_pending = if let Ok(pending_file) = crate::mutations::load_pending_mutations() {
+            pending_file.add.len() + pending_file.remove.len()
+        } else {
+            old_pending + 1
+        };
+        
+        if new_pending == 0 {
+            prog.total_mutations = 0;
+            prog.completed_mutations = 0;
+        } else if old_pending == 0 {
+            prog.total_mutations = new_pending;
+            prog.completed_mutations = 0;
+        } else if new_pending > old_pending {
+            prog.total_mutations += new_pending - old_pending;
+        }
+        prog.current_pending = new_pending;
+        
+        state.0.mutation_notify.notify_one();
+    }
+    
     Ok(serde_json::json!({ "status": "ok" }))
+}
+
+#[tauri::command]
+pub fn get_mutation_progress(
+    state: tauri::State<'_, AppState>,
+) -> crate::models::MutationProgress {
+    let progress = state.0.mutation_progress.lock().unwrap();
+    progress.clone()
 }
 
 #[tauri::command]
@@ -267,7 +334,7 @@ pub fn start_sync(
         status.success = false;
     }
 
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let settings = state_inner.settings.load();
         let mut debug_logs = "Sync started.".to_string();
         let mut error_logs = "".to_string();
@@ -280,7 +347,7 @@ pub fn start_sync(
             return;
         }
 
-        let res = sync_remote_favorites(&settings, &state_inner.db, &mut debug_logs, &mut error_logs).await;
+        let res = sync_remote_favorites(&settings, &state_inner.db, &mut debug_logs, &mut error_logs, Some(&state_inner.mutation_progress)).await;
         
         let mut status = state_inner.sync_status.lock().unwrap();
         status.is_running = false;
