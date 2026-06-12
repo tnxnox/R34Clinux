@@ -13,15 +13,14 @@ To maintain the security and cleanliness of this repository:
 ## Getting Started
 
 1. Fork and clone the repo
-2. Create a venv: `python3 -m venv .venv && source .venv/bin/activate`
-3. Install in editable mode: `pip install -e .`
-4. Run the tests: `python src/tests/run_all.py`
+2. Install system dependencies using `./scripts/setup.sh` or the guide in `README.md`
+3. Start the development server using `./start_r34.sh` or `make dev`
+4. Run unit tests using `make test` or `cd desktop/src-tauri && cargo test`
 
 ## Code Style
 
-- Target Python 3.11+
-- Use type annotations (`from __future__ import annotations`)
-- Follow the existing patterns — this project uses PySide6/Qt6 and plain `unittest`
+- Ensure all Rust code is formatted via `cargo fmt` and matches `clippy` checks (`cargo clippy --all-targets -- -D warnings`)
+- Keep UI components responsive, modular, and use vanilla CSS (or components styles) adhering to design system tokens
 
 ## Commit Messages
 
@@ -38,21 +37,16 @@ Types: `feat`, `fix`, `refactor`, `perf`, `docs`, `chore`, `test`, `build`
 ## Pull Requests
 
 - Keep PRs focused on one thing
-- Make sure all tests pass before opening
+- Make sure all unit tests, clippy, and build checks pass before opening
 - Link related issues if applicable
 - Squash commits if the history is noisy
 
 ## Running Tests
 
 ```bash
-# Full suite
-python src/tests/run_all.py
-
-# Single file
-python -m unittest src.tests.test_core_models -v
+# Run backend unit tests
+make test
 ```
-
-Tests that touch Qt use `QCoreApplication` and run fine headless. No display server needed.
 
 ## License
 

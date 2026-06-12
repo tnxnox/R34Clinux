@@ -74,7 +74,7 @@ Access via the toolbar (gear icon). Key settings:
 
 - **Search returns nothing** — check your API credentials in Settings
 - **FlareSolverr fails** — make sure the container is running and reachable at
-  `http://127.0.0.1:8191`; check `~/.local/share/R34LinuxClient/sync-debug.log`
+  `http://127.0.0.1:8191`; check the terminal console logs where the app was launched.
 - **Video won't play** — install VLC; software decode is automatic if VA-API
   isn't available
 
