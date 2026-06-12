@@ -508,6 +508,7 @@ impl LocalFavoritesStore {
         Ok(friends)
     }
 
+    #[allow(dead_code)]
     pub fn get_friend(&self, user_id: &str) -> Result<Option<Friend>> {
         let conn = self.connect()?;
         let mut stmt = conn.prepare("SELECT user_id, display_name, notes, added_at FROM friends WHERE user_id = ?1")?;

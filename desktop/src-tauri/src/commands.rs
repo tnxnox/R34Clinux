@@ -1,3 +1,5 @@
+#![allow(non_snake_case)]
+
 use crate::db::LocalFavoritesStore;
 use crate::settings::{SettingsStore, AppSettings};
 use crate::downloader::DownloadManager;

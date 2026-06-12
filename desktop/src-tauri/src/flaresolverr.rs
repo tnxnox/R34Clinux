@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::models::Post;
 use reqwest::Client;
 use std::time::Duration;
