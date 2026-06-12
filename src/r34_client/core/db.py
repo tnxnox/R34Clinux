@@ -10,17 +10,13 @@ from r34_client.core.models import Post
 logger = logging.getLogger(__name__)
 
 
-def _default_database_path() -> Path:
-    try:
-        from PySide6.QtCore import QStandardPaths  # type: ignore
+import os
 
-        app_data = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
-        if app_data:
-            root = Path(app_data)
-        else:
-            root = Path.home() / ".local" / "share" / "R34LinuxClient"
-    except Exception as exc:
-        logger.warning("Failed to resolve Qt app data location: %s. Falling back to ~/.local/share/R34LinuxClient", exc)
+def _default_database_path() -> Path:
+    xdg_data = os.environ.get("XDG_DATA_HOME")
+    if xdg_data:
+        root = Path(xdg_data) / "R34LinuxClient"
+    else:
         root = Path.home() / ".local" / "share" / "R34LinuxClient"
 
     root.mkdir(parents=True, exist_ok=True)

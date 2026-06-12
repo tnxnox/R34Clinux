@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
-
-from PySide6.QtCore import QSettings, QStandardPaths
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,33 @@ class AppSettings:
 
 class SettingsStore:
     def __init__(self) -> None:
-        self._settings = QSettings("R34LinuxClient", "R34LinuxClient")
+        xdg_config = os.environ.get("XDG_CONFIG_HOME")
+        if xdg_config:
+            self._config_dir = Path(xdg_config) / "R34LinuxClient"
+        else:
+            self._config_dir = Path.home() / ".config" / "R34LinuxClient"
+        self._config_dir.mkdir(parents=True, exist_ok=True)
+        self._settings_path = self._config_dir / "settings.json"
+        self._data: dict = {}
+        self._load_file()
+
+    def _load_file(self) -> None:
+        if self._settings_path.exists():
+            try:
+                with open(self._settings_path, "r", encoding="utf-8") as f:
+                    self._data = json.load(f)
+            except Exception as e:
+                logger.error("Failed to load settings file %s: %s", self._settings_path, e)
+                self._data = {}
+        else:
+            self._data = {}
+
+    def _save_file(self) -> None:
+        try:
+            with open(self._settings_path, "w", encoding="utf-8") as f:
+                json.dump(self._data, f, indent=2)
+        except Exception as e:
+            logger.error("Failed to save settings file %s: %s", self._settings_path, e)
 
     @staticmethod
     def _load_string_list(values: object | None, limit: int) -> list[str]:
@@ -57,30 +83,33 @@ class SettingsStore:
         return cleaned[: max(0, int(limit))]
 
     def load(self) -> AppSettings:
+        api = self._data.get("api", {})
+        sync = self._data.get("sync", {})
+        downloads = self._data.get("downloads", {})
+        ui = self._data.get("ui", {})
+
         settings = AppSettings(
-            user_id=self._settings.value("api/user_id", "", str),
-            api_key=self._settings.value("api/api_key", "", str),
-            website_username=self._settings.value("sync/website_username", "", str),
-            website_password=self._settings.value("sync/website_password", "", str),
-            download_directory=self._settings.value("downloads/directory", "", str),
-            page_size=self._settings.value("ui/page_size", 50, int),
-            flaresolverr_enabled=self._settings.value("sync/flaresolverr_enabled", False, bool),
-            flaresolverr_url=self._settings.value("sync/flaresolverr_url", "http://127.0.0.1:8191", str),
-            sync_conflict_strategy=self._settings.value("sync/conflict_strategy", "merge", str),
-            background_sync_interval_minutes=self._settings.value("sync/background_interval_minutes", 0, int),
-            download_naming_template=self._settings.value("downloads/naming_template", "{id}", str),
-            download_path_template=self._settings.value("downloads/path_template", "", str),
-            download_use_sample=self._settings.value("downloads/use_sample", False, bool),
-            download_sidecar_enabled=self._settings.value("downloads/sidecar_enabled", False, bool),
-            download_sidecar_format=self._settings.value("downloads/sidecar_format", "json", str),
-            download_max_retries=self._settings.value("downloads/max_retries", 3, int),
+            user_id=str(api.get("user_id", "")),
+            api_key=str(api.get("api_key", "")),
+            website_username=str(sync.get("website_username", "")),
+            website_password=str(sync.get("website_password", "")),
+            download_directory=str(downloads.get("directory", "")),
+            page_size=int(ui.get("page_size", 50)),
+            flaresolverr_enabled=bool(sync.get("flaresolverr_enabled", False)),
+            flaresolverr_url=str(sync.get("flaresolverr_url", "http://127.0.0.1:8191")),
+            sync_conflict_strategy=str(sync.get("conflict_strategy", "merge")),
+            background_sync_interval_minutes=int(sync.get("background_interval_minutes", 0)),
+            download_naming_template=str(downloads.get("naming_template", "{id}")),
+            download_path_template=str(downloads.get("path_template", "")),
+            download_use_sample=bool(downloads.get("use_sample", False)),
+            download_sidecar_enabled=bool(downloads.get("sidecar_enabled", False)),
+            download_sidecar_format=str(downloads.get("sidecar_format", "json")),
+            download_max_retries=int(downloads.get("max_retries", 3)),
         )
         self._validate_settings(settings)
         return settings
 
     def _validate_settings(self, settings: AppSettings) -> None:
-        """Validate loaded settings and log warnings for any issues."""
-        # Validate download directory exists or can be created
         dl_dir = settings.download_directory
         if dl_dir:
             dl_path = Path(dl_dir)
@@ -92,63 +121,52 @@ class SettingsStore:
                 except PermissionError:
                     logger.warning("Cannot create download directory '%s': permission denied", dl_dir)
 
-        # Validate page_size
         if settings.page_size < 1:
-            logger.warning("page_size is %d, resetting to default 50", settings.page_size)
             settings.page_size = 50
         elif settings.page_size > 1000:
-            logger.warning("page_size is %d, clamping to API limit of 1000", settings.page_size)
             settings.page_size = 1000
 
-        # Validate download_max_retries
         if settings.download_max_retries < 0:
-            logger.warning("download_max_retries is %d, resetting to 0", settings.download_max_retries)
             settings.download_max_retries = 0
 
-        # Validate sidecar format
         valid_formats = {"json", "txt", "both"}
         if settings.download_sidecar_format.lower() not in valid_formats:
-            logger.warning(
-                "Unknown sidecar format '%s', valid options: %s. Resetting to 'json'.",
-                settings.download_sidecar_format, ", ".join(sorted(valid_formats)),
-            )
             settings.download_sidecar_format = "json"
 
-        # Validate sync conflict strategy
         valid_strategies = {"merge", "local_wins", "remote_wins"}
         if settings.sync_conflict_strategy.lower() not in valid_strategies:
-            logger.warning(
-                "Unknown sync conflict strategy '%s', valid options: %s. Resetting to 'merge'.",
-                settings.sync_conflict_strategy, ", ".join(sorted(valid_strategies)),
-            )
             settings.sync_conflict_strategy = "merge"
 
     def save(self, settings: AppSettings) -> None:
-        if settings.website_password:
-            logger.warning(
-                "Website password is stored in plaintext. Consider setting up a system keyring "
-                "for secure credential storage instead."
-            )
-        self._settings.setValue("api/user_id", settings.user_id)
-        self._settings.setValue("api/api_key", settings.api_key)
-        self._settings.setValue("sync/website_username", settings.website_username)
-        self._settings.setValue("sync/website_password", settings.website_password)
-        self._settings.setValue("downloads/directory", settings.download_directory)
-        self._settings.setValue("ui/page_size", settings.page_size)
-        self._settings.setValue("sync/flaresolverr_enabled", settings.flaresolverr_enabled)
-        self._settings.setValue("sync/flaresolverr_url", settings.flaresolverr_url)
-        self._settings.setValue("sync/conflict_strategy", settings.sync_conflict_strategy)
-        self._settings.setValue("sync/background_interval_minutes", settings.background_sync_interval_minutes)
-        self._settings.setValue("downloads/naming_template", settings.download_naming_template)
-        self._settings.setValue("downloads/path_template", settings.download_path_template)
-        self._settings.setValue("downloads/use_sample", settings.download_use_sample)
-        self._settings.setValue("downloads/sidecar_enabled", settings.download_sidecar_enabled)
-        self._settings.setValue("downloads/sidecar_format", settings.download_sidecar_format)
-        self._settings.setValue("downloads/max_retries", settings.download_max_retries)
-        self._settings.sync()
+        self._data["api"] = {
+            "user_id": settings.user_id,
+            "api_key": settings.api_key,
+        }
+        self._data["sync"] = {
+            "website_username": settings.website_username,
+            "website_password": settings.website_password,
+            "flaresolverr_enabled": settings.flaresolverr_enabled,
+            "flaresolverr_url": settings.flaresolverr_url,
+            "conflict_strategy": settings.sync_conflict_strategy,
+            "background_interval_minutes": settings.background_sync_interval_minutes,
+        }
+        self._data["downloads"] = {
+            "directory": settings.download_directory,
+            "naming_template": settings.download_naming_template,
+            "path_template": settings.download_path_template,
+            "use_sample": settings.download_use_sample,
+            "sidecar_enabled": settings.download_sidecar_enabled,
+            "sidecar_format": settings.download_sidecar_format,
+            "max_retries": settings.download_max_retries,
+        }
+        self._data["ui"] = {
+            "page_size": settings.page_size,
+        }
+        self._save_file()
 
     def load_search_history(self, limit: int = 12) -> list[str]:
-        raw_history = self._settings.value("search/history", [], list)
+        search = self._data.get("search", {})
+        raw_history = search.get("history", [])
         history = [str(item).strip() for item in (raw_history or []) if str(item).strip()]
         unique_history: list[str] = []
         seen: set[str] = set()
@@ -161,28 +179,33 @@ class SettingsStore:
 
     def save_search_history(self, queries: list[str], limit: int = 12) -> None:
         cleaned_queries = [query.strip() for query in queries if query and query.strip()]
-        self._settings.setValue("search/history", cleaned_queries[: max(0, int(limit))])
-        self._settings.sync()
+        if "search" not in self._data:
+            self._data["search"] = {}
+        self._data["search"]["history"] = cleaned_queries[: max(0, int(limit))]
+        self._save_file()
 
     def load_saved_searches(self, limit: int = 12) -> list[str]:
-        return self._load_string_list(self._settings.value("search/saved_queries", [], list), limit)
+        search = self._data.get("search", {})
+        return self._load_string_list(search.get("saved_queries", []), limit)
 
     def save_saved_searches(self, queries: list[str], limit: int = 12) -> None:
         cleaned_queries = [query.strip() for query in queries if query and query.strip()]
-        self._settings.setValue("search/saved_queries", cleaned_queries[: max(0, int(limit))])
-        self._settings.sync()
+        if "search" not in self._data:
+            self._data["search"] = {}
+        self._data["search"]["saved_queries"] = cleaned_queries[: max(0, int(limit))]
+        self._save_file()
 
     def load_pinned_filters(self, limit: int = 12) -> list[str]:
-        return self._load_string_list(self._settings.value("search/pinned_queries", [], list), limit)
+        search = self._data.get("search", {})
+        return self._load_string_list(search.get("pinned_queries", []), limit)
 
     def save_pinned_filters(self, queries: list[str], limit: int = 12) -> None:
         cleaned_queries = [query.strip() for query in queries if query and query.strip()]
-        self._settings.setValue("search/pinned_queries", cleaned_queries[: max(0, int(limit))])
-        self._settings.sync()
+        if "search" not in self._data:
+            self._data["search"] = {}
+        self._data["search"]["pinned_queries"] = cleaned_queries[: max(0, int(limit))]
+        self._save_file()
 
     @staticmethod
     def default_download_directory() -> str:
-        location = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DownloadLocation)
-        if location:
-            return location
         return str(Path.home() / "Downloads")

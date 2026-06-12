@@ -36,12 +36,10 @@ class Rule34Client:
         return {"user_id": self.user_id.strip(), "api_key": self.api_key.strip()}
 
     def _request(self, params: dict[str, Any]) -> requests.Response:
-        from r34_client.core.worker import check_cancelled, cancellable_sleep
         query = {**self._auth_params(), **params}
         last_error: Exception | None = None
 
         for attempt in range(self.max_retries):
-            check_cancelled()
             try:
                 response = self._session.get(self.base_url, params=query, timeout=self.timeout)
 
@@ -53,7 +51,7 @@ class Rule34Client:
                             "API request got HTTP %d (attempt %d/%d). Retrying in %ds...",
                             response.status_code, attempt + 1, self.max_retries, wait,
                         )
-                        cancellable_sleep(wait)
+                        time.sleep(wait)
                         continue
                     raise Rule34APIError(
                         f"API request failed: HTTP {response.status_code} after {self.max_retries} retries"
@@ -76,7 +74,7 @@ class Rule34Client:
                 if attempt < self.max_retries - 1:
                     wait = 2**attempt
                     logger.warning("API request timed out (attempt %d/%d). Retrying in %ds...", attempt + 1, self.max_retries, wait)
-                    cancellable_sleep(wait)
+                    time.sleep(wait)
                     continue
                 raise Rule34APIError(f"API request timed out after {self.max_retries} retries") from e
 
@@ -85,7 +83,7 @@ class Rule34Client:
                 if attempt < self.max_retries - 1:
                     wait = 2**attempt
                     logger.warning("API connection error (attempt %d/%d). Retrying in %ds...", attempt + 1, self.max_retries, wait)
-                    cancellable_sleep(wait)
+                    time.sleep(wait)
                     continue
                 raise Rule34APIError(f"API connection failed after {self.max_retries} retries") from e
 
@@ -93,7 +91,7 @@ class Rule34Client:
                 last_error = e
                 if attempt < self.max_retries - 1:
                     wait = 2**attempt
-                    cancellable_sleep(wait)
+                    time.sleep(wait)
                     continue
                 raise Rule34APIError(f"API request failed after {self.max_retries} retries: {e}") from e
 
