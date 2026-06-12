@@ -142,3 +142,68 @@ pub async fn fetch_friend_favorites(
 
     Ok(parse_scraped_favorites(&html))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_scraped_favorites_standard() {
+        let html = r#"
+            <div class="thumb">
+                <span class="thumb">
+                    <a id="p12345" href="index.php?page=post&s=view&id=12345">
+                        <img src="//img.rule34.xxx/thumbnails/12345.jpg" />
+                    </a>
+                </span>
+                <span class="thumb">
+                    <a id="p67890" href="index.php?page=post&s=view&id=67890">
+                        <img src="https://img.rule34.xxx/thumbnails/67890.jpg" />
+                    </a>
+                </span>
+            </div>
+        "#;
+
+        let posts = parse_scraped_favorites(html);
+        assert_eq!(posts.len(), 2);
+
+        assert_eq!(posts[0].id, 12345);
+        assert_eq!(posts[0].preview_url, "https://img.rule34.xxx/thumbnails/12345.jpg");
+        assert_eq!(posts[0].sample_url, "https://img.rule34.xxx/thumbnails/12345.jpg");
+
+        assert_eq!(posts[1].id, 67890);
+        assert_eq!(posts[1].preview_url, "https://img.rule34.xxx/thumbnails/67890.jpg");
+        assert_eq!(posts[1].sample_url, "https://img.rule34.xxx/thumbnails/67890.jpg");
+    }
+
+    #[test]
+    fn test_parse_scraped_favorites_fallback() {
+        let html = r#"
+            <div class="content">
+                <a href="index.php?page=post&s=view&id=9999">
+                    <img src="//img.rule34.xxx/thumbnails/9999.jpg" />
+                </a>
+                <a href="index.php?page=post&s=view&id=8888">
+                    <img src="https://img.rule34.xxx/thumbnails/8888.jpg" />
+                </a>
+            </div>
+        "#;
+
+        let posts = parse_scraped_favorites(html);
+        assert_eq!(posts.len(), 2);
+
+        assert_eq!(posts[0].id, 9999);
+        assert_eq!(posts[0].preview_url, "https://img.rule34.xxx/thumbnails/9999.jpg");
+
+        assert_eq!(posts[1].id, 8888);
+        assert_eq!(posts[1].preview_url, "https://img.rule34.xxx/thumbnails/8888.jpg");
+    }
+
+    #[test]
+    fn test_parse_scraped_favorites_empty() {
+        let html = "<html><body>No posts here</body></html>";
+        let posts = parse_scraped_favorites(html);
+        assert!(posts.is_empty());
+    }
+}
+

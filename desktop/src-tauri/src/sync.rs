@@ -83,10 +83,29 @@ pub async fn sync_remote_favorites(
 
     // Merge strategy
     debug_logs.push_str("\nFavorites sync strategy merge. Merging local and remote favorites...");
+    let merged = merge_favorites(&local_posts, &remote_posts);
+
+    local_store.replace_all(&merged)
+        .map_err(|e| format!("Failed to update database with merged posts: {}", e))?;
+
+    debug_logs.push_str("\nSync completed successfully.");
+    
+    // Close session to cleanup container tasks
+    solver_client.close().await;
+
+    Ok(local_store.list_favorites(None, None).unwrap_or(merged))
+}
+
+pub fn merge_favorites(local_posts: &[Post], remote_posts: &[Post]) -> Vec<Post> {
+    let mut local_by_id = HashMap::new();
+    for post in local_posts {
+        local_by_id.insert(post.id, post);
+    }
+
     let mut merged = Vec::new();
     let mut remote_ids = std::collections::HashSet::new();
 
-    for remote in &remote_posts {
+    for remote in remote_posts {
         remote_ids.insert(remote.id);
         if let Some(local) = local_by_id.get(&remote.id) {
             // Merge posts
@@ -111,19 +130,170 @@ pub async fn sync_remote_favorites(
     }
 
     // Add local posts not present on remote
-    for local in &local_posts {
+    for local in local_posts {
         if !remote_ids.contains(&local.id) {
             merged.push(local.clone());
         }
     }
 
-    local_store.replace_all(&merged)
-        .map_err(|e| format!("Failed to update database with merged posts: {}", e))?;
-
-    debug_logs.push_str("\nSync completed successfully.");
-    
-    // Close session to cleanup container tasks
-    solver_client.close().await;
-
-    Ok(local_store.list_favorites(None, None).unwrap_or(merged))
+    merged
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_merge_favorites_empty() {
+        let local: Vec<Post> = Vec::new();
+        let remote: Vec<Post> = Vec::new();
+        let merged = merge_favorites(&local, &remote);
+        assert!(merged.is_empty());
+    }
+
+    #[test]
+    fn test_merge_favorites_only_local() {
+        let local = vec![
+            Post {
+                id: 1,
+                tags: vec!["tag1".to_string()],
+                rating: "q".to_string(),
+                score: Some(10),
+                width: None,
+                height: None,
+                file_size: None,
+                source: "".to_string(),
+                md5: "md5_1".to_string(),
+                preview_url: "".to_string(),
+                sample_url: "".to_string(),
+                file_url: "".to_string(),
+                created_at: "".to_string(),
+            }
+        ];
+        let remote = vec![];
+        let merged = merge_favorites(&local, &remote);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].id, 1);
+        assert_eq!(merged[0].tags, vec!["tag1".to_string()]);
+    }
+
+    #[test]
+    fn test_merge_favorites_only_remote() {
+        let local = vec![];
+        let remote = vec![
+            Post {
+                id: 2,
+                tags: vec!["tag2".to_string()],
+                rating: "s".to_string(),
+                score: Some(5),
+                width: None,
+                height: None,
+                file_size: None,
+                source: "".to_string(),
+                md5: "md5_2".to_string(),
+                preview_url: "".to_string(),
+                sample_url: "".to_string(),
+                file_url: "".to_string(),
+                created_at: "".to_string(),
+            }
+        ];
+        let merged = merge_favorites(&local, &remote);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].id, 2);
+        assert_eq!(merged[0].tags, vec!["tag2".to_string()]);
+    }
+
+    #[test]
+    fn test_merge_favorites_combine_and_resolve() {
+        let local = vec![
+            Post {
+                id: 1,
+                tags: vec!["tag1".to_string()],
+                rating: "q".to_string(),
+                score: Some(10),
+                width: Some(100),
+                height: Some(200),
+                file_size: Some(1000),
+                source: "src_local".to_string(),
+                md5: "md5_1".to_string(),
+                preview_url: "preview_local".to_string(),
+                sample_url: "sample_local".to_string(),
+                file_url: "file_local".to_string(),
+                created_at: "time_local".to_string(),
+            },
+            Post {
+                id: 2,
+                tags: vec!["tag2".to_string()],
+                rating: "s".to_string(),
+                score: None,
+                width: None,
+                height: None,
+                file_size: None,
+                source: "".to_string(),
+                md5: "".to_string(),
+                preview_url: "".to_string(),
+                sample_url: "".to_string(),
+                file_url: "".to_string(),
+                created_at: "".to_string(),
+            }
+        ];
+
+        let remote = vec![
+            Post {
+                id: 2,
+                tags: vec![],
+                rating: "".to_string(),
+                score: Some(20),
+                width: Some(300),
+                height: Some(400),
+                file_size: Some(2000),
+                source: "src_remote".to_string(),
+                md5: "md5_2".to_string(),
+                preview_url: "preview_remote".to_string(),
+                sample_url: "sample_remote".to_string(),
+                file_url: "file_remote".to_string(),
+                created_at: "time_remote".to_string(),
+            },
+            Post {
+                id: 3,
+                tags: vec!["tag3".to_string()],
+                rating: "e".to_string(),
+                score: None,
+                width: None,
+                height: None,
+                file_size: None,
+                source: "".to_string(),
+                md5: "".to_string(),
+                preview_url: "".to_string(),
+                sample_url: "".to_string(),
+                file_url: "".to_string(),
+                created_at: "".to_string(),
+            }
+        ];
+
+        let merged = merge_favorites(&local, &remote);
+        assert_eq!(merged.len(), 3);
+
+        // Verify Post 2
+        let p2 = merged.iter().find(|p| p.id == 2).unwrap();
+        assert_eq!(p2.tags, vec!["tag2".to_string()]);
+        assert_eq!(p2.rating, "s");
+        assert_eq!(p2.score, Some(20));
+        assert_eq!(p2.width, Some(300));
+        assert_eq!(p2.source, "src_remote");
+
+        // Verify Post 3
+        let p3 = merged.iter().find(|p| p.id == 3).unwrap();
+        assert_eq!(p3.tags, vec!["tag3".to_string()]);
+        assert_eq!(p3.rating, "e");
+
+        // Verify Post 1
+        let p1 = merged.iter().find(|p| p.id == 1).unwrap();
+        assert_eq!(p1.tags, vec!["tag1".to_string()]);
+        assert_eq!(p1.rating, "q");
+        assert_eq!(p1.score, Some(10));
+        assert_eq!(p1.width, Some(100));
+        assert_eq!(p1.source, "src_local");
+    }
+}
+

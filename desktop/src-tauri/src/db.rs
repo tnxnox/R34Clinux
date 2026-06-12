@@ -139,7 +139,7 @@ impl LocalFavoritesStore {
         let conn = self.connect()?;
         let mut posts = Vec::new();
 
-        let rows = match collection_name {
+        match collection_name {
             Some(name) => {
                 let query = if let Some(l) = limit {
                     format!(

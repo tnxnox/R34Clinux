@@ -280,3 +280,86 @@ impl SettingsStore {
         PathBuf::from(home).join("Downloads").to_string_lossy().to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_has_credentials() {
+        let mut settings = AppSettings::default();
+        assert!(!settings.has_credentials());
+
+        settings.user_id = "   ".to_string();
+        settings.api_key = "123".to_string();
+        assert!(!settings.has_credentials());
+
+        settings.user_id = "user".to_string();
+        settings.api_key = "   ".to_string();
+        assert!(!settings.has_credentials());
+
+        settings.user_id = "user".to_string();
+        settings.api_key = "123".to_string();
+        assert!(settings.has_credentials());
+    }
+
+    #[test]
+    fn test_validate_settings() {
+        let store = SettingsStore {
+            settings_path: PathBuf::from("dummy_test_path"),
+            cached_data: Mutex::new(RawSettingsFile {
+                api: None,
+                sync: None,
+                downloads: None,
+                ui: None,
+                search: None,
+            }),
+        };
+
+        // page_size validation
+        let mut settings = AppSettings::default();
+        settings.page_size = 0;
+        let validated = store.validate_settings(&settings);
+        assert_eq!(validated.page_size, 50);
+
+        settings.page_size = 1500;
+        let validated = store.validate_settings(&settings);
+        assert_eq!(validated.page_size, 1000);
+
+        settings.page_size = 200;
+        let validated = store.validate_settings(&settings);
+        assert_eq!(validated.page_size, 200);
+
+        // download_max_retries validation
+        settings.download_max_retries = -5;
+        let validated = store.validate_settings(&settings);
+        assert_eq!(validated.download_max_retries, 0);
+
+        settings.download_max_retries = 5;
+        let validated = store.validate_settings(&settings);
+        assert_eq!(validated.download_max_retries, 5);
+
+        // sync_conflict_strategy validation
+        settings.sync_conflict_strategy = "invalid".to_string();
+        let validated = store.validate_settings(&settings);
+        assert_eq!(validated.sync_conflict_strategy, "merge");
+
+        for valid_strategy in &["merge", "local_wins", "remote_wins"] {
+            settings.sync_conflict_strategy = valid_strategy.to_string();
+            let validated = store.validate_settings(&settings);
+            assert_eq!(validated.sync_conflict_strategy, *valid_strategy);
+        }
+
+        // download_sidecar_format validation
+        settings.download_sidecar_format = "invalid".to_string();
+        let validated = store.validate_settings(&settings);
+        assert_eq!(validated.download_sidecar_format, "json");
+
+        for valid_format in &["json", "txt", "both"] {
+            settings.download_sidecar_format = valid_format.to_string();
+            let validated = store.validate_settings(&settings);
+            assert_eq!(validated.download_sidecar_format, *valid_format);
+        }
+    }
+}
+

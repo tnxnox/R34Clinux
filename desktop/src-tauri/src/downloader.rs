@@ -4,7 +4,7 @@ use crate::db::LocalFavoritesStore;
 use reqwest::Client;
 use std::path::{Path, PathBuf};
 use std::fs::{self, File};
-use std::io::{Write, Read};
+use std::io::Write;
 use std::time::{Duration, Instant};
 use futures_util::StreamExt;
 
@@ -333,3 +333,130 @@ impl DownloadManager {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::Post;
+
+    fn temp_db() -> (LocalFavoritesStore, PathBuf) {
+        let mut path = std::env::temp_dir();
+        let name = format!("r34_test_dm_{}.db", std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos());
+        path.push(name);
+        let store = LocalFavoritesStore::new(Some(path.clone()));
+        (store, path)
+    }
+
+    #[test]
+    fn test_sanitize_path_segment() {
+        let (db, path) = temp_db();
+        let manager = DownloadManager::new(db);
+
+        assert_eq!(manager.sanitize_path_segment("simple"), "simple");
+        assert_eq!(manager.sanitize_path_segment("invalid/char?*"), "invalidchar");
+        assert_eq!(manager.sanitize_path_segment("  spaces  "), "spaces");
+        assert_eq!(manager.sanitize_path_segment("...dots..."), "dots");
+        assert_eq!(manager.sanitize_path_segment("a_b-c.d"), "a_b-c.d");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_format_template() {
+        let (db, path) = temp_db();
+        let manager = DownloadManager::new(db);
+
+        let post = Post {
+            id: 12345,
+            tags: vec![],
+            rating: "q".to_string(),
+            score: Some(99),
+            width: None,
+            height: None,
+            file_size: None,
+            source: "".to_string(),
+            md5: "abcdef1234567890".to_string(),
+            preview_url: "".to_string(),
+            sample_url: "".to_string(),
+            file_url: "".to_string(),
+            created_at: "".to_string(),
+        };
+
+        // Format templates for filename (is_path = false)
+        assert_eq!(
+            manager.format_template("{id}_{md5}_{score}_{rating}", &post, false),
+            "12345_abcdef1234567890_99_q"
+        );
+        assert_eq!(
+            manager.format_template("score_{score}", &post, false),
+            "score_99"
+        );
+
+        // Format templates for paths (is_path = true)
+        assert_eq!(
+            manager.format_template("rating_{rating}/score_{score}", &post, true),
+            "rating_q/score_99"
+        );
+        assert_eq!(
+            manager.format_template("sub/../~/.dir/post_{id}", &post, true),
+            "sub/dir/post_12345"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_format_filename() {
+        let (db, path) = temp_db();
+        let manager = DownloadManager::new(db);
+
+        let mut post = Post {
+            id: 12345,
+            tags: vec![],
+            rating: "s".to_string(),
+            score: None,
+            width: None,
+            height: None,
+            file_size: None,
+            source: "".to_string(),
+            md5: "md5hash".to_string(),
+            preview_url: "https://example.com/thumbnails/12345.jpg?somequery=1".to_string(),
+            sample_url: "https://example.com/samples/sample_12345.png".to_string(),
+            file_url: "https://example.com/files/file_12345.webm".to_string(),
+            created_at: "".to_string(),
+        };
+
+        // Test file_url format
+        assert_eq!(
+            manager.format_filename(&post, "post_{id}_{md5}", false),
+            "post_12345_md5hash.webm"
+        );
+
+        // Test sample_url format
+        assert_eq!(
+            manager.format_filename(&post, "sample_{id}", true),
+            "sample_12345.png"
+        );
+
+        // Test fallback to preview_url extension if file_url and sample_url are empty
+        post.file_url = "".to_string();
+        post.sample_url = "".to_string();
+        assert_eq!(
+            manager.format_filename(&post, "{id}", false),
+            "12345.jpg"
+        );
+
+        // Test empty name fallback to ID
+        assert_eq!(
+            manager.format_filename(&post, "", false),
+            "12345.jpg"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
+
