@@ -1,31 +1,17 @@
-.PHONY: test lint typecheck run clean install
+.PHONY: dev build check test clean
 
-VENV = .venv
-PYTHON = $(VENV)/bin/python
-RUFF = $(VENV)/bin/ruff
-MYPY = $(VENV)/bin/mypy
+dev:
+	cd desktop && npm run tauri dev
+
+build:
+	cd desktop && npm run tauri build
+
+check:
+	cd desktop/src-tauri && cargo check
 
 test:
-	QT_QPA_PLATFORM=offscreen $(PYTHON) -m unittest discover -s src/tests -p "test_*.py" -v
-
-test-quick:
-	QT_QPA_PLATFORM=offscreen $(PYTHON) src/tests/run_all.py
-
-lint:
-	$(RUFF) check src/r34_client/
-
-lint-fix:
-	$(RUFF) check --fix src/r34_client/
-
-typecheck:
-	$(MYPY) src/r34_client/
-
-run:
-	$(PYTHON) -m r34_client
-
-install:
-	$(PYTHON) -m pip install -e .
+	cd desktop/src-tauri && cargo test
 
 clean:
-	rm -rf build/ dist/ *.egg-info/ .mypy_cache/ .ruff_cache/ .pytest_cache/
-	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	cd desktop/src-tauri && cargo clean
+	rm -rf desktop/dist

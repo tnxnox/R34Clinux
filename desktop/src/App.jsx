@@ -23,7 +23,7 @@ import {
 import "./App.css";
 
 function App() {
-  const [port, setPort] = useState(null);
+
   const [activeTab, setActiveTab] = useState("search");
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -63,40 +63,22 @@ function App() {
   // Autocomplete ref
   const autocompleteRef = useRef(null);
 
-  // Fetch API port on mount
+  // Fetch settings on mount
   useEffect(() => {
-    async function initPort() {
-      try {
-        const apiPort = await invoke("get_api_port");
-        setPort(apiPort);
-      } catch (err) {
-        console.warn("Failed to get API port from Tauri Rust backend, falling back to port 8000 (browser dev mode)", err);
-        setPort(8000);
-      }
-    }
-    initPort();
+    fetchSettings();
+    fetchCollections();
+    fetchFriends();
+    fetchSyncStatus();
   }, []);
 
-  // Fetch settings once port is available
+  // Fetch favorites when selected collection changes
   useEffect(() => {
-    if (port) {
-      fetchSettings();
-      fetchCollections();
-      fetchFriends();
-      fetchSyncStatus();
-    }
-  }, [port]);
-
-  // Fetch favorites when port or selected collection changes
-  useEffect(() => {
-    if (port) {
-      fetchFavorites();
-    }
-  }, [port, selectedCollection]);
+    fetchFavorites();
+  }, [selectedCollection]);
 
   // Handle autocomplete search
   useEffect(() => {
-    if (!port || searchQuery.trim() === "") {
+    if (searchQuery.trim() === "") {
       setSuggestions([]);
       return;
     }
@@ -111,18 +93,15 @@ function App() {
       }
 
       try {
-        const res = await fetch(`http://localhost:${port}/api/autocomplete?prefix=${encodeURIComponent(lastTag)}`);
-        if (res.ok) {
-          const data = await res.json();
-          setSuggestions(data);
-        }
+        const data = await invoke("autocomplete_tags", { prefix: lastTag });
+        setSuggestions(data);
       } catch (err) {
         console.error(err);
       }
     }, 300);
 
     return () => clearTimeout(delayDebounce);
-  }, [searchQuery, port]);
+  }, [searchQuery]);
 
   // Click outside autocomplete to dismiss
   useEffect(() => {
@@ -138,16 +117,16 @@ function App() {
   // Poll sync status if running
   useEffect(() => {
     let interval;
-    if (port && syncStatus.is_running) {
+    if (syncStatus.is_running) {
       interval = setInterval(fetchSyncStatus, 2000);
     }
     return () => clearInterval(interval);
-  }, [port, syncStatus.is_running]);
+  }, [syncStatus.is_running]);
 
   // Fetch favorites and collections when sync completes
   const prevIsRunningRef = useRef(false);
   useEffect(() => {
-    if (port && prevIsRunningRef.current && !syncStatus.is_running) {
+    if (prevIsRunningRef.current && !syncStatus.is_running) {
       // Transitioned from running to not running (finished sync)
       fetchFavorites();
       fetchCollections();
@@ -158,7 +137,7 @@ function App() {
       }
     }
     prevIsRunningRef.current = syncStatus.is_running;
-  }, [port, syncStatus.is_running, syncStatus.success, syncStatus.error]);
+  }, [syncStatus.is_running, syncStatus.success, syncStatus.error]);
 
   const showToast = (message, type = "success") => {
     setToast({ message, type });
@@ -167,32 +146,21 @@ function App() {
 
   const fetchSettings = async () => {
     try {
-      const res = await fetch(`http://localhost:${port}/api/settings`);
-      if (res.ok) {
-        const data = await res.json();
-        setSettings(data);
-      }
+      const data = await invoke("get_settings");
+      setSettings(data);
     } catch (err) {
-      setError("Unable to communicate with the sidecar API.");
+      setError("Unable to communicate with the Tauri backend.");
     }
   };
 
   const saveSettings = async (updated) => {
     setLoading(true);
     try {
-      const res = await fetch(`http://localhost:${port}/api/settings`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updated)
-      });
-      if (res.ok) {
-        showToast("Settings saved successfully.");
-        fetchSettings();
-      } else {
-        showToast("Failed to save settings.", "error");
-      }
+      await invoke("update_settings", { payload: updated });
+      showToast("Settings saved successfully.");
+      fetchSettings();
     } catch (err) {
-      showToast("Error updating settings.", "error");
+      showToast("Failed to save settings: " + err, "error");
     } finally {
       setLoading(false);
     }
@@ -200,14 +168,10 @@ function App() {
 
   const fetchFavorites = async () => {
     try {
-      const url = selectedCollection
-        ? `http://localhost:${port}/api/favorites?collection=${encodeURIComponent(selectedCollection)}`
-        : `http://localhost:${port}/api/favorites`;
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        setFavorites(data);
-      }
+      const data = await invoke("list_favorites", {
+        collection: selectedCollection || null
+      });
+      setFavorites(data);
     } catch (err) {
       console.error("Failed to load favorites", err);
     }
@@ -215,11 +179,8 @@ function App() {
 
   const fetchCollections = async () => {
     try {
-      const res = await fetch(`http://localhost:${port}/api/collections`);
-      if (res.ok) {
-        const data = await res.json();
-        setCollections(data);
-      }
+      const data = await invoke("list_collections");
+      setCollections(data);
     } catch (err) {
       console.error("Failed to load collections", err);
     }
@@ -227,11 +188,8 @@ function App() {
 
   const fetchFriends = async () => {
     try {
-      const res = await fetch(`http://localhost:${port}/api/friends`);
-      if (res.ok) {
-        const data = await res.json();
-        setFriends(data);
-      }
+      const data = await invoke("list_friends");
+      setFriends(data);
     } catch (err) {
       console.error("Failed to load friends", err);
     }
@@ -239,11 +197,8 @@ function App() {
 
   const fetchSyncStatus = async () => {
     try {
-      const res = await fetch(`http://localhost:${port}/api/sync/status`);
-      if (res.ok) {
-        const data = await res.json();
-        setSyncStatus(data);
-      }
+      const data = await invoke("get_sync_status");
+      setSyncStatus(data);
     } catch (err) {
       console.error("Failed to load sync status", err);
     }
@@ -251,32 +206,27 @@ function App() {
 
   const triggerSync = async () => {
     try {
-      const res = await fetch(`http://localhost:${port}/api/sync/run`, { method: "POST" });
-      if (res.ok) {
-        showToast("Favorites synchronization started.");
-        fetchSyncStatus();
-      }
+      await invoke("start_sync");
+      showToast("Favorites synchronization started.");
+      fetchSyncStatus();
     } catch (err) {
-      showToast("Failed to run sync.", "error");
+      showToast("Failed to run sync: " + err, "error");
     }
   };
 
   const handleSearch = async (page = 0) => {
     setLoading(true);
     try {
-      const res = await fetch(
-        `http://localhost:${port}/api/search?tags=${encodeURIComponent(searchQuery)}&page=${page}&limit=${settings?.page_size || 50}`
-      );
-      if (res.ok) {
-        const data = await res.json();
-        setSearchResults(data);
-        setCurrentPage(page);
-        setHasMore(data.length >= (settings?.page_size || 50));
-      } else {
-        showToast("Search failed.", "error");
-      }
+      const data = await invoke("search_posts", {
+        tags: searchQuery,
+        page: page,
+        limit: settings?.page_size || 50
+      });
+      setSearchResults(data);
+      setCurrentPage(page);
+      setHasMore(data.length >= (settings?.page_size || 50));
     } catch (err) {
-      showToast("Error executing search.", "error");
+      showToast("Search failed: " + err, "error");
     } finally {
       setLoading(false);
     }
@@ -286,144 +236,134 @@ function App() {
     const isFav = favorites.some(f => f.id === post.id);
     try {
       if (isFav) {
-        const res = await fetch(`http://localhost:${port}/api/favorites/${post.id}`, { method: "DELETE" });
-        if (res.ok) {
-          setFavorites(prev => prev.filter(f => f.id !== post.id));
-          showToast("Post removed from favorites.");
-        }
+        await invoke("remove_favorite", { postId: post.id });
+        setFavorites(prev => prev.filter(f => f.id !== post.id));
+        showToast("Post removed from favorites.");
       } else {
-        const res = await fetch(`http://localhost:${port}/api/favorites`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(post)
-        });
-        if (res.ok) {
-          setFavorites(prev => [post, ...prev]);
-          showToast("Post added to favorites.");
-        }
+        const postPayload = {
+          id: post.id,
+          tags: post.tags || [],
+          rating: post.rating || "",
+          score: post.score || null,
+          width: post.width || null,
+          height: post.height || null,
+          file_size: post.file_size || null,
+          source: post.source || "",
+          md5: post.md5 || "",
+          preview_url: post.preview_url || "",
+          sample_url: post.sample_url || "",
+          file_url: post.file_url || "",
+          created_at: post.created_at || ""
+        };
+        await invoke("add_favorite", { post: postPayload });
+        setFavorites(prev => [post, ...prev]);
+        showToast("Post added to favorites.");
       }
     } catch (err) {
-      showToast("Error updating favorites.", "error");
+      showToast("Error updating favorites: " + err, "error");
     }
   };
 
   const triggerDownload = async (post) => {
     showToast("Starting download...");
     try {
-      const res = await fetch(`http://localhost:${port}/api/download`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(post)
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.status === "downloaded") {
-          showToast(`Downloaded to: ${data.path}`);
-        } else {
-          showToast("Post already downloaded.", "info");
-        }
+      const postPayload = {
+        id: post.id,
+        tags: post.tags || [],
+        rating: post.rating || "",
+        score: post.score || null,
+        width: post.width || null,
+        height: post.height || null,
+        file_size: post.file_size || null,
+        source: post.source || "",
+        md5: post.md5 || "",
+        preview_url: post.preview_url || "",
+        sample_url: post.sample_url || "",
+        file_url: post.file_url || "",
+        created_at: post.created_at || ""
+      };
+      const data = await invoke("download_post", { post: postPayload });
+      if (data.status === "downloaded") {
+        showToast(`Downloaded to: ${data.path}`);
       } else {
-        showToast("Download failed.", "error");
+        showToast("Post already downloaded.", "info");
       }
     } catch (err) {
-      showToast("Error executing download.", "error");
+      showToast("Error executing download: " + err, "error");
     }
   };
 
   const createCollection = async () => {
     if (!newCollectionName.trim()) return;
     try {
-      const res = await fetch(`http://localhost:${port}/api/collections`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newCollectionName })
-      });
-      if (res.ok) {
-        showToast("Collection created.");
-        setNewCollectionName("");
-        fetchCollections();
-      }
+      await invoke("create_collection", { name: newCollectionName });
+      showToast("Collection created.");
+      setNewCollectionName("");
+      fetchCollections();
     } catch (err) {
-      showToast("Error creating collection.", "error");
+      showToast("Error creating collection: " + err, "error");
     }
   };
 
   const deleteCollection = async (name) => {
     if (!confirm(`Delete collection "${name}"? Posts in this collection will not be deleted.`)) return;
     try {
-      const res = await fetch(`http://localhost:${port}/api/collections/${encodeURIComponent(name)}`, { method: "DELETE" });
-      if (res.ok) {
-        showToast("Collection deleted.");
-        fetchCollections();
-      }
+      await invoke("delete_collection", { name });
+      showToast("Collection deleted.");
+      fetchCollections();
     } catch (err) {
-      showToast("Error deleting collection.", "error");
+      showToast("Error deleting collection: " + err, "error");
     }
   };
 
   const assignPostToCollection = async (postId, collectionName) => {
     if (!collectionName) return;
     try {
-      const res = await fetch(`http://localhost:${port}/api/collections/${encodeURIComponent(collectionName)}/posts`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ post_ids: [postId] })
-      });
-      if (res.ok) {
-        showToast(`Post assigned to ${collectionName}.`);
-        setPostCollectionAssign("");
-      }
+      await invoke("assign_posts_to_collection", { name: collectionName, postIds: [postId] });
+      showToast(`Post assigned to ${collectionName}.`);
+      setPostCollectionAssign("");
     } catch (err) {
-      showToast("Error assigning post.", "error");
+      showToast("Error assigning post: " + err, "error");
     }
   };
 
   const addFriend = async () => {
     if (!friendUserId.trim() || !friendDisplayName.trim()) return;
     try {
-      const res = await fetch(`http://localhost:${port}/api/friends`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: friendUserId, display_name: friendDisplayName, notes: friendNotes })
+      await invoke("add_friend", {
+        userId: friendUserId,
+        displayName: friendDisplayName,
+        notes: friendNotes || null
       });
-      if (res.ok) {
-        showToast("Friend added.");
-        setFriendUserId("");
-        setFriendDisplayName("");
-        setFriendNotes("");
-        fetchFriends();
-      }
+      showToast("Friend added.");
+      setFriendUserId("");
+      setFriendDisplayName("");
+      setFriendNotes("");
+      fetchFriends();
     } catch (err) {
-      showToast("Error adding friend.", "error");
+      showToast("Error adding friend: " + err, "error");
     }
   };
 
   const removeFriend = async (userId) => {
     if (!confirm("Remove this friend?")) return;
     try {
-      const res = await fetch(`http://localhost:${port}/api/friends/${userId}`, { method: "DELETE" });
-      if (res.ok) {
-        showToast("Friend removed.");
-        fetchFriends();
-      }
+      await invoke("remove_friend", { userId });
+      showToast("Friend removed.");
+      fetchFriends();
     } catch (err) {
-      showToast("Error removing friend.", "error");
+      showToast("Error removing friend: " + err, "error");
     }
   };
 
   const fetchFriendFavs = async (userId, page = 0) => {
     setLoadingFriendFavs(true);
     try {
-      const res = await fetch(`http://localhost:${port}/api/friends/${userId}/favorites?page=${page}`);
-      if (res.ok) {
-        const data = await res.json();
-        setFriendFavorites(data);
-        setFriendPage(page);
-      } else {
-        showToast("Failed to fetch friend favorites.", "error");
-      }
+      const data = await invoke("get_friend_favorites", { userId, page });
+      setFriendFavorites(data);
+      setFriendPage(page);
     } catch (err) {
-      showToast("Error fetching friend favorites.", "error");
+      showToast("Error fetching friend favorites: " + err, "error");
     } finally {
       setLoadingFriendFavs(false);
     }
