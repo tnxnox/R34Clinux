@@ -427,19 +427,23 @@ function App() {
     }
   };
 
-  const renderMedia = (post, isPreview = false) => {
-    const url = post.sample_url || post.file_url || post.preview_url;
+  const renderMedia = (post, isDetailView = false) => {
+    // For grid cards, we want the tiny preview_url (thumbnail)
+    // For the detail modal, we want the high-res file_url or sample_url
+    const url = isDetailView
+      ? (post.file_url || post.sample_url || post.preview_url)
+      : (post.preview_url || post.sample_url || post.file_url);
     const isVideo = url.endsWith(".mp4") || url.endsWith(".webm");
 
     if (isVideo) {
       return (
         <video
           src={url}
-          className={isPreview ? "modal-media" : "card-thumbnail"}
-          controls={isPreview}
-          autoPlay={isPreview}
+          className={isDetailView ? "modal-media" : "card-thumbnail"}
+          controls={isDetailView}
+          autoPlay={isDetailView}
           loop
-          muted={!isPreview}
+          muted={!isDetailView}
         />
       );
     }
@@ -448,7 +452,7 @@ function App() {
       <img
         src={url}
         alt="media"
-        className={isPreview ? "modal-media" : "card-thumbnail"}
+        className={isDetailView ? "modal-media" : "card-thumbnail"}
         loading="lazy"
       />
     );
