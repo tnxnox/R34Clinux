@@ -39,7 +39,7 @@ pub fn run() {
             
             // Auto start flaresolverr container in background thread on startup
             let settings_data = state.0.settings.load();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 flaresolverr::start_flaresolverr_container(&settings_data.flaresolverr_url).await;
             });
 
