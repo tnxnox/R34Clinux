@@ -83,6 +83,24 @@ else
     echo "Found Rust: $RUST_VERSION"
 fi
 
+# Check for Docker/Podman (optional)
+echo ""
+echo "Checking Docker & Podman (optional for FlareSolverr sync)..."
+if ! command -v docker &>/dev/null && ! command -v podman &>/dev/null; then
+    echo "Notice: Neither Docker nor Podman was found on your system."
+    echo "If you plan to use Rule34 account favorites sync (requires FlareSolverr):"
+    echo "  - Please install Docker (e.g., 'sudo apt install docker.io' / 'sudo dnf install docker')"
+    echo "  - Ensure your user has permissions by running: 'sudo usermod -aG docker \$USER'"
+    echo "  - Enable and start the service: 'sudo systemctl enable --now docker'"
+    echo "Note: This is completely optional. Local favorites and downloads will work fine without it."
+else
+    if command -v docker &>/dev/null; then
+        echo "Found Docker: $(docker --version)"
+    else
+        echo "Found Podman: $(podman --version)"
+    fi
+fi
+
 # Install project frontend dependencies
 echo ""
 echo "Installing project dependencies (npm install)..."
