@@ -1,40 +1,29 @@
 # R34 Linux Client
 
-[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python)](https://python.org)
+[![Rust](https://img.shields.io/badge/Rust-1.70%2B-orange?logo=rust)](https://rust-lang.org)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Tests](https://github.com/tnxnox/R34Clinux/actions/workflows/tests.yml/badge.svg)](https://github.com/tnxnox/R34Clinux/actions/workflows/tests.yml)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support-FF5E5B?logo=kofi)](https://ko-fi.com/thenoix)
 
 A proper desktop client for rule34.xxx — search, browse, collect, download. Built
-with Python and Qt6 for Linux.
+with Rust and Tauri for Linux.
 I'm also planning a windows release soon.
 
 ## Quick Start
 
+Get your API credentials from rule34.xxx (Account → My Settings → API), then clone and start the app:
+
 ```bash
 git clone https://github.com/tnxnox/R34Clinux.git
 cd R34Clinux
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-```
 
-Get your API credentials from rule34.xxx (Account → My Settings → API), then:
-
-```bash
-# Recommended — handles FlareSolverr, VLC checks, and cleanup automatically
-./scripts/start_r34.sh
-```
-
-Or if you manage FlareSolverr yourself (or don't need sync):
-
-```bash
-r34-linux-client
+# Setup dependencies and start the app automatically
+./start_r34.sh
 ```
 
 The app will prompt you to enter credentials on first launch.
 
-**Requirements:** Python 3.11+. VLC is needed for video playback, Docker/Podman for
+**Requirements:** Node.js (v18+) & npm, Rust & Cargo. VLC is needed for video playback, Docker/Podman for
 FlareSolverr sync — both optional, local favorites work without either.
 
 ## What It Does
