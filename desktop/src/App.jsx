@@ -61,6 +61,64 @@ function App() {
   const [selectedPost, setSelectedPost] = useState(null);
   const [postCollectionAssign, setPostCollectionAssign] = useState("");
 
+  // Zoom & Pan state for Detail Modal
+  const [zoomScale, setZoomScale] = useState(1);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+
+  // Reset zoom & pan when post changes or modal closes
+  useEffect(() => {
+    setZoomScale(1);
+    setPanOffset({ x: 0, y: 0 });
+    setIsDragging(false);
+  }, [selectedPost?.id]);
+
+  const handleWheel = (e) => {
+    if (e.ctrlKey) {
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? 0.25 : -0.25;
+      setZoomScale(prev => {
+        const next = Math.min(Math.max(prev + delta, 1), 8);
+        if (next === 1) {
+          setPanOffset({ x: 0, y: 0 });
+        }
+        return next;
+      });
+    }
+  };
+
+  const handleMouseDown = (e) => {
+    if (zoomScale > 1 && e.button === 0) { // Left click only
+      e.preventDefault();
+      setIsDragging(true);
+      setDragStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
+    }
+  };
+
+  const handleMouseMove = (e) => {
+    if (isDragging && zoomScale > 1) {
+      e.preventDefault();
+      setPanOffset({
+        x: e.clientX - dragStart.x,
+        y: e.clientY - dragStart.y
+      });
+    }
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  const handleMouseLeave = () => {
+    setIsDragging(false);
+  };
+
+  const handleDoubleClick = () => {
+    setZoomScale(1);
+    setPanOffset({ x: 0, y: 0 });
+  };
+
   // Autocomplete ref
   const autocompleteRef = useRef(null);
 
@@ -454,6 +512,19 @@ function App() {
         alt="media"
         className={isDetailView ? "modal-media" : "card-thumbnail"}
         loading="lazy"
+        draggable={false}
+        style={isDetailView ? {
+          transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomScale})`,
+          cursor: zoomScale > 1 ? (isDragging ? "grabbing" : "grab") : "default",
+          transition: isDragging ? "none" : "transform 0.1s ease-out",
+          transformOrigin: "center center"
+        } : {}}
+        onWheel={isDetailView ? handleWheel : undefined}
+        onMouseDown={isDetailView ? handleMouseDown : undefined}
+        onMouseMove={isDetailView ? handleMouseMove : undefined}
+        onMouseUp={isDetailView ? handleMouseUp : undefined}
+        onMouseLeave={isDetailView ? handleMouseLeave : undefined}
+        onDoubleClick={isDetailView ? handleDoubleClick : undefined}
       />
     );
   };
