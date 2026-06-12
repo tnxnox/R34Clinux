@@ -19,7 +19,10 @@ pub struct Post {
 
 impl Post {
     pub fn page_url(&self) -> String {
-        format!("https://rule34.xxx/index.php?page=post&s=view&id={}", self.id)
+        format!(
+            "https://rule34.xxx/index.php?page=post&s=view&id={}",
+            self.id
+        )
     }
 
     pub fn best_preview_url(&self) -> &str {
@@ -55,7 +58,7 @@ impl Post {
             return format!("post-{}", self.id);
         }
         if let Ok(parsed) = url::Url::parse(url) {
-            if let Some(last_segment) = parsed.path_segments().and_then(|s| s.last()) {
+            if let Some(last_segment) = parsed.path_segments().and_then(|mut s| s.next_back()) {
                 if !last_segment.is_empty() {
                     return last_segment.to_string();
                 }
@@ -148,4 +151,3 @@ pub struct MutationProgress {
     pub completed_mutations: usize,
     pub current_pending: usize,
 }
-

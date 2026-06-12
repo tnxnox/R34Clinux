@@ -11,7 +11,6 @@ pub async fn sync_remote_favorites(
     error_logs: &mut String,
     progress_opt: Option<&std::sync::Mutex<crate::models::MutationProgress>>,
 ) -> Result<Vec<Post>, String> {
-    
     let solver_client = FlareSolverrFavoritesClient::new(
         settings.user_id.clone(),
         settings.api_key.clone(),
@@ -20,7 +19,8 @@ pub async fn sync_remote_favorites(
         settings.flaresolverr_url.clone(),
     );
 
-    let local_posts = local_store.list_favorites(None, None)
+    let local_posts = local_store
+        .list_favorites(None, None)
         .map_err(|e| format!("Failed to read local favorites: {}", e))?;
 
     let mut local_by_id = HashMap::new();
@@ -54,14 +54,17 @@ pub async fn sync_remote_favorites(
 
     // Load pending mutations
     let mut pending_file = crate::mutations::load_pending_mutations().unwrap_or_default();
-    let pending_remove_ids: std::collections::HashSet<i64> = pending_file.remove.iter().map(|m| m.id).collect();
+    let pending_remove_ids: std::collections::HashSet<i64> =
+        pending_file.remove.iter().map(|m| m.id).collect();
 
     // Filter out pending removes from the remote list
-    let effective_remote_posts: Vec<Post> = remote_posts.into_iter()
+    let effective_remote_posts: Vec<Post> = remote_posts
+        .into_iter()
         .filter(|p| !pending_remove_ids.contains(&p.id))
         .collect();
 
-    let remote_ids: std::collections::HashSet<i64> = effective_remote_posts.iter().map(|p| p.id).collect();
+    let remote_ids: std::collections::HashSet<i64> =
+        effective_remote_posts.iter().map(|p| p.id).collect();
 
     // Confirm pending adds that are now present on remote
     let mut confirmed_add_count = 0;
@@ -73,14 +76,17 @@ pub async fn sync_remote_favorites(
         !confirmed
     });
 
-    if confirmed_add_count > 0 {
-        if let Ok(_) = crate::mutations::save_pending_mutations(&pending_file) {
-            debug_logs.push_str(&format!("\nConfirmed {} pending adds on remote rule34 account.", confirmed_add_count));
-            if let Some(mutex) = progress_opt {
-                let mut prog = mutex.lock().unwrap();
-                prog.completed_mutations += confirmed_add_count;
-                prog.current_pending = pending_file.add.len() + pending_file.remove.len();
-            }
+    if confirmed_add_count > 0
+        && crate::mutations::save_pending_mutations(&pending_file).is_ok()
+    {
+        debug_logs.push_str(&format!(
+            "\nConfirmed {} pending adds on remote rule34 account.",
+            confirmed_add_count
+        ));
+        if let Some(mutex) = progress_opt {
+            let mut prog = mutex.lock().unwrap();
+            prog.completed_mutations += confirmed_add_count;
+            prog.current_pending = pending_file.add.len() + pending_file.remove.len();
         }
     }
 
@@ -97,7 +103,8 @@ pub async fn sync_remote_favorites(
         }
         // remote_wins: wipe local cache
         debug_logs.push_str("\nFavorites sync remote empty (remote_wins). Clearing local cache.");
-        local_store.replace_all(&[])
+        local_store
+            .replace_all(&[])
             .map_err(|e| format!("Failed to clear database: {}", e))?;
         return Ok(Vec::new());
     }
@@ -108,21 +115,27 @@ pub async fn sync_remote_favorites(
     }
 
     if strategy == "remote_wins" {
-        debug_logs.push_str("\nFavorites sync strategy remote_wins. Replacing local cache with remote posts.");
-        local_store.replace_all(&effective_remote_posts)
+        debug_logs.push_str(
+            "\nFavorites sync strategy remote_wins. Replacing local cache with remote posts.",
+        );
+        local_store
+            .replace_all(&effective_remote_posts)
             .map_err(|e| format!("Failed to update database: {}", e))?;
-        return Ok(local_store.list_favorites(None, None).unwrap_or(effective_remote_posts));
+        return Ok(local_store
+            .list_favorites(None, None)
+            .unwrap_or(effective_remote_posts));
     }
 
     // Merge strategy
     debug_logs.push_str("\nFavorites sync strategy merge. Merging local and remote favorites...");
     let merged = merge_favorites(&local_posts, &effective_remote_posts);
 
-    local_store.replace_all(&merged)
+    local_store
+        .replace_all(&merged)
         .map_err(|e| format!("Failed to update database with merged posts: {}", e))?;
 
     debug_logs.push_str("\nSync completed successfully.");
-    
+
     // Close session to cleanup container tasks
     solver_client.close().await;
 
@@ -143,19 +156,43 @@ pub fn merge_favorites(local_posts: &[Post], remote_posts: &[Post]) -> Vec<Post>
         if let Some(local) = local_by_id.get(&remote.id) {
             // Merge posts
             let mut merged_post = remote.clone();
-            if merged_post.tags.is_empty() { merged_post.tags = local.tags.clone(); }
-            if merged_post.rating.is_empty() { merged_post.rating = local.rating.clone(); }
-            if merged_post.score.is_none() { merged_post.score = local.score; }
-            if merged_post.width.is_none() { merged_post.width = local.width; }
-            if merged_post.height.is_none() { merged_post.height = local.height; }
-            if merged_post.file_size.is_none() { merged_post.file_size = local.file_size; }
-            if merged_post.source.is_empty() { merged_post.source = local.source.clone(); }
-            if merged_post.md5.is_empty() { merged_post.md5 = local.md5.clone(); }
-            if merged_post.preview_url.is_empty() { merged_post.preview_url = local.preview_url.clone(); }
-            if merged_post.sample_url.is_empty() { merged_post.sample_url = local.sample_url.clone(); }
-            if merged_post.file_url.is_empty() { merged_post.file_url = local.file_url.clone(); }
-            if merged_post.created_at.is_empty() { merged_post.created_at = local.created_at.clone(); }
-            
+            if merged_post.tags.is_empty() {
+                merged_post.tags = local.tags.clone();
+            }
+            if merged_post.rating.is_empty() {
+                merged_post.rating = local.rating.clone();
+            }
+            if merged_post.score.is_none() {
+                merged_post.score = local.score;
+            }
+            if merged_post.width.is_none() {
+                merged_post.width = local.width;
+            }
+            if merged_post.height.is_none() {
+                merged_post.height = local.height;
+            }
+            if merged_post.file_size.is_none() {
+                merged_post.file_size = local.file_size;
+            }
+            if merged_post.source.is_empty() {
+                merged_post.source = local.source.clone();
+            }
+            if merged_post.md5.is_empty() {
+                merged_post.md5 = local.md5.clone();
+            }
+            if merged_post.preview_url.is_empty() {
+                merged_post.preview_url = local.preview_url.clone();
+            }
+            if merged_post.sample_url.is_empty() {
+                merged_post.sample_url = local.sample_url.clone();
+            }
+            if merged_post.file_url.is_empty() {
+                merged_post.file_url = local.file_url.clone();
+            }
+            if merged_post.created_at.is_empty() {
+                merged_post.created_at = local.created_at.clone();
+            }
+
             merged.push(merged_post);
         } else {
             merged.push(remote.clone());
@@ -186,23 +223,21 @@ mod tests {
 
     #[test]
     fn test_merge_favorites_only_local() {
-        let local = vec![
-            Post {
-                id: 1,
-                tags: vec!["tag1".to_string()],
-                rating: "q".to_string(),
-                score: Some(10),
-                width: None,
-                height: None,
-                file_size: None,
-                source: "".to_string(),
-                md5: "md5_1".to_string(),
-                preview_url: "".to_string(),
-                sample_url: "".to_string(),
-                file_url: "".to_string(),
-                created_at: "".to_string(),
-            }
-        ];
+        let local = vec![Post {
+            id: 1,
+            tags: vec!["tag1".to_string()],
+            rating: "q".to_string(),
+            score: Some(10),
+            width: None,
+            height: None,
+            file_size: None,
+            source: "".to_string(),
+            md5: "md5_1".to_string(),
+            preview_url: "".to_string(),
+            sample_url: "".to_string(),
+            file_url: "".to_string(),
+            created_at: "".to_string(),
+        }];
         let remote = vec![];
         let merged = merge_favorites(&local, &remote);
         assert_eq!(merged.len(), 1);
@@ -213,23 +248,21 @@ mod tests {
     #[test]
     fn test_merge_favorites_only_remote() {
         let local = vec![];
-        let remote = vec![
-            Post {
-                id: 2,
-                tags: vec!["tag2".to_string()],
-                rating: "s".to_string(),
-                score: Some(5),
-                width: None,
-                height: None,
-                file_size: None,
-                source: "".to_string(),
-                md5: "md5_2".to_string(),
-                preview_url: "".to_string(),
-                sample_url: "".to_string(),
-                file_url: "".to_string(),
-                created_at: "".to_string(),
-            }
-        ];
+        let remote = vec![Post {
+            id: 2,
+            tags: vec!["tag2".to_string()],
+            rating: "s".to_string(),
+            score: Some(5),
+            width: None,
+            height: None,
+            file_size: None,
+            source: "".to_string(),
+            md5: "md5_2".to_string(),
+            preview_url: "".to_string(),
+            sample_url: "".to_string(),
+            file_url: "".to_string(),
+            created_at: "".to_string(),
+        }];
         let merged = merge_favorites(&local, &remote);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].id, 2);
@@ -268,7 +301,7 @@ mod tests {
                 sample_url: "".to_string(),
                 file_url: "".to_string(),
                 created_at: "".to_string(),
-            }
+            },
         ];
 
         let remote = vec![
@@ -301,7 +334,7 @@ mod tests {
                 sample_url: "".to_string(),
                 file_url: "".to_string(),
                 created_at: "".to_string(),
-            }
+            },
         ];
 
         let merged = merge_favorites(&local, &remote);
@@ -329,4 +362,3 @@ mod tests {
         assert_eq!(p1.source, "src_local");
     }
 }
-

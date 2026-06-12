@@ -1,11 +1,11 @@
-use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use std::fs;
-use std::collections::HashMap;
-use std::time::SystemTime;
 use crate::flaresolverr::FlareSolverrFavoritesClient;
-use crate::settings::AppSettings;
 use crate::models::MutationProgress;
+use crate::settings::AppSettings;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
+use std::time::SystemTime;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingMutation {
@@ -53,21 +53,20 @@ pub fn save_pending_mutations(data: &PendingMutationsFile) -> Result<(), String>
     }
     let content = serde_json::to_string_pretty(data)
         .map_err(|e| format!("Failed to serialize pending mutations: {}", e))?;
-    fs::write(&path, content)
-        .map_err(|e| format!("Failed to write pending mutations file: {}", e))
+    fs::write(&path, content).map_err(|e| format!("Failed to write pending mutations file: {}", e))
 }
 
 pub fn queue_pending_add(post_id: i64, reason: &str) -> Result<(), String> {
     let mut file = load_pending_mutations()?;
-    
+
     // Remove from opposite queue
     file.remove.retain(|m| m.id != post_id);
-    
+
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs_f64();
-        
+
     if let Some(existing) = file.add.iter_mut().find(|m| m.id == post_id) {
         existing.last_error = reason.to_string();
     } else {
@@ -79,21 +78,21 @@ pub fn queue_pending_add(post_id: i64, reason: &str) -> Result<(), String> {
             last_error: reason.to_string(),
         });
     }
-    
+
     save_pending_mutations(&file)
 }
 
 pub fn queue_pending_remove(post_id: i64, reason: &str) -> Result<(), String> {
     let mut file = load_pending_mutations()?;
-    
+
     // Remove from opposite queue
     file.add.retain(|m| m.id != post_id);
-    
+
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs_f64();
-        
+
     if let Some(existing) = file.remove.iter_mut().find(|m| m.id == post_id) {
         existing.last_error = reason.to_string();
     } else {
@@ -105,7 +104,7 @@ pub fn queue_pending_remove(post_id: i64, reason: &str) -> Result<(), String> {
             last_error: reason.to_string(),
         });
     }
-    
+
     save_pending_mutations(&file)
 }
 
@@ -146,7 +145,7 @@ fn random_range(min: f64, max: f64) -> f64 {
 pub fn compute_backoff_seconds(_attempts: i32, message: &str, streak: i32) -> f64 {
     let retry_after = extract_retry_after_seconds(message);
     let current_streak = streak + 1;
-    
+
     let min_streak = std::cmp::min(current_streak, 6);
     let mut base_delay = 1.25 * 2.0f64.powi(min_streak);
     if base_delay > 120.0 {
@@ -157,8 +156,12 @@ pub fn compute_backoff_seconds(_attempts: i32, message: &str, streak: i32) -> f6
             base_delay = ra;
         }
     }
-    
-    let max_jitter = if base_delay * 0.35 > 0.4 { base_delay * 0.35 } else { 0.4 };
+
+    let max_jitter = if base_delay * 0.35 > 0.4 {
+        base_delay * 0.35
+    } else {
+        0.4
+    };
     let jitter = random_range(0.2, max_jitter);
     base_delay + jitter
 }
@@ -174,12 +177,12 @@ pub async fn process_pending_mutations_impl(
     streaks_mutex: &std::sync::Mutex<HashMap<String, i32>>,
 ) -> Result<Option<f64>, String> {
     let file = load_pending_mutations()?;
-    
+
     let now_ts = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs_f64();
-        
+
     let queue_len = file.add.len() + file.remove.len();
     if queue_len == 0 {
         let mut prog = progress_mutex.lock().unwrap();
@@ -188,12 +191,12 @@ pub async fn process_pending_mutations_impl(
         prog.current_pending = 0;
         return Ok(None);
     }
-    
+
     // Check backoffs
     let mut next_retry_remaining: Option<f64> = None;
     let mut to_process_add = Vec::new();
     let mut to_process_remove = Vec::new();
-    
+
     for m in &file.remove {
         if m.next_attempt_at > now_ts {
             let rem = m.next_attempt_at - now_ts;
@@ -202,7 +205,7 @@ pub async fn process_pending_mutations_impl(
             to_process_remove.push(m.clone());
         }
     }
-    
+
     for m in &file.add {
         if m.next_attempt_at > now_ts {
             let rem = m.next_attempt_at - now_ts;
@@ -211,11 +214,11 @@ pub async fn process_pending_mutations_impl(
             to_process_add.push(m.clone());
         }
     }
-    
+
     if to_process_add.is_empty() && to_process_remove.is_empty() {
         return Ok(next_retry_remaining);
     }
-    
+
     // We have active work to process!
     let solver_client = FlareSolverrFavoritesClient::new(
         settings.user_id.clone(),
@@ -224,9 +227,9 @@ pub async fn process_pending_mutations_impl(
         settings.website_password.clone(),
         settings.flaresolverr_url.clone(),
     );
-    
+
     let mut debug_logs = String::new();
-    
+
     // Removals
     for m in to_process_remove {
         debug_logs.clear();
@@ -235,12 +238,12 @@ pub async fn process_pending_mutations_impl(
                 let mut current_file = load_pending_mutations()?;
                 current_file.remove.retain(|item| item.id != m.id);
                 save_pending_mutations(&current_file)?;
-                
+
                 {
                     let mut streaks = streaks_mutex.lock().unwrap();
                     streaks.insert("remove".to_string(), 0);
                 }
-                
+
                 {
                     let mut prog = progress_mutex.lock().unwrap();
                     prog.completed_mutations += 1;
@@ -254,10 +257,10 @@ pub async fn process_pending_mutations_impl(
                     *s += 1;
                     *s
                 };
-                
+
                 let delay = compute_backoff_seconds(m.attempts + 1, &err_msg, streak);
                 let next_attempt = now_ts + delay;
-                
+
                 let mut current_file = load_pending_mutations()?;
                 if let Some(item) = current_file.remove.iter_mut().find(|item| item.id == m.id) {
                     item.attempts += 1;
@@ -265,23 +268,23 @@ pub async fn process_pending_mutations_impl(
                     item.last_error = err_msg.clone();
                 }
                 save_pending_mutations(&current_file)?;
-                
+
                 next_retry_remaining = Some(next_retry_remaining.map_or(delay, |r| r.min(delay)));
-                
+
                 if is_rate_limited_error(&err_msg) {
                     break;
                 }
             }
         }
     }
-    
+
     // Additions
     let file_after_removals = load_pending_mutations()?;
     let to_process_add_still_pending: Vec<PendingMutation> = to_process_add
         .into_iter()
         .filter(|m| file_after_removals.add.iter().any(|item| item.id == m.id))
         .collect();
-        
+
     for m in to_process_add_still_pending {
         debug_logs.clear();
         match solver_client.add_favorite(m.id, &mut debug_logs).await {
@@ -289,12 +292,12 @@ pub async fn process_pending_mutations_impl(
                 let mut current_file = load_pending_mutations()?;
                 current_file.add.retain(|item| item.id != m.id);
                 save_pending_mutations(&current_file)?;
-                
+
                 {
                     let mut streaks = streaks_mutex.lock().unwrap();
                     streaks.insert("add".to_string(), 0);
                 }
-                
+
                 {
                     let mut prog = progress_mutex.lock().unwrap();
                     prog.completed_mutations += 1;
@@ -308,10 +311,10 @@ pub async fn process_pending_mutations_impl(
                     *s += 1;
                     *s
                 };
-                
+
                 let delay = compute_backoff_seconds(m.attempts + 1, &err_msg, streak);
                 let next_attempt = now_ts + delay;
-                
+
                 let mut current_file = load_pending_mutations()?;
                 if let Some(item) = current_file.add.iter_mut().find(|item| item.id == m.id) {
                     item.attempts += 1;
@@ -319,16 +322,16 @@ pub async fn process_pending_mutations_impl(
                     item.last_error = err_msg.clone();
                 }
                 save_pending_mutations(&current_file)?;
-                
+
                 next_retry_remaining = Some(next_retry_remaining.map_or(delay, |r| r.min(delay)));
-                
+
                 if is_rate_limited_error(&err_msg) {
                     break;
                 }
             }
         }
     }
-    
+
     solver_client.close().await;
     Ok(next_retry_remaining)
 }
@@ -348,11 +351,11 @@ mod tests {
     fn test_compute_backoff_seconds() {
         // Streak 0 (current_streak = 1, base_delay = 2.5, jitter max = 0.875)
         let backoff = compute_backoff_seconds(1, "error", 0);
-        assert!(backoff >= 2.7 && backoff <= 3.38);
+        assert!((2.7..=3.38).contains(&backoff));
 
         // Streak 5 (current_streak = 6, base_delay = 80.0, jitter max = 28.0)
         let backoff_large = compute_backoff_seconds(1, "error", 5);
-        assert!(backoff_large >= 80.2 && backoff_large <= 108.0);
+        assert!((80.2..=108.0).contains(&backoff_large));
 
         // Retry after header in message
         let backoff_retry_after = compute_backoff_seconds(1, "retry after 60", 0);
@@ -398,4 +401,3 @@ mod tests {
         }
     }
 }
-

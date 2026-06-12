@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use std::env;
 use std::fs;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,8 +77,12 @@ struct RawSyncSettings {
     background_interval_minutes: i32,
 }
 
-fn default_flaresolverr_url() -> String { "http://127.0.0.1:8191".to_string() }
-fn default_strategy() -> String { "merge".to_string() }
+fn default_flaresolverr_url() -> String {
+    "http://127.0.0.1:8191".to_string()
+}
+fn default_strategy() -> String {
+    "merge".to_string()
+}
 
 #[derive(Serialize, Deserialize)]
 struct RawDownloadsSettings {
@@ -98,9 +102,15 @@ struct RawDownloadsSettings {
     max_retries: i32,
 }
 
-fn default_naming() -> String { "{id}".to_string() }
-fn default_sidecar_format() -> String { "json".to_string() }
-fn default_max_retries() -> i32 { 3 }
+fn default_naming() -> String {
+    "{id}".to_string()
+}
+fn default_sidecar_format() -> String {
+    "json".to_string()
+}
+fn default_max_retries() -> i32 {
+    3
+}
 
 #[derive(Serialize, Deserialize)]
 struct RawUiSettings {
@@ -108,7 +118,9 @@ struct RawUiSettings {
     page_size: i32,
 }
 
-fn default_page_size() -> i32 { 50 }
+fn default_page_size() -> i32 {
+    50
+}
 
 #[derive(Serialize, Deserialize)]
 struct RawSettingsFile {
@@ -175,26 +187,85 @@ impl SettingsStore {
 
     pub fn load(&self) -> AppSettings {
         let guard = self.cached_data.lock().unwrap();
-        
-        let user_id = guard.api.as_ref().map(|a| a.user_id.clone()).unwrap_or_default();
-        let api_key = guard.api.as_ref().map(|a| a.api_key.clone()).unwrap_or_default();
-        
-        let website_username = guard.sync.as_ref().map(|s| s.website_username.clone()).unwrap_or_default();
-        let website_password = guard.sync.as_ref().map(|s| s.website_password.clone()).unwrap_or_default();
-        let flaresolverr_enabled = guard.sync.as_ref().map(|s| s.flaresolverr_enabled).unwrap_or(false);
-        let flaresolverr_url = guard.sync.as_ref().map(|s| s.flaresolverr_url.clone()).unwrap_or_else(default_flaresolverr_url);
-        let sync_conflict_strategy = guard.sync.as_ref().map(|s| s.conflict_strategy.clone()).unwrap_or_else(default_strategy);
-        let background_sync_interval_minutes = guard.sync.as_ref().map(|s| s.background_interval_minutes).unwrap_or(0);
 
-        let download_directory = guard.downloads.as_ref().map(|d| d.directory.clone()).unwrap_or_else(|| {
-            let home = env::var("HOME").unwrap_or_else(|_| "/".to_string());
-            PathBuf::from(home).join("Downloads").to_string_lossy().to_string()
-        });
-        let download_naming_template = guard.downloads.as_ref().map(|d| d.naming_template.clone()).unwrap_or_else(default_naming);
-        let download_path_template = guard.downloads.as_ref().map(|d| d.path_template.clone()).unwrap_or_default();
-        let download_use_sample = guard.downloads.as_ref().map(|d| d.use_sample).unwrap_or(false);
-        let download_sidecar_enabled = guard.downloads.as_ref().map(|d| d.sidecar_enabled).unwrap_or(false);
-        let download_sidecar_format = guard.downloads.as_ref().map(|d| d.sidecar_format.clone()).unwrap_or_else(default_sidecar_format);
+        let user_id = guard
+            .api
+            .as_ref()
+            .map(|a| a.user_id.clone())
+            .unwrap_or_default();
+        let api_key = guard
+            .api
+            .as_ref()
+            .map(|a| a.api_key.clone())
+            .unwrap_or_default();
+
+        let website_username = guard
+            .sync
+            .as_ref()
+            .map(|s| s.website_username.clone())
+            .unwrap_or_default();
+        let website_password = guard
+            .sync
+            .as_ref()
+            .map(|s| s.website_password.clone())
+            .unwrap_or_default();
+        let flaresolverr_enabled = guard
+            .sync
+            .as_ref()
+            .map(|s| s.flaresolverr_enabled)
+            .unwrap_or(false);
+        let flaresolverr_url = guard
+            .sync
+            .as_ref()
+            .map(|s| s.flaresolverr_url.clone())
+            .unwrap_or_else(default_flaresolverr_url);
+        let sync_conflict_strategy = guard
+            .sync
+            .as_ref()
+            .map(|s| s.conflict_strategy.clone())
+            .unwrap_or_else(default_strategy);
+        let background_sync_interval_minutes = guard
+            .sync
+            .as_ref()
+            .map(|s| s.background_interval_minutes)
+            .unwrap_or(0);
+
+        let download_directory = guard
+            .downloads
+            .as_ref()
+            .map(|d| d.directory.clone())
+            .unwrap_or_else(|| {
+                let home = env::var("HOME").unwrap_or_else(|_| "/".to_string());
+                PathBuf::from(home)
+                    .join("Downloads")
+                    .to_string_lossy()
+                    .to_string()
+            });
+        let download_naming_template = guard
+            .downloads
+            .as_ref()
+            .map(|d| d.naming_template.clone())
+            .unwrap_or_else(default_naming);
+        let download_path_template = guard
+            .downloads
+            .as_ref()
+            .map(|d| d.path_template.clone())
+            .unwrap_or_default();
+        let download_use_sample = guard
+            .downloads
+            .as_ref()
+            .map(|d| d.use_sample)
+            .unwrap_or(false);
+        let download_sidecar_enabled = guard
+            .downloads
+            .as_ref()
+            .map(|d| d.sidecar_enabled)
+            .unwrap_or(false);
+        let download_sidecar_format = guard
+            .downloads
+            .as_ref()
+            .map(|d| d.sidecar_format.clone())
+            .unwrap_or_else(default_sidecar_format);
         let download_max_retries = guard.downloads.as_ref().map(|d| d.max_retries).unwrap_or(3);
 
         let page_size = guard.ui.as_ref().map(|u| u.page_size).unwrap_or(50);
@@ -217,7 +288,7 @@ impl SettingsStore {
             download_sidecar_format,
             download_max_retries,
         };
-        
+
         self.validate_settings(&settings)
     }
 
@@ -231,10 +302,16 @@ impl SettingsStore {
         if validated.download_max_retries < 0 {
             validated.download_max_retries = 0;
         }
-        if validated.sync_conflict_strategy != "merge" && validated.sync_conflict_strategy != "local_wins" && validated.sync_conflict_strategy != "remote_wins" {
+        if validated.sync_conflict_strategy != "merge"
+            && validated.sync_conflict_strategy != "local_wins"
+            && validated.sync_conflict_strategy != "remote_wins"
+        {
             validated.sync_conflict_strategy = "merge".to_string();
         }
-        if validated.download_sidecar_format != "json" && validated.download_sidecar_format != "txt" && validated.download_sidecar_format != "both" {
+        if validated.download_sidecar_format != "json"
+            && validated.download_sidecar_format != "txt"
+            && validated.download_sidecar_format != "both"
+        {
             validated.download_sidecar_format = "json".to_string();
         }
         validated
@@ -243,12 +320,12 @@ impl SettingsStore {
     pub fn save(&self, settings: &AppSettings) {
         let validated = self.validate_settings(settings);
         let mut guard = self.cached_data.lock().unwrap();
-        
+
         guard.api = Some(RawApiSettings {
             user_id: validated.user_id,
             api_key: validated.api_key,
         });
-        
+
         guard.sync = Some(RawSyncSettings {
             website_username: validated.website_username,
             website_password: validated.website_password,
@@ -277,7 +354,10 @@ impl SettingsStore {
 
     pub fn default_download_directory() -> String {
         let home = env::var("HOME").unwrap_or_else(|_| "/".to_string());
-        PathBuf::from(home).join("Downloads").to_string_lossy().to_string()
+        PathBuf::from(home)
+            .join("Downloads")
+            .to_string_lossy()
+            .to_string()
     }
 }
 
@@ -317,8 +397,10 @@ mod tests {
         };
 
         // page_size validation
-        let mut settings = AppSettings::default();
-        settings.page_size = 0;
+        let mut settings = AppSettings {
+            page_size: 0,
+            ..Default::default()
+        };
         let validated = store.validate_settings(&settings);
         assert_eq!(validated.page_size, 50);
 
@@ -362,4 +444,3 @@ mod tests {
         }
     }
 }
-

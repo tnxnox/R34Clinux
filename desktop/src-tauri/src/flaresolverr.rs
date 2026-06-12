@@ -1,18 +1,18 @@
 #![allow(dead_code)]
 
 use crate::models::Post;
+use regex::Regex;
 use reqwest::Client;
-use std::time::Duration;
+use serde_json::Value;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use regex::Regex;
-use serde_json::Value;
+use std::time::Duration;
 
 fn has_command(cmd: &str) -> bool {
     match Command::new(cmd)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .spawn() 
+        .spawn()
     {
         Ok(mut child) => {
             child.kill().ok();
@@ -47,7 +47,11 @@ fn detect_container_cmd() -> Option<Vec<String>> {
             .status();
         if let Ok(status) = res_sudo {
             if status.success() {
-                return Some(vec!["sudo".to_string(), "-n".to_string(), "docker".to_string()]);
+                return Some(vec![
+                    "sudo".to_string(),
+                    "-n".to_string(),
+                    "docker".to_string(),
+                ]);
             }
         }
     }
@@ -69,7 +73,7 @@ async fn probe_flaresolverr(solver_url: &str, timeout_secs: u64) -> bool {
         .timeout(Duration::from_secs(timeout_secs))
         .build()
         .unwrap_or_default();
-    
+
     let base = solver_url.trim_end_matches('/');
     for path in ["/health", "/"] {
         let url = format!("{}{}", base, path);
@@ -88,7 +92,7 @@ fn is_container_running(cmd: &[String], container_name: &str) -> bool {
         child.arg(arg);
     }
     child.args(["ps", "--format", "{{.Names}}"]);
-    
+
     if let Ok(output) = child.output() {
         if output.status.success() {
             let text = String::from_utf8_lossy(&output.stdout);
@@ -121,7 +125,7 @@ pub async fn start_flaresolverr_container(solver_url: &str) -> bool {
         check_cmd.arg(arg);
     }
     check_cmd.args(["ps", "-a", "--format", "{{.Names}}"]);
-    
+
     let container_exists = if let Ok(output) = check_cmd.output() {
         let text = String::from_utf8_lossy(&output.stdout);
         text.lines().any(|l| l.trim() == container_name)
@@ -143,11 +147,16 @@ pub async fn start_flaresolverr_container(solver_url: &str) -> bool {
             run_cmd.arg(arg);
         }
         run_cmd.args([
-            "run", "-d",
-            "--name", container_name,
-            "--restart", "no",
-            "-p", "8191:8191",
-            "-e", "LOG_LEVEL=info",
+            "run",
+            "-d",
+            "--name",
+            container_name,
+            "--restart",
+            "no",
+            "-p",
+            "8191:8191",
+            "-e",
+            "LOG_LEVEL=info",
             image_name,
         ]);
         run_cmd.status().ok();
@@ -196,8 +205,11 @@ impl FlareSolverrSession {
             }
         }
 
-        debug_logs.push_str(&format!("\nCreating FlareSolverr session: {}", self.session_name));
-        
+        debug_logs.push_str(&format!(
+            "\nCreating FlareSolverr session: {}",
+            self.session_name
+        ));
+
         let payload = serde_json::json!({
             "cmd": "sessions.create",
             "session": self.session_name,
@@ -205,7 +217,9 @@ impl FlareSolverrSession {
 
         let mut last_err = String::new();
         for attempt in 1..=3 {
-            let res = self.client.post(self.solver_endpoint())
+            let res = self
+                .client
+                .post(self.solver_endpoint())
                 .json(&payload)
                 .send()
                 .await;
@@ -213,9 +227,13 @@ impl FlareSolverrSession {
             match res {
                 Ok(resp) => {
                     if let Ok(body) = resp.json::<Value>().await {
-                        let status = body.get("status").and_then(|s| s.as_str()).unwrap_or("").to_lowercase();
+                        let status = body
+                            .get("status")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("")
+                            .to_lowercase();
                         let msg = body.get("message").and_then(|m| m.as_str()).unwrap_or("");
-                        
+
                         if status == "ok" || msg.to_lowercase().contains("already exists") {
                             let mut ready = self.session_ready.lock().unwrap();
                             *ready = true;
@@ -237,7 +255,10 @@ impl FlareSolverrSession {
             }
         }
 
-        Err(format!("Failed to create FlareSolverr session: {}", last_err))
+        Err(format!(
+            "Failed to create FlareSolverr session: {}",
+            last_err
+        ))
     }
 
     pub async fn destroy_session(&self) {
@@ -246,7 +267,8 @@ impl FlareSolverrSession {
             "session": self.session_name,
         });
 
-        self.client.post(self.solver_endpoint())
+        self.client
+            .post(self.solver_endpoint())
             .json(&payload)
             .send()
             .await
@@ -256,7 +278,12 @@ impl FlareSolverrSession {
         *ready = false;
     }
 
-    async fn request_via_solver(&self, url: &str, referer: Option<&str>, debug_logs: &mut String) -> Result<String, String> {
+    async fn request_via_solver(
+        &self,
+        url: &str,
+        referer: Option<&str>,
+        debug_logs: &mut String,
+    ) -> Result<String, String> {
         let mut payload = serde_json::json!({
             "cmd": "request.get",
             "url": url,
@@ -267,14 +294,16 @@ impl FlareSolverrSession {
         if let Some(ref_url) = referer {
             payload.as_object_mut().unwrap().insert(
                 "headers".to_string(),
-                serde_json::json!({ "Referer": ref_url })
+                serde_json::json!({ "Referer": ref_url }),
             );
         }
 
         for attempt in 1..=4 {
             self.ensure_session(debug_logs).await?;
-            
-            let res = self.client.post(self.solver_endpoint())
+
+            let res = self
+                .client
+                .post(self.solver_endpoint())
                 .json(&payload)
                 .send()
                 .await;
@@ -282,17 +311,29 @@ impl FlareSolverrSession {
             match res {
                 Ok(resp) => {
                     if let Ok(body) = resp.json::<Value>().await {
-                        let status = body.get("status").and_then(|s| s.as_str()).unwrap_or("").to_lowercase();
+                        let status = body
+                            .get("status")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("")
+                            .to_lowercase();
                         if status == "ok" {
                             let solution = body.get("solution").and_then(|s| s.as_object());
-                            let response = solution.and_then(|s| s.get("response")).and_then(|r| r.as_str());
+                            let response = solution
+                                .and_then(|s| s.get("response"))
+                                .and_then(|r| r.as_str());
                             if let Some(content) = response {
                                 return Ok(content.to_string());
                             }
                         }
-                        
-                        let message = body.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown FlareSolverr error");
-                        if message.to_lowercase().contains("session") && (message.to_lowercase().contains("not found") || message.to_lowercase().contains("does not exist")) {
+
+                        let message = body
+                            .get("message")
+                            .and_then(|m| m.as_str())
+                            .unwrap_or("Unknown FlareSolverr error");
+                        if message.to_lowercase().contains("session")
+                            && (message.to_lowercase().contains("not found")
+                                || message.to_lowercase().contains("does not exist"))
+                        {
                             {
                                 let mut ready = self.session_ready.lock().unwrap();
                                 *ready = false;
@@ -319,9 +360,18 @@ impl FlareSolverrSession {
         Err("Solver request failed after retries.".to_string())
     }
 
-    async fn post_via_solver(&self, url: &str, post_data: &str, referer: Option<&str>, debug_logs: &mut String) -> Result<String, String> {
+    async fn post_via_solver(
+        &self,
+        url: &str,
+        post_data: &str,
+        referer: Option<&str>,
+        debug_logs: &mut String,
+    ) -> Result<String, String> {
         let mut headers = serde_json::Map::new();
-        headers.insert("Content-Type".to_string(), serde_json::json!("application/x-www-form-urlencoded"));
+        headers.insert(
+            "Content-Type".to_string(),
+            serde_json::json!("application/x-www-form-urlencoded"),
+        );
         if let Some(ref_url) = referer {
             headers.insert("Referer".to_string(), serde_json::json!(ref_url));
         }
@@ -338,7 +388,9 @@ impl FlareSolverrSession {
         for attempt in 1..=4 {
             self.ensure_session(debug_logs).await?;
 
-            let res = self.client.post(self.solver_endpoint())
+            let res = self
+                .client
+                .post(self.solver_endpoint())
                 .json(&payload)
                 .send()
                 .await;
@@ -346,17 +398,29 @@ impl FlareSolverrSession {
             match res {
                 Ok(resp) => {
                     if let Ok(body) = resp.json::<Value>().await {
-                        let status = body.get("status").and_then(|s| s.as_str()).unwrap_or("").to_lowercase();
+                        let status = body
+                            .get("status")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("")
+                            .to_lowercase();
                         if status == "ok" {
                             let solution = body.get("solution").and_then(|s| s.as_object());
-                            let response = solution.and_then(|s| s.get("response")).and_then(|r| r.as_str());
+                            let response = solution
+                                .and_then(|s| s.get("response"))
+                                .and_then(|r| r.as_str());
                             if let Some(content) = response {
                                 return Ok(content.to_string());
                             }
                         }
 
-                        let message = body.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown FlareSolverr error");
-                        if message.to_lowercase().contains("session") && (message.to_lowercase().contains("not found") || message.to_lowercase().contains("does not exist")) {
+                        let message = body
+                            .get("message")
+                            .and_then(|m| m.as_str())
+                            .unwrap_or("Unknown FlareSolverr error");
+                        if message.to_lowercase().contains("session")
+                            && (message.to_lowercase().contains("not found")
+                                || message.to_lowercase().contains("does not exist"))
+                        {
                             {
                                 let mut ready = self.session_ready.lock().unwrap();
                                 *ready = false;
@@ -401,8 +465,18 @@ impl FlareSolverrFavoritesClient {
         website_password: String,
         solver_url: String,
     ) -> Self {
-        let cleaned_user_id = Regex::new(r"[^a-zA-Z0-9_-]").unwrap().replace_all(&user_id, "").to_string();
-        let session_name = format!("r34-{}", if cleaned_user_id.is_empty() { "default" } else { &cleaned_user_id });
+        let cleaned_user_id = Regex::new(r"[^a-zA-Z0-9_-]")
+            .unwrap()
+            .replace_all(&user_id, "")
+            .to_string();
+        let session_name = format!(
+            "r34-{}",
+            if cleaned_user_id.is_empty() {
+                "default"
+            } else {
+                &cleaned_user_id
+            }
+        );
         Self {
             user_id,
             api_key,
@@ -415,7 +489,8 @@ impl FlareSolverrFavoritesClient {
 
     fn looks_rate_limited(&self, text: &str) -> bool {
         let lowered = text.to_lowercase();
-        (lowered.contains("429") && lowered.contains("rate")) || lowered.contains("too many requests")
+        (lowered.contains("429") && lowered.contains("rate"))
+            || lowered.contains("too many requests")
     }
 
     fn looks_logged_in(&self, text: &str) -> bool {
@@ -435,7 +510,9 @@ impl FlareSolverrFavoritesClient {
         if lowered.contains("name=\"user\"") && lowered.contains("name=\"pass\"") {
             return false;
         }
-        lowered.contains("page=favorites&s=view") || lowered.contains("id=\"post-list\"") || lowered.contains("id=\"p")
+        lowered.contains("page=favorites&s=view")
+            || lowered.contains("id=\"post-list\"")
+            || lowered.contains("id=\"p")
     }
 
     fn extract_favorite_tile_ids(&self, text: &str) -> Vec<i64> {
@@ -453,7 +530,9 @@ impl FlareSolverrFavoritesClient {
     }
 
     fn extract_items(&self, text: &str) -> Vec<(i64, String)> {
-        let tile_re = Regex::new(r#"(?i)<a[^>]+id=['"]p(\d+)['"][^>]*>\s*<img[^>]+src=['"]([^'"]+)['"]"#).unwrap();
+        let tile_re =
+            Regex::new(r#"(?i)<a[^>]+id=['"]p(\d+)['"][^>]*>\s*<img[^>]+src=['"]([^'"]+)['"]"#)
+                .unwrap();
         let mut items = Vec::new();
         let mut seen = std::collections::HashSet::new();
 
@@ -496,7 +575,11 @@ impl FlareSolverrFavoritesClient {
         }
 
         for (i, &post_id) in ids.iter().enumerate() {
-            let preview = if i < previews.len() { previews[i].clone() } else { "".to_string() };
+            let preview = if i < previews.len() {
+                previews[i].clone()
+            } else {
+                "".to_string()
+            };
             items.push((post_id, preview));
         }
 
@@ -514,7 +597,10 @@ impl FlareSolverrFavoritesClient {
         // Probe if already logged in
         let probe_urls = [
             "https://rule34.xxx/index.php?page=account&s=home".to_string(),
-            format!("https://rule34.xxx/index.php?page=favorites&s=view&id={}", self.user_id),
+            format!(
+                "https://rule34.xxx/index.php?page=favorites&s=view&id={}",
+                self.user_id
+            ),
         ];
 
         for url in &probe_urls {
@@ -531,17 +617,26 @@ impl FlareSolverrFavoritesClient {
         let username = self.website_username.trim();
         let password = self.website_password.trim();
         if username.is_empty() || password.is_empty() {
-            return Err("Account sync requires website username and password in settings.".to_string());
+            return Err(
+                "Account sync requires website username and password in settings.".to_string(),
+            );
         }
 
         debug_logs.push_str("\nLogging in to rule34.xxx...");
         let login_url = "https://rule34.xxx/index.php?page=account&s=login&code=00";
-        
-        let username_encoded = url::form_urlencoded::byte_serialize(username.as_bytes()).collect::<String>();
-        let password_encoded = url::form_urlencoded::byte_serialize(password.as_bytes()).collect::<String>();
-        let post_data = format!("user={}&pass={}&submit=Log+in&login=Log+in", username_encoded, password_encoded);
-        
-        self.session.post_via_solver(login_url, &post_data, Some(login_url), debug_logs).await?;
+
+        let username_encoded =
+            url::form_urlencoded::byte_serialize(username.as_bytes()).collect::<String>();
+        let password_encoded =
+            url::form_urlencoded::byte_serialize(password.as_bytes()).collect::<String>();
+        let post_data = format!(
+            "user={}&pass={}&submit=Log+in&login=Log+in",
+            username_encoded, password_encoded
+        );
+
+        self.session
+            .post_via_solver(login_url, &post_data, Some(login_url), debug_logs)
+            .await?;
 
         // Verify login
         for attempt in 1..=3 {
@@ -563,25 +658,38 @@ impl FlareSolverrFavoritesClient {
         Ok(())
     }
 
-    pub async fn list_favorites(&self, limit: i32, debug_logs: &mut String) -> Result<Vec<Post>, String> {
+    pub async fn list_favorites(
+        &self,
+        limit: i32,
+        debug_logs: &mut String,
+    ) -> Result<Vec<Post>, String> {
         let dapi_posts = self.list_favorites_from_dapi(limit, debug_logs).await;
         match dapi_posts {
             Ok(posts) if !posts.is_empty() => return Ok(posts),
             _ => {
-                debug_logs.push_str("\nDAPI favorites returned empty or failed, falling back to HTML scraping...");
+                debug_logs.push_str(
+                    "\nDAPI favorites returned empty or failed, falling back to HTML scraping...",
+                );
             }
         }
 
         self.list_favorites_from_html(limit, debug_logs).await
     }
 
-    async fn list_favorites_from_dapi(&self, limit: i32, debug_logs: &mut String) -> Result<Vec<Post>, String> {
+    async fn list_favorites_from_dapi(
+        &self,
+        limit: i32,
+        debug_logs: &mut String,
+    ) -> Result<Vec<Post>, String> {
         let url = format!(
             "https://api.rule34.xxx/index.php?page=dapi&s=favorite&q=index&json=1&user_id={}&api_key={}&limit={}",
             self.user_id, self.api_key, limit
         );
 
-        let raw = self.session.request_via_solver(&url, None, debug_logs).await?;
+        let raw = self
+            .session
+            .request_via_solver(&url, None, debug_logs)
+            .await?;
         let payload: Value = serde_json::from_str(&raw)
             .map_err(|e| format!("DAPI favorites invalid JSON: {}", e))?;
 
@@ -589,11 +697,16 @@ impl FlareSolverrFavoritesClient {
             arr
         } else if let Some(obj) = payload.as_object() {
             if obj.get("success") == Some(&Value::Bool(false)) {
-                let msg = obj.get("message").and_then(|m| m.as_str()).unwrap_or("API error");
+                let msg = obj
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("API error");
                 return Err(msg.to_string());
             }
             if let Some(posts_val) = obj.get("post").or(obj.get("posts")).or(obj.get("result")) {
-                posts_val.as_array().ok_or_else(|| "Invalid posts array".to_string())?
+                posts_val
+                    .as_array()
+                    .ok_or_else(|| "Invalid posts array".to_string())?
             } else {
                 return Ok(Vec::new());
             }
@@ -611,11 +724,18 @@ impl FlareSolverrFavoritesClient {
         Ok(posts)
     }
 
-    async fn list_favorites_from_html(&self, limit: i32, debug_logs: &mut String) -> Result<Vec<Post>, String> {
+    async fn list_favorites_from_html(
+        &self,
+        limit: i32,
+        debug_logs: &mut String,
+    ) -> Result<Vec<Post>, String> {
         self.ensure_web_login(debug_logs).await?;
 
         let candidates = [
-            format!("https://rule34.xxx/index.php?page=favorites&s=view&id={}", self.user_id),
+            format!(
+                "https://rule34.xxx/index.php?page=favorites&s=view&id={}",
+                self.user_id
+            ),
             "https://rule34.xxx/index.php?page=favorites&s=list".to_string(),
         ];
 
@@ -627,10 +747,14 @@ impl FlareSolverrFavoritesClient {
                 if self.looks_rate_limited(&html) {
                     return Err("Rate limited while fetching favorites HTML.".to_string());
                 }
-                
+
                 let items = self.extract_items(&html);
-                debug_logs.push_str(&format!("\nHTML Scrape url={}: extracted {} posts", url, items.len()));
-                
+                debug_logs.push_str(&format!(
+                    "\nHTML Scrape url={}: extracted {} posts",
+                    url,
+                    items.len()
+                ));
+
                 for (post_id, preview_url) in items {
                     if seen.insert(post_id) {
                         posts.push(Post {
@@ -661,7 +785,10 @@ impl FlareSolverrFavoritesClient {
 
         if !posts.is_empty() {
             // Hydrate posts
-            debug_logs.push_str(&format!("\nHydrating {} HTML scraped posts via DAPI...", posts.len()));
+            debug_logs.push_str(&format!(
+                "\nHydrating {} HTML scraped posts via DAPI...",
+                posts.len()
+            ));
             self.hydrate_posts(&mut posts).await;
         }
 
@@ -672,7 +799,7 @@ impl FlareSolverrFavoritesClient {
         // Fetch detailed post data from DAPI for posts with only IDs
         let client = crate::api::Rule34Client::new(self.user_id.clone(), self.api_key.clone());
         let mut futures = Vec::new();
-        
+
         for post in posts.iter() {
             let id = post.id;
             let tags = format!("id:{}", id);
@@ -698,8 +825,11 @@ impl FlareSolverrFavoritesClient {
     pub async fn add_favorite(&self, post_id: i64, debug_logs: &mut String) -> Result<(), String> {
         self.ensure_web_login(debug_logs).await?;
         let add_url = format!("https://rule34.xxx/public/addfav.php?id={}", post_id);
-        
-        let raw = self.session.request_via_solver(&add_url, None, debug_logs).await?;
+
+        let raw = self
+            .session
+            .request_via_solver(&add_url, None, debug_logs)
+            .await?;
         let body = extract_body_text(&raw);
 
         if self.looks_rate_limited(&body) {
@@ -708,18 +838,29 @@ impl FlareSolverrFavoritesClient {
 
         if body == "2" {
             // Re-login fallback
-            debug_logs.push_str("\nAdd endpoint reported not logged in. Destroying session and retrying...");
+            debug_logs.push_str(
+                "\nAdd endpoint reported not logged in. Destroying session and retrying...",
+            );
             self.session.destroy_session().await;
             {
                 let mut auth = self.web_session_authenticated.lock().unwrap();
                 *auth = false;
             }
             self.ensure_web_login(debug_logs).await?;
-            
-            let alt_url = format!("https://rule34.xxx/index.php?page=favorites&s=add&id={}", post_id);
-            let referrer = format!("https://rule34.xxx/index.php?page=favorites&s=view&id={}", self.user_id);
-            
-            let alt_raw = self.session.request_via_solver(&alt_url, Some(&referrer), debug_logs).await?;
+
+            let alt_url = format!(
+                "https://rule34.xxx/index.php?page=favorites&s=add&id={}",
+                post_id
+            );
+            let referrer = format!(
+                "https://rule34.xxx/index.php?page=favorites&s=view&id={}",
+                self.user_id
+            );
+
+            let alt_raw = self
+                .session
+                .request_via_solver(&alt_url, Some(&referrer), debug_logs)
+                .await?;
             let alt_body = extract_body_text(&alt_raw);
             if self.looks_rate_limited(&alt_body) {
                 return Err("Rule34 temporarily rate limited favorite add (HTTP 429).".to_string());
@@ -731,41 +872,78 @@ impl FlareSolverrFavoritesClient {
 
         // Verify it was added
         tokio::time::sleep(Duration::from_millis(500)).await;
-        if self.favorite_exists_in_view(post_id, debug_logs).await.unwrap_or(false) {
+        if self
+            .favorite_exists_in_view(post_id, debug_logs)
+            .await
+            .unwrap_or(false)
+        {
             Ok(())
         } else {
-            Err(format!("Unable to confirm favorite #{} was added.", post_id))
+            Err(format!(
+                "Unable to confirm favorite #{} was added.",
+                post_id
+            ))
         }
     }
 
-    pub async fn remove_favorite(&self, post_id: i64, debug_logs: &mut String) -> Result<(), String> {
+    pub async fn remove_favorite(
+        &self,
+        post_id: i64,
+        debug_logs: &mut String,
+    ) -> Result<(), String> {
         self.ensure_web_login(debug_logs).await?;
-        let referrer = format!("https://rule34.xxx/index.php?page=favorites&s=view&id={}", self.user_id);
-        let delete_url = format!("https://rule34.xxx/index.php?page=favorites&s=delete&id={}&return_pid=0", post_id);
-        
-        let raw = self.session.request_via_solver(&delete_url, Some(&referrer), debug_logs).await?;
+        let referrer = format!(
+            "https://rule34.xxx/index.php?page=favorites&s=view&id={}",
+            self.user_id
+        );
+        let delete_url = format!(
+            "https://rule34.xxx/index.php?page=favorites&s=delete&id={}&return_pid=0",
+            post_id
+        );
+
+        let raw = self
+            .session
+            .request_via_solver(&delete_url, Some(&referrer), debug_logs)
+            .await?;
         let body = extract_body_text(&raw);
-        
+
         if body == "2" {
             return Err("Web session login expired or invalid.".to_string());
         }
 
         tokio::time::sleep(Duration::from_millis(500)).await;
-        if !self.favorite_exists_in_view(post_id, debug_logs).await.unwrap_or(true) {
+        if !self
+            .favorite_exists_in_view(post_id, debug_logs)
+            .await
+            .unwrap_or(true)
+        {
             Ok(())
         } else {
-            Err(format!("Unable to confirm favorite #{} was removed.", post_id))
+            Err(format!(
+                "Unable to confirm favorite #{} was removed.",
+                post_id
+            ))
         }
     }
 
-    async fn favorite_exists_in_view(&self, post_id: i64, debug_logs: &mut String) -> Result<bool, String> {
-        let url = format!("https://rule34.xxx/index.php?page=favorites&s=view&id={}", self.user_id);
-        let html = self.session.request_via_solver(&url, None, debug_logs).await?;
-        
+    async fn favorite_exists_in_view(
+        &self,
+        post_id: i64,
+        debug_logs: &mut String,
+    ) -> Result<bool, String> {
+        let url = format!(
+            "https://rule34.xxx/index.php?page=favorites&s=view&id={}",
+            self.user_id
+        );
+        let html = self
+            .session
+            .request_via_solver(&url, None, debug_logs)
+            .await?;
+
         if self.looks_rate_limited(&html) {
             return Err("Rate limited while checking favorites view.".to_string());
         }
-        
+
         let tile_ids = self.extract_favorite_tile_ids(&html);
         Ok(tile_ids.contains(&post_id))
     }

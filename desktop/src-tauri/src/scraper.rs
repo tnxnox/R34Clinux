@@ -1,8 +1,8 @@
 use crate::models::Post;
-use reqwest::Client;
-use std::time::Duration;
 use regex::Regex;
+use reqwest::Client;
 use serde_json::Value;
+use std::time::Duration;
 
 pub async fn fetch_page(url: &str, flare_solver_url: &str) -> Option<String> {
     if flare_solver_url.is_empty() {
@@ -36,7 +36,10 @@ pub async fn fetch_page(url: &str, flare_solver_url: &str) -> Option<String> {
     if let Ok(resp) = client.post(&endpoint).json(&payload).send().await {
         if let Ok(body) = resp.json::<Value>().await {
             let solution = body.get("solution").and_then(|s| s.as_object());
-            if let Some(content) = solution.and_then(|s| s.get("response")).and_then(|r| r.as_str()) {
+            if let Some(content) = solution
+                .and_then(|s| s.get("response"))
+                .and_then(|r| r.as_str())
+            {
                 return Some(content.to_string());
             }
         }
@@ -45,7 +48,9 @@ pub async fn fetch_page(url: &str, flare_solver_url: &str) -> Option<String> {
 }
 
 pub fn parse_scraped_favorites(html: &str) -> Vec<Post> {
-    let tile_re = Regex::new(r#"(?i)<a[^>]+id=['"]p(\d+)['"][^>]*>\s*<img[^>]+src=['"]([^'"]+)['"]"#).unwrap();
+    let tile_re =
+        Regex::new(r#"(?i)<a[^>]+id=['"]p(\d+)['"][^>]*>\s*<img[^>]+src=['"]([^'"]+)['"]"#)
+            .unwrap();
     let mut posts = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
@@ -102,7 +107,11 @@ pub fn parse_scraped_favorites(html: &str) -> Vec<Post> {
     }
 
     for (i, &post_id) in ids.iter().enumerate() {
-        let preview = if i < previews.len() { previews[i].clone() } else { "".to_string() };
+        let preview = if i < previews.len() {
+            previews[i].clone()
+        } else {
+            "".to_string()
+        };
         posts.push(Post {
             id: post_id,
             tags: Vec::new(),
@@ -130,15 +139,20 @@ pub async fn fetch_friend_favorites(
 ) -> Result<Vec<Post>, String> {
     let api_page = page / 5;
     let pid = api_page * 50;
-    
-    let user_id_encoded = url::form_urlencoded::byte_serialize(user_id.trim().as_bytes()).collect::<String>();
+
+    let user_id_encoded =
+        url::form_urlencoded::byte_serialize(user_id.trim().as_bytes()).collect::<String>();
     let url = format!(
         "https://rule34.xxx/index.php?page=favorites&s=view&id={}&pid={}",
         user_id_encoded, pid
     );
 
-    let html = fetch_page(&url, flare_solver_url).await
-        .ok_or_else(|| format!("Failed to fetch favorites for user {} (page {})", user_id, page))?;
+    let html = fetch_page(&url, flare_solver_url).await.ok_or_else(|| {
+        format!(
+            "Failed to fetch favorites for user {} (page {})",
+            user_id, page
+        )
+    })?;
 
     Ok(parse_scraped_favorites(&html))
 }
@@ -168,12 +182,24 @@ mod tests {
         assert_eq!(posts.len(), 2);
 
         assert_eq!(posts[0].id, 12345);
-        assert_eq!(posts[0].preview_url, "https://img.rule34.xxx/thumbnails/12345.jpg");
-        assert_eq!(posts[0].sample_url, "https://img.rule34.xxx/thumbnails/12345.jpg");
+        assert_eq!(
+            posts[0].preview_url,
+            "https://img.rule34.xxx/thumbnails/12345.jpg"
+        );
+        assert_eq!(
+            posts[0].sample_url,
+            "https://img.rule34.xxx/thumbnails/12345.jpg"
+        );
 
         assert_eq!(posts[1].id, 67890);
-        assert_eq!(posts[1].preview_url, "https://img.rule34.xxx/thumbnails/67890.jpg");
-        assert_eq!(posts[1].sample_url, "https://img.rule34.xxx/thumbnails/67890.jpg");
+        assert_eq!(
+            posts[1].preview_url,
+            "https://img.rule34.xxx/thumbnails/67890.jpg"
+        );
+        assert_eq!(
+            posts[1].sample_url,
+            "https://img.rule34.xxx/thumbnails/67890.jpg"
+        );
     }
 
     #[test]
@@ -193,10 +219,16 @@ mod tests {
         assert_eq!(posts.len(), 2);
 
         assert_eq!(posts[0].id, 9999);
-        assert_eq!(posts[0].preview_url, "https://img.rule34.xxx/thumbnails/9999.jpg");
+        assert_eq!(
+            posts[0].preview_url,
+            "https://img.rule34.xxx/thumbnails/9999.jpg"
+        );
 
         assert_eq!(posts[1].id, 8888);
-        assert_eq!(posts[1].preview_url, "https://img.rule34.xxx/thumbnails/8888.jpg");
+        assert_eq!(
+            posts[1].preview_url,
+            "https://img.rule34.xxx/thumbnails/8888.jpg"
+        );
     }
 
     #[test]
@@ -206,4 +238,3 @@ mod tests {
         assert!(posts.is_empty());
     }
 }
-

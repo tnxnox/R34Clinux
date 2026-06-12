@@ -1,12 +1,12 @@
+use crate::db::LocalFavoritesStore;
 use crate::models::Post;
 use crate::settings::AppSettings;
-use crate::db::LocalFavoritesStore;
+use futures_util::StreamExt;
 use reqwest::Client;
-use std::path::{Path, PathBuf};
 use std::fs::{self, File};
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use futures_util::StreamExt;
 
 const MAX_DOWNLOAD_BYTES: u64 = 500 * 1024 * 1024; // 500 MB
 
@@ -28,7 +28,8 @@ impl DownloadManager {
     }
 
     fn sanitize_path_segment(&self, segment: &str) -> String {
-        let cleaned: String = segment.chars()
+        let cleaned: String = segment
+            .chars()
             .filter(|&c| c.is_alphanumeric() || c == ' ' || c == '.' || c == '_' || c == '-')
             .collect();
         cleaned.trim_matches(|c| c == '.' || c == ' ').to_string()
@@ -36,8 +37,16 @@ impl DownloadManager {
 
     fn format_template(&self, template: &str, post: &Post, is_path: bool) -> String {
         let score_str = post.score.unwrap_or(0).to_string();
-        let rating_str = if post.rating.is_empty() { "unknown" } else { &post.rating };
-        let md5_str = if post.md5.is_empty() { "unknown" } else { &post.md5 };
+        let rating_str = if post.rating.is_empty() {
+            "unknown"
+        } else {
+            &post.rating
+        };
+        let md5_str = if post.md5.is_empty() {
+            "unknown"
+        } else {
+            &post.md5
+        };
         let id_str = post.id.to_string();
 
         let formatted = template
@@ -54,7 +63,11 @@ impl DownloadManager {
                 let trimmed = s.trim();
                 if !trimmed.is_empty() {
                     let sanitized = self.sanitize_path_segment(trimmed);
-                    if !sanitized.is_empty() && sanitized != "." && sanitized != ".." && sanitized != "~" {
+                    if !sanitized.is_empty()
+                        && sanitized != "."
+                        && sanitized != ".."
+                        && sanitized != "~"
+                    {
                         sanitized_segments.push(sanitized);
                     }
                 }
@@ -66,7 +79,8 @@ impl DownloadManager {
             }
         } else {
             // Keep alphanumeric, spaces, dots, underscores, dashes
-            formatted.chars()
+            formatted
+                .chars()
                 .filter(|&c| c.is_alphanumeric() || c == ' ' || c == '.' || c == '_' || c == '-')
                 .collect::<String>()
                 .trim()
@@ -75,9 +89,11 @@ impl DownloadManager {
     }
 
     fn validate_path_within_base(&self, full_path: &Path, base_dir: &Path) -> Result<(), String> {
-        let resolved_full = full_path.canonicalize()
+        let resolved_full = full_path
+            .canonicalize()
             .unwrap_or_else(|_| full_path.to_path_buf());
-        let resolved_base = base_dir.canonicalize()
+        let resolved_base = base_dir
+            .canonicalize()
             .map_err(|e| format!("Failed to canonicalize base directory: {}", e))?;
 
         if !resolved_full.starts_with(&resolved_base) {
@@ -101,7 +117,8 @@ impl DownloadManager {
         let ext = if !url.is_empty() {
             if let Ok(parsed) = url::Url::parse(url) {
                 let path_str = parsed.path();
-                Path::new(path_str).extension()
+                Path::new(path_str)
+                    .extension()
                     .and_then(|e| e.to_str())
                     .map(|s| format!(".{}", s))
                     .unwrap_or_else(|| ".jpg".to_string())
@@ -126,12 +143,13 @@ impl DownloadManager {
 
         let path_c = CString::new(dest_dir.as_os_str().as_bytes())
             .map_err(|_| "Invalid destination path encoding")?;
-        
+
         let mut stats = std::mem::MaybeUninit::<libc::statvfs>::uninit();
-        
+
         unsafe {
             if libc::statvfs(path_c.as_ptr(), stats.as_mut_ptr()) == 0 {
                 let stats = stats.assume_init();
+                #[allow(clippy::unnecessary_cast)]
                 let free_space = stats.f_bavail as u64 * stats.f_frsize as u64;
                 if free_space < required_bytes {
                     return Err(format!(
@@ -150,7 +168,11 @@ impl DownloadManager {
         Ok(())
     }
 
-    pub async fn download_post(&self, post: &Post, settings: &AppSettings) -> Result<Option<PathBuf>, String> {
+    pub async fn download_post(
+        &self,
+        post: &Post,
+        settings: &AppSettings,
+    ) -> Result<Option<PathBuf>, String> {
         if post.file_url.is_empty() && post.sample_url.is_empty() {
             return Err("Post has no downloadable content.".to_string());
         }
@@ -211,7 +233,9 @@ impl DownloadManager {
         let mut download_error = String::new();
 
         for attempt in 0..=max_retries {
-            let res = self.client.get(url)
+            let res = self
+                .client
+                .get(url)
                 .header("Referer", post.page_url())
                 .send()
                 .await;
@@ -219,7 +243,9 @@ impl DownloadManager {
             match res {
                 Ok(resp) => {
                     let status = resp.status();
-                    if status == reqwest::StatusCode::NOT_FOUND || status == reqwest::StatusCode::GONE {
+                    if status == reqwest::StatusCode::NOT_FOUND
+                        || status == reqwest::StatusCode::GONE
+                    {
                         return Err(format!(
                             "Post #{} no longer available on server (HTTP {}) - content may have been deleted.",
                             post.id, status
@@ -248,8 +274,9 @@ impl DownloadManager {
                     }
 
                     // Stream download
-                    let mut file = File::create(&dest)
-                        .map_err(|e| format!("Failed to create destination file {:?}: {}", dest, e))?;
+                    let mut file = File::create(&dest).map_err(|e| {
+                        format!("Failed to create destination file {:?}: {}", dest, e)
+                    })?;
 
                     let mut stream = resp.bytes_stream();
                     let mut bytes_downloaded = 0;
@@ -262,12 +289,18 @@ impl DownloadManager {
                             Ok(chunk) => {
                                 bytes_downloaded += chunk.len() as u64;
                                 if bytes_downloaded > MAX_DOWNLOAD_BYTES {
-                                    download_error = format!("Download exceeded maximum size of {} MB", MAX_DOWNLOAD_BYTES / (1024*1024));
+                                    download_error = format!(
+                                        "Download exceeded maximum size of {} MB",
+                                        MAX_DOWNLOAD_BYTES / (1024 * 1024)
+                                    );
                                     stream_success = false;
                                     break;
                                 }
                                 if read_start.elapsed() > max_read_duration {
-                                    download_error = format!("Download timed out after {}s", max_read_duration.as_secs());
+                                    download_error = format!(
+                                        "Download timed out after {}s",
+                                        max_read_duration.as_secs()
+                                    );
                                     stream_success = false;
                                     break;
                                 }
@@ -289,7 +322,9 @@ impl DownloadManager {
                         if settings.download_sidecar_enabled {
                             self.write_sidecar(&dest, post, &settings.download_sidecar_format);
                         }
-                        self.db.record_download(post.id, &post.md5, dest.to_str().unwrap_or("")).ok();
+                        self.db
+                            .record_download(post.id, &post.md5, dest.to_str().unwrap_or(""))
+                            .ok();
                         return Ok(Some(dest));
                     }
                 }
@@ -307,7 +342,10 @@ impl DownloadManager {
             fs::remove_file(&dest).ok(); // cleanup partial download
         }
 
-        Err(format!("Failed to download post {} after {} retries: {}", post.id, max_retries, download_error))
+        Err(format!(
+            "Failed to download post {} after {} retries: {}",
+            post.id, max_retries, download_error
+        ))
     }
 
     fn write_sidecar(&self, media_path: &Path, post: &Post, format: &str) {
@@ -341,10 +379,13 @@ mod tests {
 
     fn temp_db() -> (LocalFavoritesStore, PathBuf) {
         let mut path = std::env::temp_dir();
-        let name = format!("r34_test_dm_{}.db", std::time::SystemTime::now()
-            .duration_since(std::time::SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos());
+        let name = format!(
+            "r34_test_dm_{}.db",
+            std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
         path.push(name);
         let store = LocalFavoritesStore::new(Some(path.clone()));
         (store, path)
@@ -356,7 +397,10 @@ mod tests {
         let manager = DownloadManager::new(db);
 
         assert_eq!(manager.sanitize_path_segment("simple"), "simple");
-        assert_eq!(manager.sanitize_path_segment("invalid/char?*"), "invalidchar");
+        assert_eq!(
+            manager.sanitize_path_segment("invalid/char?*"),
+            "invalidchar"
+        );
         assert_eq!(manager.sanitize_path_segment("  spaces  "), "spaces");
         assert_eq!(manager.sanitize_path_segment("...dots..."), "dots");
         assert_eq!(manager.sanitize_path_segment("a_b-c.d"), "a_b-c.d");
@@ -444,19 +488,11 @@ mod tests {
         // Test fallback to preview_url extension if file_url and sample_url are empty
         post.file_url = "".to_string();
         post.sample_url = "".to_string();
-        assert_eq!(
-            manager.format_filename(&post, "{id}", false),
-            "12345.jpg"
-        );
+        assert_eq!(manager.format_filename(&post, "{id}", false), "12345.jpg");
 
         // Test empty name fallback to ID
-        assert_eq!(
-            manager.format_filename(&post, "", false),
-            "12345.jpg"
-        );
+        assert_eq!(manager.format_filename(&post, "", false), "12345.jpg");
 
         let _ = std::fs::remove_file(&path);
     }
 }
-
-

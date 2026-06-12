@@ -1,8 +1,8 @@
 use crate::models::{Post, TagSuggestion};
-use reqwest::Client;
-use std::time::Duration;
 use regex::Regex;
+use reqwest::Client;
 use serde_json::Value;
+use std::time::Duration;
 
 pub struct Rule34Client {
     client: Client,
@@ -24,28 +24,39 @@ impl Rule34Client {
     }
 
     fn auth_params(&self) -> Vec<(&str, &str)> {
-        vec![
-            ("user_id", &self.user_id),
-            ("api_key", &self.api_key),
-        ]
+        vec![("user_id", &self.user_id), ("api_key", &self.api_key)]
     }
 
-    pub async fn search_posts(&self, tags: &str, page: i32, limit: i32) -> Result<Vec<Post>, String> {
+    pub async fn search_posts(
+        &self,
+        tags: &str,
+        page: i32,
+        limit: i32,
+    ) -> Result<Vec<Post>, String> {
         let mut query_params = self.auth_params();
         let limit_str = limit.to_string();
         let page_str = page.to_string();
-        
+
         query_params.extend([
             ("page", "dapi"),
             ("s", "post"),
             ("q", "index"),
-            ("tags", if tags.trim().is_empty() { "all" } else { tags.trim() }),
+            (
+                "tags",
+                if tags.trim().is_empty() {
+                    "all"
+                } else {
+                    tags.trim()
+                },
+            ),
             ("pid", &page_str),
             ("limit", &limit_str),
             ("json", "1"),
         ]);
 
-        let response = self.client.get("https://api.rule34.xxx/index.php")
+        let response = self
+            .client
+            .get("https://api.rule34.xxx/index.php")
             .query(&query_params)
             .send()
             .await
@@ -56,9 +67,11 @@ impl Rule34Client {
             return Err(format!("Rule34 API returned HTTP status {}", status));
         }
 
-        let text = response.text().await
+        let text = response
+            .text()
+            .await
             .map_err(|e| format!("Failed to read response body: {}", e))?;
-        
+
         let trimmed = text.trim();
         if trimmed.is_empty() {
             return Ok(Vec::new());
@@ -81,7 +94,10 @@ impl Rule34Client {
             arr
         } else if let Some(obj) = val.as_object() {
             if obj.get("success") == Some(&Value::Bool(false)) {
-                let msg = obj.get("message").and_then(|m| m.as_str()).unwrap_or("API returned error status");
+                let msg = obj
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("API returned error status");
                 return Err(msg.to_string());
             }
             if let Some(posts_val) = obj.get("post").or(obj.get("posts")).or(obj.get("result")) {
@@ -109,27 +125,54 @@ impl Rule34Client {
     }
 
     pub fn value_to_post(&self, val: &Value) -> Result<Post, String> {
-        let id = val.get("id")
-            .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok())))
+        let id = val
+            .get("id")
+            .and_then(|v| {
+                v.as_i64()
+                    .or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok()))
+            })
             .unwrap_or(0);
 
-        let tags_str = val.get("tags")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let tags_str = val.get("tags").and_then(|v| v.as_str()).unwrap_or("");
         let tags: Vec<String> = tags_str.split_whitespace().map(|s| s.to_string()).collect();
 
-        let rating = val.get("rating").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let rating = val
+            .get("rating")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let score = val.get("score").and_then(|v| v.as_i64().map(|s| s as i32));
         let width = val.get("width").and_then(|v| v.as_i64().map(|w| w as i32));
         let height = val.get("height").and_then(|v| v.as_i64().map(|h| h as i32));
         let file_size = val.get("file_size").and_then(|v| v.as_i64());
-        let source = val.get("source").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let md5 = val.get("md5").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let preview_url = val.get("preview_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let sample_url = val.get("sample_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let file_url = val.get("file_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        
-        let created_at = val.get("change")
+        let source = val
+            .get("source")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let md5 = val
+            .get("md5")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let preview_url = val
+            .get("preview_url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let sample_url = val
+            .get("sample_url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let file_url = val
+            .get("file_url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let created_at = val
+            .get("change")
             .or(val.get("created_at"))
             .or(val.get("date"))
             .and_then(|v| v.as_str().map(|s| s.to_string()))
@@ -221,17 +264,24 @@ impl Rule34Client {
             return Ok(Vec::new());
         }
 
-        let response = self.client.get("https://api.rule34.xxx/autocomplete.php")
+        let response = self
+            .client
+            .get("https://api.rule34.xxx/autocomplete.php")
             .query(&[("q", query)])
             .send()
             .await
             .map_err(|e| format!("Autocomplete request failed: {}", e))?;
 
         if response.status().is_client_error() || response.status().is_server_error() {
-            return Err(format!("Autocomplete returned status {}", response.status()));
+            return Err(format!(
+                "Autocomplete returned status {}",
+                response.status()
+            ));
         }
 
-        let text = response.text().await
+        let text = response
+            .text()
+            .await
             .map_err(|e| format!("Failed to read autocomplete response: {}", e))?;
 
         if text.trim().is_empty() {
@@ -241,7 +291,8 @@ impl Rule34Client {
         let payload: Value = serde_json::from_str(&text)
             .map_err(|e| format!("Autocomplete response invalid JSON: {}", e))?;
 
-        let arr = payload.as_array()
+        let arr = payload
+            .as_array()
             .ok_or_else(|| "Autocomplete response is not a list".to_string())?;
 
         let mut suggestions = Vec::new();
@@ -254,16 +305,20 @@ impl Rule34Client {
                 let raw_val = obj.get("value").and_then(|v| v.as_str()).unwrap_or("");
                 let decoded_val = html_escape::decode_html_entities(raw_val).into_owned();
                 let sanitized_val = self.sanitize_autocomplete_val(&decoded_val);
-                
+
                 if sanitized_val.is_empty() || seen.contains(&sanitized_val) {
                     continue;
                 }
 
                 let raw_label = obj.get("label").and_then(|v| v.as_str()).unwrap_or("");
                 let decoded_label = html_escape::decode_html_entities(raw_label).into_owned();
-                let normalized_label = decoded_label.split_whitespace().collect::<Vec<_>>().join(" ");
+                let normalized_label = decoded_label
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ");
 
-                let count = label_count_regex.captures(&normalized_label)
+                let count = label_count_regex
+                    .captures(&normalized_label)
                     .and_then(|cap| cap[1].parse::<i32>().ok());
 
                 suggestions.push(TagSuggestion {
@@ -284,7 +339,11 @@ impl Rule34Client {
         if normalized.is_empty() {
             return "".to_string();
         }
-        if normalized.contains(';') || normalized.contains('&') || normalized.contains('?') || normalized.contains(' ') {
+        if normalized.contains(';')
+            || normalized.contains('&')
+            || normalized.contains('?')
+            || normalized.contains(' ')
+        {
             return "".to_string();
         }
         normalized
@@ -315,7 +374,7 @@ mod tests {
         }"#;
         let val: Value = serde_json::from_str(json_str).unwrap();
         let post = client.value_to_post(&val).unwrap();
-        
+
         assert_eq!(post.id, 123);
         assert_eq!(post.tags, vec!["tag1", "tag2", "tag3"]);
         assert_eq!(post.rating, "s");
@@ -359,11 +418,13 @@ mod tests {
     #[test]
     fn test_sanitize_autocomplete_val() {
         let client = Rule34Client::new("".to_string(), "".to_string());
-        assert_eq!(client.sanitize_autocomplete_val("  hello_world  "), "hello_world");
+        assert_eq!(
+            client.sanitize_autocomplete_val("  hello_world  "),
+            "hello_world"
+        );
         assert_eq!(client.sanitize_autocomplete_val("hello world"), "");
         assert_eq!(client.sanitize_autocomplete_val("hello;world"), "");
         assert_eq!(client.sanitize_autocomplete_val("hello&world"), "");
         assert_eq!(client.sanitize_autocomplete_val("hello?world"), "");
     }
 }
-

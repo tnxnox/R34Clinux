@@ -1,15 +1,18 @@
-use std::path::PathBuf;
-use std::env;
-use std::time::SystemTime;
+use crate::models::{Friend, Post};
 use rusqlite::{params, Connection, Result};
-use crate::models::{Post, Friend};
+use std::env;
+use std::path::PathBuf;
+use std::time::SystemTime;
 
 fn default_database_path() -> PathBuf {
     let root = if let Ok(xdg_data) = env::var("XDG_DATA_HOME") {
         PathBuf::from(xdg_data).join("R34LinuxClient")
     } else {
         let home = env::var("HOME").unwrap_or_else(|_| "/".to_string());
-        PathBuf::from(home).join(".local").join("share").join("R34LinuxClient")
+        PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join("R34LinuxClient")
     };
     std::fs::create_dir_all(&root).ok();
     root.join("favorites.db")
@@ -25,17 +28,23 @@ impl LocalFavoritesStore {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).ok();
         }
-        let store = Self { database_path: path };
-        store.init_schema().expect("Failed to initialize database schema");
+        let store = Self {
+            database_path: path,
+        };
+        store
+            .init_schema()
+            .expect("Failed to initialize database schema");
         store
     }
 
     fn connect(&self) -> Result<Connection> {
         let conn = Connection::open(&self.database_path)?;
-        conn.execute_batch("
+        conn.execute_batch(
+            "
             PRAGMA journal_mode = WAL;
             PRAGMA busy_timeout = 30000;
-        ")?;
+        ",
+        )?;
         Ok(conn)
     }
 
@@ -117,7 +126,8 @@ impl LocalFavoritesStore {
 
     pub fn is_downloaded(&self, post_id: i64, md5: &str) -> Result<bool> {
         let conn = self.connect()?;
-        let mut stmt = conn.prepare("SELECT 1 FROM downloads WHERE post_id = ?1 OR md5 = ?2 LIMIT 1")?;
+        let mut stmt =
+            conn.prepare("SELECT 1 FROM downloads WHERE post_id = ?1 OR md5 = ?2 LIMIT 1")?;
         let exists = stmt.exists(params![post_id, md5])?;
         Ok(exists)
     }
@@ -135,7 +145,11 @@ impl LocalFavoritesStore {
         Ok(())
     }
 
-    pub fn list_favorites(&self, limit: Option<u32>, collection_name: Option<&str>) -> Result<Vec<Post>> {
+    pub fn list_favorites(
+        &self,
+        limit: Option<u32>,
+        collection_name: Option<&str>,
+    ) -> Result<Vec<Post>> {
         let conn = self.connect()?;
         let mut posts = Vec::new();
 
@@ -176,7 +190,8 @@ impl LocalFavoritesStore {
                 } else {
                     "SELECT id, tags, rating, score, width, height, file_size, source, md5, \
                      preview_url, sample_url, file_url, created_at \
-                     FROM favorites ORDER BY favorited_at DESC".to_string()
+                     FROM favorites ORDER BY favorited_at DESC"
+                        .to_string()
                 };
                 let mut stmt = conn.prepare(&query)?;
                 let mapped = stmt.query_map([], |row| self.row_to_post(row))?;
@@ -210,7 +225,7 @@ impl LocalFavoritesStore {
     }
 
     pub fn add_favorite(&self, post: &Post) -> Result<()> {
-        self.upsert_many(&[post.clone()])
+        self.upsert_many(std::slice::from_ref(post))
     }
 
     pub fn upsert_many(&self, posts: &[Post]) -> Result<()> {
@@ -277,14 +292,18 @@ impl LocalFavoritesStore {
         if !posts.is_empty() {
             let keep_ids: Vec<i64> = posts.iter().map(|p| p.id).collect();
             let placeholders = keep_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-            
+
             // Delete favorites not in keep_ids
-            let delete_favs_query = format!("DELETE FROM favorites WHERE id NOT IN ({})", placeholders);
+            let delete_favs_query =
+                format!("DELETE FROM favorites WHERE id NOT IN ({})", placeholders);
             let mut stmt = tx.prepare(&delete_favs_query)?;
             stmt.execute(rusqlite::params_from_iter(keep_ids.iter()))?;
 
             // Delete collection items not in keep_ids
-            let delete_items_query = format!("DELETE FROM favorite_collection_items WHERE post_id NOT IN ({})", placeholders);
+            let delete_items_query = format!(
+                "DELETE FROM favorite_collection_items WHERE post_id NOT IN ({})",
+                placeholders
+            );
             let mut stmt = tx.prepare(&delete_items_query)?;
             stmt.execute(rusqlite::params_from_iter(keep_ids.iter()))?;
         } else {
@@ -358,7 +377,10 @@ impl LocalFavoritesStore {
 
         for chunk in post_ids.chunks(500) {
             let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-            let delete_items = format!("DELETE FROM favorite_collection_items WHERE post_id IN ({})", placeholders);
+            let delete_items = format!(
+                "DELETE FROM favorite_collection_items WHERE post_id IN ({})",
+                placeholders
+            );
             let mut stmt = tx.prepare(&delete_items)?;
             stmt.execute(rusqlite::params_from_iter(chunk.iter()))?;
 
@@ -374,7 +396,8 @@ impl LocalFavoritesStore {
 
     pub fn list_collections(&self) -> Result<Vec<String>> {
         let conn = self.connect()?;
-        let mut stmt = conn.prepare("SELECT name FROM favorite_collections ORDER BY lower(name)")?;
+        let mut stmt =
+            conn.prepare("SELECT name FROM favorite_collections ORDER BY lower(name)")?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         let mut collections = Vec::new();
         for r in rows {
@@ -406,13 +429,23 @@ impl LocalFavoritesStore {
         }
         let mut conn = self.connect()?;
         let tx = conn.transaction()?;
-        tx.execute("DELETE FROM favorite_collection_items WHERE collection_name = ?1", params![normalized])?;
-        tx.execute("DELETE FROM favorite_collections WHERE name = ?1", params![normalized])?;
+        tx.execute(
+            "DELETE FROM favorite_collection_items WHERE collection_name = ?1",
+            params![normalized],
+        )?;
+        tx.execute(
+            "DELETE FROM favorite_collections WHERE name = ?1",
+            params![normalized],
+        )?;
         tx.commit()?;
         Ok(())
     }
 
-    pub fn assign_posts_to_collection(&self, post_ids: &[i64], collection_name: &str) -> Result<u32> {
+    pub fn assign_posts_to_collection(
+        &self,
+        post_ids: &[i64],
+        collection_name: &str,
+    ) -> Result<u32> {
         let normalized = collection_name.trim();
         if normalized.is_empty() || post_ids.is_empty() {
             return Ok(0);
@@ -442,7 +475,11 @@ impl LocalFavoritesStore {
         Ok(assigned)
     }
 
-    pub fn remove_posts_from_collection(&self, post_ids: &[i64], collection_name: &str) -> Result<u32> {
+    pub fn remove_posts_from_collection(
+        &self,
+        post_ids: &[i64],
+        collection_name: &str,
+    ) -> Result<u32> {
         let normalized = collection_name.trim();
         if normalized.is_empty() || post_ids.is_empty() {
             return Ok(0);
@@ -462,7 +499,8 @@ impl LocalFavoritesStore {
             for &id in chunk {
                 params.push(id.to_string());
             }
-            let params_ref: Vec<&dyn rusqlite::ToSql> = params.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+            let params_ref: Vec<&dyn rusqlite::ToSql> =
+                params.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
             let deleted = stmt.execute(params_ref.as_slice())?;
             removed += deleted as u32;
         }
@@ -486,7 +524,10 @@ impl LocalFavoritesStore {
 
     pub fn remove_friend(&self, user_id: &str) -> Result<()> {
         let conn = self.connect()?;
-        conn.execute("DELETE FROM friends WHERE user_id = ?1", params![user_id.trim()])?;
+        conn.execute(
+            "DELETE FROM friends WHERE user_id = ?1",
+            params![user_id.trim()],
+        )?;
         Ok(())
     }
 
@@ -511,7 +552,9 @@ impl LocalFavoritesStore {
     #[allow(dead_code)]
     pub fn get_friend(&self, user_id: &str) -> Result<Option<Friend>> {
         let conn = self.connect()?;
-        let mut stmt = conn.prepare("SELECT user_id, display_name, notes, added_at FROM friends WHERE user_id = ?1")?;
+        let mut stmt = conn.prepare(
+            "SELECT user_id, display_name, notes, added_at FROM friends WHERE user_id = ?1",
+        )?;
         let mut rows = stmt.query_map([user_id.trim()], |row| {
             Ok(Friend {
                 user_id: row.get(0)?,
@@ -535,10 +578,13 @@ mod tests {
 
     fn temp_db() -> LocalFavoritesStore {
         let mut path = std::env::temp_dir();
-        let name = format!("r34_test_{}.db", std::time::SystemTime::now()
-            .duration_since(std::time::SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos());
+        let name = format!(
+            "r34_test_{}.db",
+            std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
         path.push(name);
         LocalFavoritesStore::new(Some(path))
     }
@@ -546,7 +592,7 @@ mod tests {
     #[test]
     fn test_db_init_and_favorites() {
         let store = temp_db();
-        
+
         let post = Post {
             id: 12345,
             tags: vec!["tag1".to_string(), "tag2".to_string()],
@@ -568,14 +614,19 @@ mod tests {
 
         // Check is_downloaded
         assert!(!store.is_downloaded(12345, "abcde12345").unwrap());
-        store.record_download(12345, "abcde12345", "/path/to/file.jpg").unwrap();
+        store
+            .record_download(12345, "abcde12345", "/path/to/file.jpg")
+            .unwrap();
         assert!(store.is_downloaded(12345, "abcde12345").unwrap());
 
         // List favorites
         let favorites = store.list_favorites(None, None).unwrap();
         assert_eq!(favorites.len(), 1);
         assert_eq!(favorites[0].id, 12345);
-        assert_eq!(favorites[0].tags, vec!["tag1".to_string(), "tag2".to_string()]);
+        assert_eq!(
+            favorites[0].tags,
+            vec!["tag1".to_string(), "tag2".to_string()]
+        );
 
         // Remove favorite
         store.remove_favorite(12345).unwrap();
@@ -617,7 +668,9 @@ mod tests {
         store.add_favorite(&post).unwrap();
 
         // Assign post to collection
-        let assigned = store.assign_posts_to_collection(&[999], "My Collection").unwrap();
+        let assigned = store
+            .assign_posts_to_collection(&[999], "My Collection")
+            .unwrap();
         assert_eq!(assigned, 1);
 
         // List favorites in collection
@@ -626,7 +679,9 @@ mod tests {
         assert_eq!(favs[0].id, 999);
 
         // Remove post from collection
-        let removed = store.remove_posts_from_collection(&[999], "My Collection").unwrap();
+        let removed = store
+            .remove_posts_from_collection(&[999], "My Collection")
+            .unwrap();
         assert_eq!(removed, 1);
         let favs = store.list_favorites(None, Some("My Collection")).unwrap();
         assert_eq!(favs.len(), 0);
@@ -644,7 +699,9 @@ mod tests {
         let store = temp_db();
 
         // Add friend
-        store.add_friend("friend123", "Nice Friend", "A cool friend").unwrap();
+        store
+            .add_friend("friend123", "Nice Friend", "A cool friend")
+            .unwrap();
 
         // Get friend
         let friend = store.get_friend("friend123").unwrap();
@@ -667,4 +724,3 @@ mod tests {
         let _ = std::fs::remove_file(&store.database_path);
     }
 }
-
