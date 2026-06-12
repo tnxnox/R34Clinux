@@ -4,6 +4,11 @@ set -e
 
 SCRIPTPATH="$(cd "$(dirname "$0")" >/dev/null 2>&1 && pwd)"
 
+# Source Rust/Cargo environment if it exists (e.g. installed via rustup but not in current shell path)
+if [ -f "$HOME/.cargo/env" ]; then
+    . "$HOME/.cargo/env"
+fi
+
 # Verify prerequisites
 MISSING_PREREQ=false
 
@@ -30,6 +35,10 @@ if [ "$MISSING_PREREQ" = true ]; then
     echo "  Automated system dependency installer needed      "
     echo "===================================================="
     bash "$SCRIPTPATH/scripts/setup.sh"
+    # Source env again in case setup.sh just installed rustup
+    if [ -f "$HOME/.cargo/env" ]; then
+        . "$HOME/.cargo/env"
+    fi
 else
     # Auto install npm packages if node_modules is missing
     if [ ! -d "$SCRIPTPATH/desktop/node_modules" ]; then
@@ -44,3 +53,4 @@ fi
 echo "Launching Rule34 Client..."
 cd "$SCRIPTPATH"
 make dev
+

@@ -247,7 +247,23 @@ pub fn remove_favorite(state: tauri::State<'_, AppState>, postId: i64) -> Result
 
 #[tauri::command]
 pub fn get_mutation_progress(state: tauri::State<'_, AppState>) -> crate::models::MutationProgress {
-    let progress = state.0.mutation_progress.lock().unwrap();
+    let mut progress = state.0.mutation_progress.lock().unwrap();
+    if let Ok(pending_file) = crate::mutations::load_pending_mutations() {
+        let count = pending_file.add.len() + pending_file.remove.len();
+        progress.current_pending = count;
+        if count == 0 {
+            progress.total_mutations = 0;
+            progress.completed_mutations = 0;
+        } else {
+            if progress.total_mutations < count {
+                progress.total_mutations = count;
+            }
+            let calculated_completed = progress.total_mutations - count;
+            if calculated_completed > progress.completed_mutations {
+                progress.completed_mutations = calculated_completed;
+            }
+        }
+    }
     progress.clone()
 }
 
@@ -280,12 +296,12 @@ pub fn delete_collection(state: tauri::State<'_, AppState>, name: String) -> Res
 pub fn assign_posts_to_collection(
     state: tauri::State<'_, AppState>,
     name: String,
-    postIds: Vec<i64>,
+    posts: Vec<Post>,
 ) -> Result<Value, String> {
     let count = state
         .0
         .db
-        .assign_posts_to_collection(&postIds, &name)
+        .assign_posts_to_collection(&posts, &name)
         .map_err(|e| e.to_string())?;
     Ok(serde_json::json!({ "status": "ok", "assigned": count }))
 }
@@ -380,6 +396,34 @@ pub fn start_sync(state: tauri::State<'_, AppState>) -> Value {
             status.error =
                 "Sync skipped: Another sync operation is already in progress.".to_string();
             return;
+        }
+
+        // Process pending mutations first, so that remote account matches our local intentions before we fetch
+        if settings.has_credentials()
+            && !settings.website_username.is_empty()
+            && !settings.website_password.is_empty()
+        {
+            debug_logs.push_str("\nProcessing pending remote mutations first...");
+            let mutation_res = crate::mutations::process_pending_mutations_impl(
+                &settings,
+                &state_inner.mutation_progress,
+                &state_inner.mutation_streaks,
+            )
+            .await;
+
+            if let Ok(Some(delay)) = mutation_res {
+                debug_logs.push_str(&format!(
+                    "\nWarning: Some mutations are rate-limited/backed off. Remaining delay: {:.1}s.",
+                    delay
+                ));
+            } else if let Err(e) = mutation_res {
+                debug_logs.push_str(&format!(
+                    "\nWarning: Failed to process pending mutations: {}",
+                    e
+                ));
+            } else {
+                debug_logs.push_str("\nPending mutations processed successfully.");
+            }
         }
 
         let res = sync_remote_favorites(

@@ -70,6 +70,24 @@ impl LocalFavoritesStore {
             [],
         )?;
 
+        // Migration: Add is_favorite column if it doesn't exist
+        let mut check_col = conn.prepare("PRAGMA table_info(favorites)")?;
+        let mut rows = check_col.query([])?;
+        let mut has_is_favorite = false;
+        while let Some(row) = rows.next()? {
+            let col_name: String = row.get(1)?;
+            if col_name == "is_favorite" {
+                has_is_favorite = true;
+                break;
+            }
+        }
+        if !has_is_favorite {
+            conn.execute(
+                "ALTER TABLE favorites ADD COLUMN is_favorite INTEGER DEFAULT 1",
+                [],
+            )?;
+        }
+
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_favorites_favorited_at ON favorites (favorited_at DESC)",
             [],
@@ -184,13 +202,13 @@ impl LocalFavoritesStore {
                     format!(
                         "SELECT id, tags, rating, score, width, height, file_size, source, md5, \
                          preview_url, sample_url, file_url, created_at \
-                         FROM favorites ORDER BY favorited_at DESC LIMIT {}",
+                         FROM favorites WHERE is_favorite = 1 ORDER BY favorited_at DESC LIMIT {}",
                         l
                     )
                 } else {
                     "SELECT id, tags, rating, score, width, height, file_size, source, md5, \
                      preview_url, sample_url, file_url, created_at \
-                     FROM favorites ORDER BY favorited_at DESC"
+                     FROM favorites WHERE is_favorite = 1 ORDER BY favorited_at DESC"
                         .to_string()
                 };
                 let mut stmt = conn.prepare(&query)?;
@@ -243,8 +261,8 @@ impl LocalFavoritesStore {
             let mut stmt = tx.prepare(
                 "INSERT INTO favorites (
                     id, tags, rating, score, width, height, file_size, source, md5,
-                    preview_url, sample_url, file_url, created_at, favorited_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                    preview_url, sample_url, file_url, created_at, favorited_at, is_favorite
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 1)
                 ON CONFLICT(id) DO UPDATE SET
                     tags=excluded.tags,
                     rating=excluded.rating,
@@ -257,7 +275,8 @@ impl LocalFavoritesStore {
                     preview_url=excluded.preview_url,
                     sample_url=excluded.sample_url,
                     file_url=excluded.file_url,
-                    created_at=excluded.created_at",
+                    created_at=excluded.created_at,
+                    is_favorite=1",
             )?;
 
             for post in posts {
@@ -293,22 +312,25 @@ impl LocalFavoritesStore {
             let keep_ids: Vec<i64> = posts.iter().map(|p| p.id).collect();
             let placeholders = keep_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
 
-            // Delete favorites not in keep_ids
-            let delete_favs_query =
-                format!("DELETE FROM favorites WHERE id NOT IN ({})", placeholders);
-            let mut stmt = tx.prepare(&delete_favs_query)?;
-            stmt.execute(rusqlite::params_from_iter(keep_ids.iter()))?;
-
-            // Delete collection items not in keep_ids
-            let delete_items_query = format!(
-                "DELETE FROM favorite_collection_items WHERE post_id NOT IN ({})",
+            // Update favorites not in keep_ids to have is_favorite = 0
+            let update_favs_query = format!(
+                "UPDATE favorites SET is_favorite = 0 WHERE id NOT IN ({})",
                 placeholders
             );
-            let mut stmt = tx.prepare(&delete_items_query)?;
+            let mut stmt = tx.prepare(&update_favs_query)?;
             stmt.execute(rusqlite::params_from_iter(keep_ids.iter()))?;
+
+            // Delete favorites that are is_favorite = 0 and not in any collection
+            tx.execute(
+                "DELETE FROM favorites WHERE is_favorite = 0 AND id NOT IN (SELECT post_id FROM favorite_collection_items)",
+                [],
+            )?;
         } else {
-            tx.execute("DELETE FROM favorites", [])?;
-            tx.execute("DELETE FROM favorite_collection_items", [])?;
+            tx.execute("UPDATE favorites SET is_favorite = 0", [])?;
+            tx.execute(
+                "DELETE FROM favorites WHERE is_favorite = 0 AND id NOT IN (SELECT post_id FROM favorite_collection_items)",
+                [],
+            )?;
         }
 
         let now = SystemTime::now()
@@ -320,8 +342,8 @@ impl LocalFavoritesStore {
             let mut stmt = tx.prepare(
                 "INSERT INTO favorites (
                     id, tags, rating, score, width, height, file_size, source, md5,
-                    preview_url, sample_url, file_url, created_at, favorited_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                    preview_url, sample_url, file_url, created_at, favorited_at, is_favorite
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 1)
                 ON CONFLICT(id) DO UPDATE SET
                     tags=excluded.tags,
                     rating=excluded.rating,
@@ -334,7 +356,8 @@ impl LocalFavoritesStore {
                     preview_url=excluded.preview_url,
                     sample_url=excluded.sample_url,
                     file_url=excluded.file_url,
-                    created_at=excluded.created_at",
+                    created_at=excluded.created_at,
+                    is_favorite=1",
             )?;
 
             for post in posts {
@@ -377,14 +400,20 @@ impl LocalFavoritesStore {
 
         for chunk in post_ids.chunks(500) {
             let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-            let delete_items = format!(
-                "DELETE FROM favorite_collection_items WHERE post_id IN ({})",
+
+            // Set is_favorite = 0 for post_ids
+            let update_favs = format!(
+                "UPDATE favorites SET is_favorite = 0 WHERE id IN ({})",
                 placeholders
             );
-            let mut stmt = tx.prepare(&delete_items)?;
+            let mut stmt = tx.prepare(&update_favs)?;
             stmt.execute(rusqlite::params_from_iter(chunk.iter()))?;
 
-            let delete_favs = format!("DELETE FROM favorites WHERE id IN ({})", placeholders);
+            // Delete favorites if they are is_favorite = 0 and not in any collection
+            let delete_favs = format!(
+                "DELETE FROM favorites WHERE id IN ({}) AND is_favorite = 0 AND id NOT IN (SELECT post_id FROM favorite_collection_items)",
+                placeholders
+            );
             let mut stmt = tx.prepare(&delete_favs)?;
             let deleted_chunk = stmt.execute(rusqlite::params_from_iter(chunk.iter()))?;
             removed += deleted_chunk as u32;
@@ -429,6 +458,19 @@ impl LocalFavoritesStore {
         }
         let mut conn = self.connect()?;
         let tx = conn.transaction()?;
+
+        // Find which posts are in this collection before deleting
+        let mut post_ids = Vec::new();
+        {
+            let mut stmt = tx.prepare(
+                "SELECT post_id FROM favorite_collection_items WHERE collection_name = ?1",
+            )?;
+            let rows = stmt.query_map([normalized], |row| row.get::<_, i64>(0))?;
+            for r in rows {
+                post_ids.push(r?);
+            }
+        }
+
         tx.execute(
             "DELETE FROM favorite_collection_items WHERE collection_name = ?1",
             params![normalized],
@@ -437,17 +479,27 @@ impl LocalFavoritesStore {
             "DELETE FROM favorite_collections WHERE name = ?1",
             params![normalized],
         )?;
+
+        // Cleanup orphaned non-favorites
+        if !post_ids.is_empty() {
+            for chunk in post_ids.chunks(500) {
+                let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                let cleanup_query = format!(
+                    "DELETE FROM favorites WHERE id IN ({}) AND is_favorite = 0 AND id NOT IN (SELECT post_id FROM favorite_collection_items)",
+                    placeholders
+                );
+                let mut stmt = tx.prepare(&cleanup_query)?;
+                stmt.execute(rusqlite::params_from_iter(chunk.iter()))?;
+            }
+        }
+
         tx.commit()?;
         Ok(())
     }
 
-    pub fn assign_posts_to_collection(
-        &self,
-        post_ids: &[i64],
-        collection_name: &str,
-    ) -> Result<u32> {
+    pub fn assign_posts_to_collection(&self, posts: &[Post], collection_name: &str) -> Result<u32> {
         let normalized = collection_name.trim();
-        if normalized.is_empty() || post_ids.is_empty() {
+        if normalized.is_empty() || posts.is_empty() {
             return Ok(0);
         }
         let mut conn = self.connect()?;
@@ -458,16 +510,58 @@ impl LocalFavoritesStore {
             params![normalized],
         )?;
 
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+
         let mut assigned = 0;
         {
-            let mut check_stmt = tx.prepare("SELECT 1 FROM favorites WHERE id = ?1")?;
-            let mut insert_stmt = tx.prepare("INSERT OR IGNORE INTO favorite_collection_items (collection_name, post_id) VALUES (?1, ?2)")?;
+            let mut insert_post_stmt = tx.prepare(
+                "INSERT INTO favorites (
+                    id, tags, rating, score, width, height, file_size, source, md5,
+                    preview_url, sample_url, file_url, created_at, favorited_at, is_favorite
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 0)
+                ON CONFLICT(id) DO UPDATE SET
+                    tags=excluded.tags,
+                    rating=excluded.rating,
+                    score=excluded.score,
+                    width=excluded.width,
+                    height=excluded.height,
+                    file_size=excluded.file_size,
+                    source=excluded.source,
+                    md5=excluded.md5,
+                    preview_url=excluded.preview_url,
+                    sample_url=excluded.sample_url,
+                    file_url=excluded.file_url,
+                    created_at=excluded.created_at",
+            )?;
 
-            for &post_id in post_ids {
-                if check_stmt.exists([post_id])? {
-                    let rows_affected = insert_stmt.execute(params![normalized, post_id])?;
-                    assigned += rows_affected as u32;
-                }
+            let mut insert_item_stmt = tx.prepare(
+                "INSERT OR IGNORE INTO favorite_collection_items (collection_name, post_id) VALUES (?1, ?2)"
+            )?;
+
+            for post in posts {
+                let tags_str = post.tags.join(" ");
+                insert_post_stmt.execute(params![
+                    post.id,
+                    tags_str,
+                    post.rating,
+                    post.score,
+                    post.width,
+                    post.height,
+                    post.file_size,
+                    post.source,
+                    post.md5,
+                    post.preview_url,
+                    post.sample_url,
+                    post.file_url,
+                    post.created_at,
+                    now,
+                ])?;
+
+                let rows_affected = insert_item_stmt.execute(params![normalized, post.id])?;
+                assigned += rows_affected as u32;
             }
         }
 
@@ -503,6 +597,13 @@ impl LocalFavoritesStore {
                 params.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
             let deleted = stmt.execute(params_ref.as_slice())?;
             removed += deleted as u32;
+
+            let cleanup_query = format!(
+                "DELETE FROM favorites WHERE id IN ({}) AND is_favorite = 0 AND id NOT IN (SELECT post_id FROM favorite_collection_items)",
+                placeholders
+            );
+            let mut stmt = tx.prepare(&cleanup_query)?;
+            stmt.execute(rusqlite::params_from_iter(chunk.iter()))?;
         }
 
         tx.commit()?;
@@ -649,7 +750,7 @@ mod tests {
         let collections = store.list_collections().unwrap();
         assert_eq!(collections, vec!["My Collection".to_string()]);
 
-        // Add post to DB so we can assign it to a collection
+        // Post 999 (favorited)
         let post = Post {
             id: 999,
             tags: vec![],
@@ -667,24 +768,61 @@ mod tests {
         };
         store.add_favorite(&post).unwrap();
 
-        // Assign post to collection
+        // Post 888 (non-favorited)
+        let post_non_fav = Post {
+            id: 888,
+            tags: vec![],
+            rating: "s".to_string(),
+            score: None,
+            width: None,
+            height: None,
+            file_size: None,
+            source: "".to_string(),
+            md5: "md5_888".to_string(),
+            preview_url: "".to_string(),
+            sample_url: "".to_string(),
+            file_url: "".to_string(),
+            created_at: "".to_string(),
+        };
+
+        // Assign both posts to collection
         let assigned = store
-            .assign_posts_to_collection(&[999], "My Collection")
+            .assign_posts_to_collection(&[post.clone(), post_non_fav.clone()], "My Collection")
             .unwrap();
-        assert_eq!(assigned, 1);
+        assert_eq!(assigned, 2);
 
-        // List favorites in collection
-        let favs = store.list_favorites(None, Some("My Collection")).unwrap();
-        assert_eq!(favs.len(), 1);
-        assert_eq!(favs[0].id, 999);
+        // List favorites (should only show 999, not 888)
+        let favorites = store.list_favorites(None, None).unwrap();
+        assert_eq!(favorites.len(), 1);
+        assert_eq!(favorites[0].id, 999);
 
-        // Remove post from collection
+        // List collection (should show both 999 and 888)
+        let col_items = store.list_favorites(None, Some("My Collection")).unwrap();
+        assert_eq!(col_items.len(), 2);
+        assert!(col_items.iter().any(|p| p.id == 999));
+        assert!(col_items.iter().any(|p| p.id == 888));
+
+        // Remove favorited post 999 from favorites
+        store.remove_favorite(999).unwrap();
+
+        // Favorites should be empty now
+        let favorites = store.list_favorites(None, None).unwrap();
+        assert_eq!(favorites.len(), 0);
+
+        // Collection should still have both since 999 remains in collection even if unfavorited
+        let col_items = store.list_favorites(None, Some("My Collection")).unwrap();
+        assert_eq!(col_items.len(), 2);
+
+        // Remove post 888 from collection
         let removed = store
-            .remove_posts_from_collection(&[999], "My Collection")
+            .remove_posts_from_collection(&[888], "My Collection")
             .unwrap();
         assert_eq!(removed, 1);
-        let favs = store.list_favorites(None, Some("My Collection")).unwrap();
-        assert_eq!(favs.len(), 0);
+
+        // Collection should have only 999 left
+        let col_items = store.list_favorites(None, Some("My Collection")).unwrap();
+        assert_eq!(col_items.len(), 1);
+        assert_eq!(col_items[0].id, 999);
 
         // Delete collection
         store.delete_collection("My Collection").unwrap();

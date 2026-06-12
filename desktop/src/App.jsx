@@ -220,6 +220,7 @@ function App() {
       // Transitioned from running to not running (finished sync)
       fetchFavorites();
       fetchCollections();
+      fetchMutationProgress();
       if (syncStatus.success) {
         showToast("Sync completed successfully!");
       } else if (syncStatus.error) {
@@ -416,10 +417,25 @@ function App() {
     }
   };
 
-  const assignPostToCollection = async (postId, collectionName) => {
+  const assignPostToCollection = async (post, collectionName) => {
     if (!collectionName) return;
     try {
-      await invoke("assign_posts_to_collection", { name: collectionName, postIds: [postId] });
+      const postPayload = {
+        id: post.id,
+        tags: post.tags || [],
+        rating: post.rating || "",
+        score: post.score || null,
+        width: post.width || null,
+        height: post.height || null,
+        file_size: post.file_size || null,
+        source: post.source || "",
+        md5: post.md5 || "",
+        preview_url: post.preview_url || "",
+        sample_url: post.sample_url || "",
+        file_url: post.file_url || "",
+        created_at: post.created_at || ""
+      };
+      await invoke("assign_posts_to_collection", { name: collectionName, posts: [postPayload] });
       showToast(`Post assigned to ${collectionName}.`);
       setPostCollectionAssign("");
     } catch (err) {
@@ -1253,7 +1269,7 @@ function App() {
                       <button
                         className="btn-primary"
                         style={{ width: "80px", padding: "10px" }}
-                        onClick={() => assignPostToCollection(selectedPost.id, postCollectionAssign)}
+                        onClick={() => assignPostToCollection(selectedPost, postCollectionAssign)}
                       >
                         Assign
                       </button>
