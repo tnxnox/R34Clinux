@@ -426,3 +426,17 @@ pub async fn get_friend_favorites(
     let posts = fetch_friend_favorites(&userId, flare_solver_url, page).await?;
     Ok(posts.into_iter().map(SerializedPost::from).collect())
 }
+
+#[tauri::command]
+pub async fn get_post_by_id(
+    state: tauri::State<'_, AppState>,
+    id: i64,
+) -> Result<Option<SerializedPost>, String> {
+    let s = state.0.settings.load();
+    if !s.has_credentials() {
+        return Err("API credentials are not configured.".to_string());
+    }
+    let client = Rule34Client::new(s.user_id, s.api_key);
+    let post = client.fetch_post_by_id(id).await?;
+    Ok(post.map(SerializedPost::from))
+}

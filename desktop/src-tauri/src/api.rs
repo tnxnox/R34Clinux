@@ -334,6 +334,49 @@ impl Rule34Client {
         Ok(suggestions)
     }
 
+    pub async fn fetch_post_by_id(&self, id: i64) -> Result<Option<Post>, String> {
+        let mut query_params = self.auth_params();
+        let id_str = id.to_string();
+        query_params.extend([
+            ("page", "dapi"),
+            ("s", "post"),
+            ("q", "index"),
+            ("id", &id_str),
+            ("json", "1"),
+        ]);
+
+        let response = self
+            .client
+            .get("https://api.rule34.xxx/index.php")
+            .query(&query_params)
+            .send()
+            .await
+            .map_err(|e| format!("Network request failed: {}", e))?;
+
+        let status = response.status();
+        if status.is_client_error() || status.is_server_error() {
+            return Err(format!("Rule34 API returned HTTP status {}", status));
+        }
+
+        let text = response
+            .text()
+            .await
+            .map_err(|e| format!("Failed to read response body: {}", e))?;
+
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
+        }
+
+        let posts = if trimmed.starts_with('<') {
+            self.parse_xml_posts(trimmed)?
+        } else {
+            self.parse_json_posts(trimmed)?
+        };
+
+        Ok(posts.into_iter().next())
+    }
+
     fn sanitize_autocomplete_val(&self, val: &str) -> String {
         let normalized = val.split_whitespace().collect::<Vec<_>>().join(" ");
         if normalized.is_empty() {

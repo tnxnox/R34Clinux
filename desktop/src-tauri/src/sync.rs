@@ -76,9 +76,7 @@ pub async fn sync_remote_favorites(
         !confirmed
     });
 
-    if confirmed_add_count > 0
-        && crate::mutations::save_pending_mutations(&pending_file).is_ok()
-    {
+    if confirmed_add_count > 0 && crate::mutations::save_pending_mutations(&pending_file).is_ok() {
         debug_logs.push_str(&format!(
             "\nConfirmed {} pending adds on remote rule34 account.",
             confirmed_add_count

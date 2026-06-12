@@ -179,6 +179,7 @@ pub fn run() {
             commands::start_sync,
             commands::get_friend_favorites,
             commands::get_mutation_progress,
+            commands::get_post_by_id,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

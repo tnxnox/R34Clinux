@@ -78,6 +78,32 @@ function App() {
     fetchFavorites();
   }, [selectedCollection]);
 
+  // Fetch full post detail on-demand when selected (useful for scraped friend favorites)
+  useEffect(() => {
+    if (!selectedPost) return;
+
+    const needsDetail =
+      !selectedPost.file_url ||
+      selectedPost.sample_url === selectedPost.preview_url ||
+      !selectedPost.tags ||
+      selectedPost.tags.length === 0;
+
+    if (!needsDetail) return;
+
+    const loadPostDetail = async () => {
+      try {
+        const fullPost = await invoke("get_post_by_id", { id: selectedPost.id });
+        if (fullPost) {
+          setSelectedPost(fullPost);
+        }
+      } catch (err) {
+        console.error("Failed to load post detail:", err);
+      }
+    };
+
+    loadPostDetail();
+  }, [selectedPost?.id]);
+
   // Handle autocomplete search
   useEffect(() => {
     if (searchQuery.trim() === "") {
@@ -1161,7 +1187,7 @@ function App() {
                 )}
 
                 {/* Tags */}
-                {selectedPost.tags && selectedPost.tags.length > 0 && (
+                {selectedPost.tags && selectedPost.tags.length > 0 ? (
                   <div className="info-section">
                     <h3>Associated Tags</h3>
                     <div className="tags-container" style={{ marginTop: "8px" }}>
@@ -1172,7 +1198,14 @@ function App() {
                       ))}
                     </div>
                   </div>
-                )}
+                ) : !selectedPost.file_url ? (
+                  <div className="info-section">
+                    <h3>Associated Tags</h3>
+                    <div style={{ fontStyle: "italic", opacity: 0.6, marginTop: "8px" }}>
+                      Loading full post details...
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
               {/* Actions Footer */}
