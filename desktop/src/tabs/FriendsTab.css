@@ -1,0 +1,27 @@
+/* Friends Panel */
+.friend-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  background: var(--bg-glass);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  margin-bottom: 16px;
+  transition: var(--transition);
+}
+
+.friend-card:hover {
+  border-color: var(--border-glass-active);
+}
+
+.friend-details h4 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.friend-details p {
+  font-size: 12px;
+  color: var(--text-muted);
+}

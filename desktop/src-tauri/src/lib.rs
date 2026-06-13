@@ -1,3 +1,5 @@
+#![allow(clippy::collapsible_if)]
+
 mod api;
 mod commands;
 mod db;
@@ -13,7 +15,7 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let db = db::LocalFavoritesStore::new(None);
@@ -24,7 +26,7 @@ pub fn run() {
             let downloader = downloader::DownloadManager::new(downloader_db);
 
             let initial_progress = if let Ok(pending_file) = mutations::load_pending_mutations() {
-                let count = pending_file.add.len() + pending_file.remove.len();
+                let count = mutations::count_active_mutations(&pending_file);
                 models::MutationProgress {
                     total_mutations: count,
                     completed_mutations: 0,
@@ -49,6 +51,7 @@ pub fn run() {
                 mutation_notify: tokio::sync::Notify::new(),
                 mutation_progress: std::sync::Mutex::new(initial_progress),
                 mutation_streaks: std::sync::Mutex::new(std::collections::HashMap::new()),
+                has_synced_once: std::sync::atomic::AtomicBool::new(false),
             }));
 
             app.manage(state.clone());
@@ -68,7 +71,14 @@ pub fn run() {
                         && !settings.website_username.is_empty()
                         && !settings.website_password.is_empty()
                     {
-                        if let Ok(_lock) = state_for_mutations.0.sync_lock.try_lock() {
+                        if !state_for_mutations
+                            .0
+                            .has_synced_once
+                            .load(std::sync::atomic::Ordering::Relaxed)
+                        {
+                            // Delay processing mutations until the first sync has finished checking remote changes
+                            Ok(Some(5.0))
+                        } else if let Ok(_lock) = state_for_mutations.0.sync_lock.try_lock() {
                             mutations::process_pending_mutations_impl(
                                 &settings,
                                 &state_for_mutations.0.mutation_progress,
@@ -103,55 +113,40 @@ pub fn run() {
                 state.0.mutation_notify.notify_one();
             }
 
-            // Background sync scheduler loop
-            let state_for_sync = state.clone();
+            // Background startup sync task
+            let state_for_startup_sync = state.clone();
             tauri::async_runtime::spawn(async move {
-                let mut minutes_elapsed = 0;
-                loop {
-                    tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
-
-                    let interval = {
-                        let s = state_for_sync.0.settings.load();
-                        s.background_sync_interval_minutes
-                    };
-
-                    if interval > 0 {
-                        minutes_elapsed += 1;
-                        if minutes_elapsed >= interval {
-                            minutes_elapsed = 0;
-                            let settings = state_for_sync.0.settings.load();
-                            if settings.has_credentials() {
-                                if let Ok(_guard) = state_for_sync.0.sync_lock.try_lock() {
-                                    {
-                                        let mut status =
-                                            state_for_sync.0.sync_status.lock().unwrap();
-                                        status.is_running = true;
-                                        status.debug = "Background sync started.".to_string();
-                                        status.error = "".to_string();
-                                        status.success = false;
-                                    }
-
-                                    let mut debug_logs = "Background sync started.".to_string();
-                                    let mut error_logs = "".to_string();
-                                    let res = sync::sync_remote_favorites(
-                                        &settings,
-                                        &state_for_sync.0.db,
-                                        &mut debug_logs,
-                                        &mut error_logs,
-                                        Some(&state_for_sync.0.mutation_progress),
-                                    )
-                                    .await;
-
-                                    let mut status = state_for_sync.0.sync_status.lock().unwrap();
-                                    status.is_running = false;
-                                    status.debug = debug_logs;
-                                    status.error = error_logs;
-                                    status.success = res.is_ok();
-                                }
-                            }
+                // Wait for FlareSolverr to start
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                let settings = state_for_startup_sync.0.settings.load();
+                if settings.has_credentials() {
+                    if let Ok(_lock) = state_for_startup_sync.0.sync_lock.try_lock() {
+                        {
+                            let mut status = state_for_startup_sync.0.sync_status.lock().unwrap();
+                            status.is_running = true;
+                            status.debug = "Startup sync started.".to_string();
+                            status.error = "".to_string();
+                            status.success = false;
                         }
-                    } else {
-                        minutes_elapsed = 0;
+
+                        let mut debug_logs = "Startup sync started.".to_string();
+                        let mut error_logs = "".to_string();
+                        let res = sync::sync_remote_favorites(
+                            &settings,
+                            &state_for_startup_sync.0.db,
+                            &mut debug_logs,
+                            &mut error_logs,
+                            Some(&state_for_startup_sync.0.mutation_progress),
+                            Some(&state_for_startup_sync.0.mutation_streaks),
+                            Some(&state_for_startup_sync.0.has_synced_once),
+                        )
+                        .await;
+
+                        let mut status = state_for_startup_sync.0.sync_status.lock().unwrap();
+                        status.is_running = false;
+                        status.debug = debug_logs;
+                        status.error = error_logs;
+                        status.success = res.is_ok();
                     }
                 }
             });
@@ -181,6 +176,31 @@ pub fn run() {
             commands::get_mutation_progress,
             commands::get_post_by_id,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::ExitRequested { .. } = event {
+            let state = app_handle.state::<commands::AppState>();
+            let settings = state.0.settings.load();
+            if settings.has_credentials() {
+                tauri::async_runtime::block_on(async {
+                    if let Ok(_lock) = state.0.sync_lock.try_lock() {
+                        let mut debug_logs = "Close up sync started.".to_string();
+                        let mut error_logs = "".to_string();
+                        let _ = sync::sync_remote_favorites(
+                            &settings,
+                            &state.0.db,
+                            &mut debug_logs,
+                            &mut error_logs,
+                            Some(&state.0.mutation_progress),
+                            Some(&state.0.mutation_streaks),
+                            Some(&state.0.has_synced_once),
+                        )
+                        .await;
+                    }
+                });
+            }
+        }
+    });
 }

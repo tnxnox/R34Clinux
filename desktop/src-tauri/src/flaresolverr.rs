@@ -662,10 +662,13 @@ impl FlareSolverrFavoritesClient {
         &self,
         limit: i32,
         debug_logs: &mut String,
-    ) -> Result<Vec<Post>, String> {
+    ) -> Result<(Vec<Post>, bool), String> {
         let dapi_posts = self.list_favorites_from_dapi(limit, debug_logs).await;
         match dapi_posts {
-            Ok(posts) if !posts.is_empty() => return Ok(posts),
+            Ok(posts) if !posts.is_empty() => {
+                let is_complete = posts.len() < limit as usize;
+                return Ok((posts, is_complete));
+            }
             _ => {
                 debug_logs.push_str(
                     "\nDAPI favorites returned empty or failed, falling back to HTML scraping...",
@@ -673,7 +676,9 @@ impl FlareSolverrFavoritesClient {
             }
         }
 
-        self.list_favorites_from_html(limit, debug_logs).await
+        let html_posts = self.list_favorites_from_html(limit, debug_logs).await?;
+        let is_complete = html_posts.len() < 50;
+        Ok((html_posts, is_complete))
     }
 
     async fn list_favorites_from_dapi(
@@ -681,9 +686,13 @@ impl FlareSolverrFavoritesClient {
         limit: i32,
         debug_logs: &mut String,
     ) -> Result<Vec<Post>, String> {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
         let url = format!(
-            "https://api.rule34.xxx/index.php?page=dapi&s=favorite&q=index&json=1&user_id={}&api_key={}&limit={}",
-            self.user_id, self.api_key, limit
+            "https://api.rule34.xxx/index.php?page=dapi&s=favorite&q=index&json=1&user_id={}&api_key={}&limit={}&_={}",
+            self.user_id, self.api_key, limit, timestamp
         );
 
         let raw = self
@@ -731,12 +740,19 @@ impl FlareSolverrFavoritesClient {
     ) -> Result<Vec<Post>, String> {
         self.ensure_web_login(debug_logs).await?;
 
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
         let candidates = [
             format!(
-                "https://rule34.xxx/index.php?page=favorites&s=view&id={}",
-                self.user_id
+                "https://rule34.xxx/index.php?page=favorites&s=view&id={}&_={}",
+                self.user_id, timestamp
             ),
-            "https://rule34.xxx/index.php?page=favorites&s=list".to_string(),
+            format!(
+                "https://rule34.xxx/index.php?page=favorites&s=list&_={}",
+                timestamp
+            ),
         ];
 
         let mut seen = std::collections::HashSet::new();
@@ -872,17 +888,13 @@ impl FlareSolverrFavoritesClient {
 
         // Verify it was added
         tokio::time::sleep(Duration::from_millis(500)).await;
-        if self
-            .favorite_exists_in_view(post_id, debug_logs)
-            .await
-            .unwrap_or(false)
-        {
-            Ok(())
-        } else {
-            Err(format!(
+        match self.favorite_exists_in_view(post_id, debug_logs).await {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(format!(
                 "Unable to confirm favorite #{} was added.",
                 post_id
-            ))
+            )),
+            Err(e) => Err(e),
         }
     }
 
@@ -907,23 +919,47 @@ impl FlareSolverrFavoritesClient {
             .await?;
         let body = extract_body_text(&raw);
 
-        if body == "2" {
-            return Err("Web session login expired or invalid.".to_string());
+        let final_body = if body == "2" {
+            debug_logs.push_str(
+                "\nDelete endpoint reported not logged in. Destroying session and retrying...",
+            );
+            self.session.destroy_session().await;
+            {
+                let mut auth = self.web_session_authenticated.lock().unwrap();
+                *auth = false;
+            }
+            self.ensure_web_login(debug_logs).await?;
+
+            let raw_retry = self
+                .session
+                .request_via_solver(&delete_url, Some(&referrer), debug_logs)
+                .await?;
+            let body_retry = extract_body_text(&raw_retry);
+            if body_retry == "2" {
+                return Err("Web session login expired or invalid.".to_string());
+            }
+            body_retry
+        } else {
+            body
+        };
+
+        if self.looks_rate_limited(&final_body) {
+            return Err("Rate limited while deleting favorite.".to_string());
         }
 
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        if !self
-            .favorite_exists_in_view(post_id, debug_logs)
-            .await
-            .unwrap_or(true)
-        {
-            Ok(())
-        } else {
-            Err(format!(
+        if !self.looks_favorites_view_authenticated(&final_body) {
+            return Err("Session expired or not logged in while deleting favorite.".to_string());
+        }
+
+        let tile_ids = self.extract_favorite_tile_ids(&final_body);
+        if tile_ids.contains(&post_id) {
+            return Err(format!(
                 "Unable to confirm favorite #{} was removed.",
                 post_id
-            ))
+            ));
         }
+
+        Ok(())
     }
 
     async fn favorite_exists_in_view(
@@ -931,9 +967,13 @@ impl FlareSolverrFavoritesClient {
         post_id: i64,
         debug_logs: &mut String,
     ) -> Result<bool, String> {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
         let url = format!(
-            "https://rule34.xxx/index.php?page=favorites&s=view&id={}",
-            self.user_id
+            "https://rule34.xxx/index.php?page=favorites&s=view&id={}&_={}",
+            self.user_id, timestamp
         );
         let html = self
             .session

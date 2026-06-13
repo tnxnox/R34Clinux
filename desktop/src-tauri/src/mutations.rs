@@ -56,6 +56,25 @@ pub fn save_pending_mutations(data: &PendingMutationsFile) -> Result<(), String>
     fs::write(&path, content).map_err(|e| format!("Failed to write pending mutations file: {}", e))
 }
 
+pub fn count_active_mutations(file: &PendingMutationsFile) -> usize {
+    let now_ts = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs_f64();
+    let mut count = 0;
+    for m in &file.add {
+        if m.next_attempt_at <= now_ts {
+            count += 1;
+        }
+    }
+    for m in &file.remove {
+        if m.next_attempt_at <= now_ts {
+            count += 1;
+        }
+    }
+    count
+}
+
 pub fn queue_pending_add(post_id: i64, reason: &str) -> Result<(), String> {
     let mut file = load_pending_mutations()?;
 
@@ -168,7 +187,11 @@ pub fn compute_backoff_seconds(_attempts: i32, message: &str, streak: i32) -> f6
 
 pub fn is_rate_limited_error(message: &str) -> bool {
     let lowered = message.to_lowercase();
-    (lowered.contains("429") && lowered.contains("rate")) || lowered.contains("too many requests")
+    lowered.contains("429")
+        || lowered.contains("rate limit")
+        || lowered.contains("rate-limit")
+        || lowered.contains("rate limited")
+        || lowered.contains("too many requests")
 }
 
 pub async fn process_pending_mutations_impl(
@@ -236,7 +259,10 @@ pub async fn process_pending_mutations_impl(
         match solver_client.remove_favorite(m.id, &mut debug_logs).await {
             Ok(_) => {
                 let mut current_file = load_pending_mutations()?;
-                current_file.remove.retain(|item| item.id != m.id);
+                if let Some(item) = current_file.remove.iter_mut().find(|item| item.id == m.id) {
+                    item.attempts = 0;
+                    item.next_attempt_at = now_ts + 600.0;
+                }
                 save_pending_mutations(&current_file)?;
 
                 {
@@ -247,31 +273,44 @@ pub async fn process_pending_mutations_impl(
                 {
                     let mut prog = progress_mutex.lock().unwrap();
                     prog.completed_mutations += 1;
-                    prog.current_pending = current_file.add.len() + current_file.remove.len();
+                    prog.current_pending = count_active_mutations(&current_file);
                 }
             }
             Err(err_msg) => {
-                let streak = {
-                    let mut streaks = streaks_mutex.lock().unwrap();
-                    let s = streaks.entry("remove".to_string()).or_insert(0);
-                    *s += 1;
-                    *s
-                };
-
-                let delay = compute_backoff_seconds(m.attempts + 1, &err_msg, streak);
-                let next_attempt = now_ts + delay;
-
                 let mut current_file = load_pending_mutations()?;
+                let mut discarded = false;
                 if let Some(item) = current_file.remove.iter_mut().find(|item| item.id == m.id) {
                     item.attempts += 1;
-                    item.next_attempt_at = next_attempt;
-                    item.last_error = err_msg.clone();
+                    if item.attempts >= 5 {
+                        discarded = true;
+                    } else {
+                        let streak = {
+                            let mut streaks = streaks_mutex.lock().unwrap();
+                            let s = streaks.entry("remove".to_string()).or_insert(0);
+                            *s += 1;
+                            *s
+                        };
+
+                        let delay = compute_backoff_seconds(item.attempts, &err_msg, streak);
+                        let next_attempt = now_ts + delay;
+                        item.next_attempt_at = next_attempt;
+                        item.last_error = err_msg.clone();
+                        next_retry_remaining =
+                            Some(next_retry_remaining.map_or(delay, |r| r.min(delay)));
+                    }
+                }
+
+                if discarded {
+                    current_file.remove.retain(|item| item.id != m.id);
+                    {
+                        let mut prog = progress_mutex.lock().unwrap();
+                        prog.completed_mutations += 1;
+                        prog.current_pending = count_active_mutations(&current_file);
+                    }
                 }
                 save_pending_mutations(&current_file)?;
 
-                next_retry_remaining = Some(next_retry_remaining.map_or(delay, |r| r.min(delay)));
-
-                if is_rate_limited_error(&err_msg) {
+                if is_rate_limited_error(&err_msg) && !discarded {
                     break;
                 }
             }
@@ -290,7 +329,10 @@ pub async fn process_pending_mutations_impl(
         match solver_client.add_favorite(m.id, &mut debug_logs).await {
             Ok(_) => {
                 let mut current_file = load_pending_mutations()?;
-                current_file.add.retain(|item| item.id != m.id);
+                if let Some(item) = current_file.add.iter_mut().find(|item| item.id == m.id) {
+                    item.attempts = 0;
+                    item.next_attempt_at = now_ts + 600.0;
+                }
                 save_pending_mutations(&current_file)?;
 
                 {
@@ -301,31 +343,44 @@ pub async fn process_pending_mutations_impl(
                 {
                     let mut prog = progress_mutex.lock().unwrap();
                     prog.completed_mutations += 1;
-                    prog.current_pending = current_file.add.len() + current_file.remove.len();
+                    prog.current_pending = count_active_mutations(&current_file);
                 }
             }
             Err(err_msg) => {
-                let streak = {
-                    let mut streaks = streaks_mutex.lock().unwrap();
-                    let s = streaks.entry("add".to_string()).or_insert(0);
-                    *s += 1;
-                    *s
-                };
-
-                let delay = compute_backoff_seconds(m.attempts + 1, &err_msg, streak);
-                let next_attempt = now_ts + delay;
-
                 let mut current_file = load_pending_mutations()?;
+                let mut discarded = false;
                 if let Some(item) = current_file.add.iter_mut().find(|item| item.id == m.id) {
                     item.attempts += 1;
-                    item.next_attempt_at = next_attempt;
-                    item.last_error = err_msg.clone();
+                    if item.attempts >= 5 {
+                        discarded = true;
+                    } else {
+                        let streak = {
+                            let mut streaks = streaks_mutex.lock().unwrap();
+                            let s = streaks.entry("add".to_string()).or_insert(0);
+                            *s += 1;
+                            *s
+                        };
+
+                        let delay = compute_backoff_seconds(item.attempts, &err_msg, streak);
+                        let next_attempt = now_ts + delay;
+                        item.next_attempt_at = next_attempt;
+                        item.last_error = err_msg.clone();
+                        next_retry_remaining =
+                            Some(next_retry_remaining.map_or(delay, |r| r.min(delay)));
+                    }
+                }
+
+                if discarded {
+                    current_file.add.retain(|item| item.id != m.id);
+                    {
+                        let mut prog = progress_mutex.lock().unwrap();
+                        prog.completed_mutations += 1;
+                        prog.current_pending = count_active_mutations(&current_file);
+                    }
                 }
                 save_pending_mutations(&current_file)?;
 
-                next_retry_remaining = Some(next_retry_remaining.map_or(delay, |r| r.min(delay)));
-
-                if is_rate_limited_error(&err_msg) {
+                if is_rate_limited_error(&err_msg) && !discarded {
                     break;
                 }
             }
@@ -340,10 +395,17 @@ pub async fn process_pending_mutations_impl(
 mod tests {
     use super::*;
 
+    static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn test_is_rate_limited_error() {
         assert!(is_rate_limited_error("HTTP 429 Rate Limited"));
         assert!(is_rate_limited_error("too many requests"));
+        assert!(is_rate_limited_error(
+            "Rate limited while checking favorites view."
+        ));
+        assert!(is_rate_limited_error("rate limit exceeded"));
+        assert!(is_rate_limited_error("rate-limited"));
         assert!(!is_rate_limited_error("some normal error"));
     }
 
@@ -364,6 +426,7 @@ mod tests {
 
     #[test]
     fn test_queue_and_persistence() {
+        let _guard = TEST_MUTEX.lock().unwrap();
         let test_path = pending_mutations_path();
         if test_path.exists() {
             fs::remove_file(&test_path).ok();
@@ -395,6 +458,64 @@ mod tests {
         let cleared = load_pending_mutations().unwrap();
         assert_eq!(cleared.add.len(), 0);
         assert_eq!(cleared.remove.len(), 0);
+
+        if test_path.exists() {
+            fs::remove_file(&test_path).ok();
+        }
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn test_discard_failing_mutation() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let test_path = pending_mutations_path();
+        if test_path.exists() {
+            fs::remove_file(&test_path).ok();
+        }
+
+        // Set up dummy app settings with empty website login details so ensure_web_login fails immediately
+        let settings = AppSettings {
+            user_id: "dummy_user".to_string(),
+            api_key: "dummy_key".to_string(),
+            website_username: "".to_string(),
+            website_password: "".to_string(),
+            flaresolverr_url: "http://nonexistent.invalid".to_string(),
+            ..Default::default()
+        };
+
+        // Queue a pending add
+        queue_pending_add(99999, "should fail").unwrap();
+
+        let progress = std::sync::Mutex::new(MutationProgress::default());
+        let streaks = std::sync::Mutex::new(HashMap::new());
+
+        // Process once - should fail and attempts becomes 1
+        let res1 = process_pending_mutations_impl(&settings, &progress, &streaks).await;
+        println!("DEBUG: First process result: {:?}", res1);
+        let file = load_pending_mutations().unwrap();
+        println!("DEBUG: File after first process: {:?}", file);
+        assert_eq!(file.add.len(), 1);
+        assert_eq!(file.add[0].attempts, 1);
+
+        // Modify attempt count manually to 4 so next failure discards it
+        {
+            let mut file = load_pending_mutations().unwrap();
+            file.add[0].attempts = 4;
+            // Clear backoff to allow immediate retry
+            file.add[0].next_attempt_at = 0.0;
+            save_pending_mutations(&file).unwrap();
+        }
+        println!(
+            "DEBUG: File after manual update: {:?}",
+            load_pending_mutations().unwrap()
+        );
+
+        // Process again - should fail and attempts becomes 5, discarding the mutation
+        let res2 = process_pending_mutations_impl(&settings, &progress, &streaks).await;
+        println!("DEBUG: Second process result: {:?}", res2);
+        let file_after = load_pending_mutations().unwrap();
+        println!("DEBUG: File after second process: {:?}", file_after);
+        assert_eq!(file_after.add.len(), 0);
 
         if test_path.exists() {
             fs::remove_file(&test_path).ok();

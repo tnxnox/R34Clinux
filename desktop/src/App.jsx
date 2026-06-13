@@ -1,26 +1,24 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  Search as SearchIcon,
-  Heart,
-  Users,
-  Folder,
-  Settings as SettingsIcon,
-  Download,
-  Play,
-  Pause,
-  X,
-  Loader,
-  Plus,
-  Trash2,
-  ChevronLeft,
-  ChevronRight,
-  Check,
   AlertTriangle,
-  RefreshCw,
-  Info
+  Check,
+  Loader,
+  RefreshCw
 } from "lucide-react";
 import "./App.css";
+
+// Components
+import { Sidebar } from "./components/Sidebar";
+import { DetailModal } from "./components/DetailModal";
+import { MultiSelectToolbar } from "./components/MultiSelectToolbar";
+
+// Tabs
+import { SearchTab } from "./tabs/SearchTab";
+import { FavoritesTab } from "./tabs/FavoritesTab";
+import { CollectionsTab } from "./tabs/CollectionsTab";
+import { FriendsTab } from "./tabs/FriendsTab";
+import { SettingsTab } from "./tabs/SettingsTab";
 
 function App() {
 
@@ -59,65 +57,12 @@ function App() {
 
   // Detail view state
   const [selectedPost, setSelectedPost] = useState(null);
-  const [postCollectionAssign, setPostCollectionAssign] = useState("");
 
-  // Zoom & Pan state for Detail Modal
-  const [zoomScale, setZoomScale] = useState(1);
-  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-
-  // Reset zoom & pan when post changes or modal closes
+  // Selection state for bulk operations
+  const [selectedPosts, setSelectedPosts] = useState([]);
   useEffect(() => {
-    setZoomScale(1);
-    setPanOffset({ x: 0, y: 0 });
-    setIsDragging(false);
-  }, [selectedPost?.id]);
-
-  const handleWheel = (e) => {
-    if (e.ctrlKey) {
-      e.preventDefault();
-      const delta = e.deltaY < 0 ? 0.25 : -0.25;
-      setZoomScale(prev => {
-        const next = Math.min(Math.max(prev + delta, 1), 8);
-        if (next === 1) {
-          setPanOffset({ x: 0, y: 0 });
-        }
-        return next;
-      });
-    }
-  };
-
-  const handleMouseDown = (e) => {
-    if (zoomScale > 1 && e.button === 0) { // Left click only
-      e.preventDefault();
-      setIsDragging(true);
-      setDragStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
-    }
-  };
-
-  const handleMouseMove = (e) => {
-    if (isDragging && zoomScale > 1) {
-      e.preventDefault();
-      setPanOffset({
-        x: e.clientX - dragStart.x,
-        y: e.clientY - dragStart.y
-      });
-    }
-  };
-
-  const handleMouseUp = () => {
-    setIsDragging(false);
-  };
-
-  const handleMouseLeave = () => {
-    setIsDragging(false);
-  };
-
-  const handleDoubleClick = () => {
-    setZoomScale(1);
-    setPanOffset({ x: 0, y: 0 });
-  };
+    setSelectedPosts([]);
+  }, [activeTab]);
 
   // Autocomplete ref
   const autocompleteRef = useRef(null);
@@ -170,7 +115,6 @@ function App() {
     }
 
     const delayDebounce = setTimeout(async () => {
-      // Get the last tag typed (separated by spaces)
       const tags = searchQuery.trim().split(/\s+/);
       const lastTag = tags[tags.length - 1];
       if (lastTag.length < 2) {
@@ -217,7 +161,6 @@ function App() {
   const prevIsRunningRef = useRef(false);
   useEffect(() => {
     if (prevIsRunningRef.current && !syncStatus.is_running) {
-      // Transitioned from running to not running (finished sync)
       fetchFavorites();
       fetchCollections();
       fetchMutationProgress();
@@ -437,7 +380,6 @@ function App() {
       };
       await invoke("assign_posts_to_collection", { name: collectionName, posts: [postPayload] });
       showToast(`Post assigned to ${collectionName}.`);
-      setPostCollectionAssign("");
     } catch (err) {
       showToast("Error assigning post: " + err, "error");
     }
@@ -487,13 +429,12 @@ function App() {
 
   const handleSuggestionClick = (value) => {
     const tags = searchQuery.trim().split(/\s+/);
-    tags[tags.length - 1] = value; // Replace the last prefix with full tag
+    tags[tags.length - 1] = value;
     setSearchQuery(tags.join(" ") + " ");
     setSuggestions([]);
   };
 
   const handleTagClick = (tag) => {
-    // Append tag to search query
     if (!searchQuery.includes(tag)) {
       setSearchQuery(prev => (prev.trim() + " " + tag + " ").replace(/\s+/g, " "));
       setActiveTab("search");
@@ -501,48 +442,159 @@ function App() {
     }
   };
 
-  const renderMedia = (post, isDetailView = false) => {
-    // For grid cards, we want the tiny preview_url (thumbnail)
-    // For the detail modal, we want the high-res file_url or sample_url
-    const url = isDetailView
-      ? (post.file_url || post.sample_url || post.preview_url)
-      : (post.preview_url || post.sample_url || post.file_url);
-    const isVideo = url.endsWith(".mp4") || url.endsWith(".webm");
-
-    if (isVideo) {
-      return (
-        <video
-          src={url}
-          className={isDetailView ? "modal-media" : "card-thumbnail"}
-          controls={isDetailView}
-          autoPlay={isDetailView}
-          loop
-          muted={!isDetailView}
-        />
-      );
+  const handleAddBlacklistTag = (tag) => {
+    if (!settings) return;
+    const currentTags = settings.blacklisted_tags || [];
+    if (!currentTags.includes(tag)) {
+      setSettings(prev => ({
+        ...prev,
+        blacklisted_tags: [...currentTags, tag]
+      }));
     }
+  };
 
-    return (
-      <img
-        src={url}
-        alt="media"
-        className={isDetailView ? "modal-media" : "card-thumbnail"}
-        loading="lazy"
-        draggable={false}
-        style={isDetailView ? {
-          transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomScale})`,
-          cursor: zoomScale > 1 ? (isDragging ? "grabbing" : "grab") : "default",
-          transition: isDragging ? "none" : "transform 0.1s ease-out",
-          transformOrigin: "center center"
-        } : {}}
-        onWheel={isDetailView ? handleWheel : undefined}
-        onMouseDown={isDetailView ? handleMouseDown : undefined}
-        onMouseMove={isDetailView ? handleMouseMove : undefined}
-        onMouseUp={isDetailView ? handleMouseUp : undefined}
-        onMouseLeave={isDetailView ? handleMouseLeave : undefined}
-        onDoubleClick={isDetailView ? handleDoubleClick : undefined}
-      />
-    );
+  const handleRemoveBlacklistTag = (tag) => {
+    if (!settings) return;
+    const currentTags = settings.blacklisted_tags || [];
+    setSettings(prev => ({
+      ...prev,
+      blacklisted_tags: currentTags.filter(t => t !== tag)
+    }));
+  };
+
+  const handleSelectToggle = (postId) => {
+    setSelectedPosts(prev => {
+      const exists = prev.some(p => p.id === postId);
+      if (exists) {
+        return prev.filter(p => p.id !== postId);
+      } else {
+        const post = searchResults.find(p => p.id === postId) || favorites.find(p => p.id === postId) || friendFavorites.find(p => p.id === postId);
+        if (post) {
+          return [...prev, post];
+        }
+        return prev;
+      }
+    });
+  };
+
+  const handleBulkFavorite = async (posts, setFav) => {
+    showToast(`${setFav ? "Favoriting" : "Unfavoriting"} ${posts.length} posts...`);
+    let succeeded = 0;
+    let failed = 0;
+    
+    for (const post of posts) {
+      try {
+        if (setFav) {
+          const isAlreadyFav = favorites.some(f => f.id === post.id);
+          if (!isAlreadyFav) {
+            const postPayload = {
+              id: post.id,
+              tags: post.tags || [],
+              rating: post.rating || "",
+              score: post.score || null,
+              width: post.width || null,
+              height: post.height || null,
+              file_size: post.file_size || null,
+              source: post.source || "",
+              md5: post.md5 || "",
+              preview_url: post.preview_url || "",
+              sample_url: post.sample_url || "",
+              file_url: post.file_url || "",
+              created_at: post.created_at || ""
+            };
+            await invoke("add_favorite", { post: postPayload });
+            setFavorites(prev => [post, ...prev]);
+          }
+        } else {
+          await invoke("remove_favorite", { postId: post.id });
+          setFavorites(prev => prev.filter(f => f.id !== post.id));
+        }
+        succeeded++;
+      } catch (err) {
+        console.error("Bulk favorite failed for post id", post.id, err);
+        failed++;
+      }
+    }
+    
+    fetchMutationProgress();
+    setSelectedPosts([]);
+    
+    if (failed === 0) {
+      showToast(`Successfully processed ${succeeded} posts.`);
+    } else {
+      showToast(`Processed posts: ${succeeded} succeeded, ${failed} failed.`, "error");
+    }
+  };
+
+  const handleBulkDownload = async (posts) => {
+    showToast(`Downloading ${posts.length} posts...`);
+    let downloadedCount = 0;
+    let skippedCount = 0;
+    let failedCount = 0;
+    
+    for (const post of posts) {
+      try {
+        const postPayload = {
+          id: post.id,
+          tags: post.tags || [],
+          rating: post.rating || "",
+          score: post.score || null,
+          width: post.width || null,
+          height: post.height || null,
+          file_size: post.file_size || null,
+          source: post.source || "",
+          md5: post.md5 || "",
+          preview_url: post.preview_url || "",
+          sample_url: post.sample_url || "",
+          file_url: post.file_url || "",
+          created_at: post.created_at || ""
+        };
+        const data = await invoke("download_post", { post: postPayload });
+        if (data.status === "downloaded") {
+          downloadedCount++;
+        } else {
+          skippedCount++;
+        }
+      } catch (err) {
+        console.error("Download failed for post id", post.id, err);
+        failedCount++;
+      }
+    }
+    
+    setSelectedPosts([]);
+    if (failedCount === 0) {
+      showToast(`Bulk download complete: ${downloadedCount} downloaded, ${skippedCount} skipped.`);
+    } else {
+      showToast(`Bulk download completed with errors: ${downloadedCount} downloaded, ${failedCount} failed.`, "error");
+    }
+  };
+
+  const handleBulkAssignCollection = async (posts, collectionName) => {
+    if (!collectionName) return;
+    showToast(`Assigning ${posts.length} posts to collection "${collectionName}"...`);
+    try {
+      const postPayloads = posts.map(post => ({
+        id: post.id,
+        tags: post.tags || [],
+        rating: post.rating || "",
+        score: post.score || null,
+        width: post.width || null,
+        height: post.height || null,
+        file_size: post.file_size || null,
+        source: post.source || "",
+        md5: post.md5 || "",
+        preview_url: post.preview_url || "",
+        sample_url: post.sample_url || "",
+        file_url: post.file_url || "",
+        created_at: post.created_at || ""
+      }));
+      await invoke("assign_posts_to_collection", { name: collectionName, posts: postPayloads });
+      showToast(`Successfully assigned ${posts.length} posts to collection "${collectionName}".`);
+      setSelectedPosts([]);
+      fetchFavorites();
+    } catch (err) {
+      showToast("Error assigning posts: " + err, "error");
+    }
   };
 
   // Setup Wizard if credentials missing
@@ -613,52 +665,11 @@ function App() {
       )}
 
       {/* Sidebar Navigation */}
-      <aside className="sidebar">
-        <div className="logo-container">
-          <div className="logo-icon">R</div>
-          <span className="logo-text">R34 Client</span>
-        </div>
-
-        <nav className="nav-links">
-          <div
-            className={`nav-item ${activeTab === "search" ? "active" : ""}`}
-            onClick={() => { setActiveTab("search"); setActiveFriend(null); }}
-          >
-            <SearchIcon />
-            Search Gallery
-          </div>
-          <div
-            className={`nav-item ${activeTab === "favorites" ? "active" : ""}`}
-            onClick={() => { setActiveTab("favorites"); setActiveFriend(null); }}
-          >
-            <Heart />
-            Favorites
-          </div>
-          <div
-            className={`nav-item ${activeTab === "collections" ? "active" : ""}`}
-            onClick={() => { setActiveTab("collections"); setActiveFriend(null); }}
-          >
-            <Folder />
-            Collections
-          </div>
-          <div
-            className={`nav-item ${activeTab === "friends" ? "active" : ""}`}
-            onClick={() => { setActiveTab("friends"); }}
-          >
-            <Users />
-            Friends
-          </div>
-          <div
-            className={`nav-item ${activeTab === "settings" ? "active" : ""}`}
-            onClick={() => { setActiveTab("settings"); setActiveFriend(null); }}
-          >
-            <SettingsIcon />
-            Settings
-          </div>
-        </nav>
-
-
-      </aside>
+      <Sidebar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        setActiveFriend={setActiveFriend}
+      />
 
       {/* Main Panel */}
       <main className="main-content">
@@ -722,601 +733,116 @@ function App() {
             </div>
           )}
 
-          {/* Tab: SEARCH */}
+          {/* Tab Content */}
           {activeTab === "search" && !activeFriend && (
-            <div>
-              <div className="search-wrapper" ref={autocompleteRef}>
-                <div className="search-input-container">
-                  <SearchIcon className="search-icon-inside" size={18} />
-                  <input
-                    type="text"
-                    className="search-input"
-                    placeholder="Search tags (e.g. solo, rating:safe, score:>10)..."
-                    value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && handleSearch(0)}
-                  />
-                  {suggestions.length > 0 && (
-                    <div className="autocomplete-dropdown">
-                      {suggestions.map((s, idx) => (
-                        <div
-                          key={idx}
-                          className="autocomplete-item"
-                          onClick={() => handleSuggestionClick(s.value)}
-                        >
-                          <span>{s.value}</span>
-                          <span className="tag-count">{s.count ? s.count.toLocaleString() : ""}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <button className="btn-primary" style={{ width: "120px" }} onClick={() => handleSearch(0)}>
-                  Search
-                </button>
-              </div>
-
-              {loading ? (
-                <div className="loader-container">
-                  <div className="spinner"></div>
-                  <p>Searching rule34 database...</p>
-                </div>
-              ) : searchResults.length > 0 ? (
-                <div>
-                  <div className="media-grid">
-                    {searchResults.map((post) => {
-                      const isFav = favorites.some(f => f.id === post.id);
-                      return (
-                        <div key={post.id} className="post-card" onClick={() => setSelectedPost(post)}>
-                          <div className="card-thumbnail-container">
-                            {renderMedia(post)}
-                            {post.file_url.endsWith(".mp4") && (
-                              <span className="video-badge">
-                                <Play size={10} fill="white" /> VIDEO
-                              </span>
-                            )}
-                            <span className="rating-badge">{post.rating}</span>
-                          </div>
-                          <div className="card-info">
-                            <span className="card-score">Score: {post.score || 0}</span>
-                            <div className="card-actions" onClick={e => e.stopPropagation()}>
-                              <button
-                                className={`icon-btn favorite ${isFav ? "active" : ""}`}
-                                onClick={() => toggleFavorite(post)}
-                              >
-                                <Heart size={16} fill={isFav ? "currentColor" : "none"} />
-                              </button>
-                              <button className="icon-btn" onClick={() => triggerDownload(post)}>
-                                <Download size={16} />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div className="pagination">
-                    <button
-                      className="btn-secondary"
-                      onClick={() => handleSearch(currentPage - 1)}
-                      disabled={currentPage === 0}
-                    >
-                      <ChevronLeft size={16} /> Previous
-                    </button>
-                    <span className="page-num">Page {currentPage + 1}</span>
-                    <button
-                      className="btn-secondary"
-                      onClick={() => handleSearch(currentPage + 1)}
-                      disabled={!hasMore}
-                    >
-                      Next <ChevronRight size={16} />
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div style={{ textAlign: "center", color: "var(--text-muted)", marginTop: "80px" }}>
-                  <SearchIcon size={48} style={{ marginBottom: "16px" }} />
-                  <p>Enter tags above and press Enter to search rule34.xxx database.</p>
-                </div>
-              )}
-            </div>
+            <SearchTab
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+              suggestions={suggestions}
+              searchResults={searchResults}
+              currentPage={currentPage}
+              hasMore={hasMore}
+              loading={loading}
+              favorites={favorites}
+              handleSearch={handleSearch}
+              toggleFavorite={toggleFavorite}
+              triggerDownload={triggerDownload}
+              setSelectedPost={setSelectedPost}
+              handleSuggestionClick={handleSuggestionClick}
+              autocompleteRef={autocompleteRef}
+              selectedPostIds={selectedPosts.map(p => p.id)}
+              onSelectToggle={handleSelectToggle}
+            />
           )}
 
-          {/* Tab: FAVORITES */}
           {activeTab === "favorites" && !activeFriend && (
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "16px", marginBottom: "30px" }}>
-                <select
-                  className="form-input"
-                  style={{ width: "250px" }}
-                  value={selectedCollection}
-                  onChange={e => setSelectedCollection(e.target.value)}
-                >
-                  <option value="">All Collections</option>
-                  {collections.map(c => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-
-                <button
-                  className="btn-secondary"
-                  style={{ width: "160px", justifyContent: "center" }}
-                  onClick={triggerSync}
-                  disabled={syncStatus.is_running}
-                >
-                  {syncStatus.is_running ? (
-                    <>
-                      <Loader className="spinner" size={16} />
-                      Syncing...
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw size={16} />
-                      Sync Account
-                    </>
-                  )}
-                </button>
-              </div>
-
-              {favorites.length > 0 ? (
-                <div className="media-grid">
-                  {favorites.map((post) => (
-                      <div key={post.id} className="post-card" onClick={() => setSelectedPost(post)}>
-                        <div className="card-thumbnail-container">
-                          {renderMedia(post)}
-                          {post.file_url.endsWith(".mp4") && (
-                            <span className="video-badge">
-                              <Play size={10} fill="white" /> VIDEO
-                            </span>
-                          )}
-                          <span className="rating-badge">{post.rating}</span>
-                        </div>
-                        <div className="card-info">
-                          <span className="card-score">Score: {post.score || 0}</span>
-                          <div className="card-actions" onClick={e => e.stopPropagation()}>
-                            <button
-                              className="icon-btn favorite active"
-                              onClick={() => toggleFavorite(post)}
-                            >
-                              <Heart size={16} fill="currentColor" />
-                            </button>
-                            <button className="icon-btn" onClick={() => triggerDownload(post)}>
-                              <Download size={16} />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              ) : (
-                <div style={{ textAlign: "center", color: "var(--text-muted)", marginTop: "80px" }}>
-                  <Heart size={48} style={{ marginBottom: "16px" }} />
-                  <p>You haven't saved any favorites to your local database yet.</p>
-                </div>
-              )}
-            </div>
+            <FavoritesTab
+              selectedCollection={selectedCollection}
+              setSelectedCollection={setSelectedCollection}
+              collections={collections}
+              favorites={favorites}
+              syncStatus={syncStatus}
+              triggerSync={triggerSync}
+              toggleFavorite={toggleFavorite}
+              triggerDownload={triggerDownload}
+              setSelectedPost={setSelectedPost}
+              selectedPostIds={selectedPosts.map(p => p.id)}
+              onSelectToggle={handleSelectToggle}
+            />
           )}
 
-          {/* Tab: COLLECTIONS */}
           {activeTab === "collections" && !activeFriend && (
-            <div className="collections-panel">
-              <div className="create-collection-box">
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="New collection name..."
-                  value={newCollectionName}
-                  onChange={e => setNewCollectionName(e.target.value)}
-                />
-                <button className="btn-primary" style={{ width: "160px" }} onClick={createCollection}>
-                  <Plus size={16} style={{ marginRight: "6px" }} /> Create
-                </button>
-              </div>
-
-              {collections.length > 0 ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                  {collections.map(name => (
-                    <div key={name} className="collection-row">
-                      <span style={{ fontWeight: "600" }}>{name}</span>
-                      <button className="icon-btn" onClick={() => deleteCollection(name)}>
-                        <Trash2 size={16} className="text-danger" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div style={{ textAlign: "center", color: "var(--text-muted)", marginTop: "60px" }}>
-                  <Folder size={48} style={{ marginBottom: "16px" }} />
-                  <p>No collections created. Group your local favorites into folders.</p>
-                </div>
-              )}
-            </div>
+            <CollectionsTab
+              newCollectionName={newCollectionName}
+              setNewCollectionName={setNewCollectionName}
+              createCollection={createCollection}
+              collections={collections}
+              deleteCollection={deleteCollection}
+            />
           )}
 
-          {/* Tab: FRIENDS */}
-          {activeTab === "friends" && !activeFriend && (
-            <div>
-              <div className="cred-card" style={{ width: "100%", textAlign: "left", marginBottom: "30px" }}>
-                <h3 style={{ fontSize: "16px", marginBottom: "16px" }}>Add Friend Account</h3>
-                <div style={{ display: "flex", gap: "16px" }}>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="Friend User ID"
-                    value={friendUserId}
-                    onChange={e => setFriendUserId(e.target.value)}
-                  />
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="Display Name"
-                    value={friendDisplayName}
-                    onChange={e => setFriendDisplayName(e.target.value)}
-                  />
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="Notes"
-                    value={friendNotes}
-                    onChange={e => setFriendNotes(e.target.value)}
-                  />
-                  <button className="btn-primary" style={{ width: "150px" }} onClick={addFriend}>
-                    Add Friend
-                  </button>
-                </div>
-              </div>
-
-              {friends.length > 0 ? (
-                <div>
-                  {friends.map(friend => (
-                    <div key={friend.user_id} className="friend-card">
-                      <div className="friend-details">
-                        <h4>{friend.display_name}</h4>
-                        <p>User ID: {friend.user_id} {friend.notes ? `• ${friend.notes}` : ""}</p>
-                      </div>
-                      <div style={{ display: "flex", gap: "12px" }}>
-                        <button
-                          className="btn-secondary"
-                          onClick={() => {
-                            setActiveFriend(friend);
-                            fetchFriendFavs(friend.user_id, 0);
-                          }}
-                        >
-                          View Favorites
-                        </button>
-                        <button className="icon-btn" onClick={() => removeFriend(friend.user_id)}>
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div style={{ textAlign: "center", color: "var(--text-muted)", marginTop: "60px" }}>
-                  <Users size={48} style={{ marginBottom: "16px" }} />
-                  <p>You haven't added any friend user accounts yet.</p>
-                </div>
-              )}
-            </div>
+          {activeTab === "friends" && (
+            <FriendsTab
+              activeFriend={activeFriend}
+              setActiveFriend={setActiveFriend}
+              friendUserId={friendUserId}
+              setFriendUserId={setFriendUserId}
+              friendDisplayName={friendDisplayName}
+              setFriendDisplayName={setFriendDisplayName}
+              friendNotes={friendNotes}
+              setFriendNotes={setFriendNotes}
+              addFriend={addFriend}
+              friends={friends}
+              removeFriend={removeFriend}
+              loadingFriendFavs={loadingFriendFavs}
+              friendFavorites={friendFavorites}
+              setFriendFavorites={setFriendFavorites}
+              friendPage={friendPage}
+              fetchFriendFavs={fetchFriendFavs}
+              favorites={favorites}
+              toggleFavorite={toggleFavorite}
+              setSelectedPost={setSelectedPost}
+            />
           )}
 
-          {/* View Friend Favorites Page */}
-          {activeFriend && (
-            <div>
-              <div style={{ marginBottom: "20px" }}>
-                <button className="btn-secondary" onClick={() => { setActiveFriend(null); setFriendFavorites([]); }}>
-                  &larr; Back to Friends
-                </button>
-              </div>
-
-              {loadingFriendFavs ? (
-                <div className="loader-container">
-                  <div className="spinner"></div>
-                  <p>Scraping public favorites page (using FlareSolverr if enabled)...</p>
-                </div>
-              ) : friendFavorites.length > 0 ? (
-                <div>
-                  <div className="media-grid">
-                    {friendFavorites.map((post) => {
-                      const isFav = favorites.some(f => f.id === post.id);
-                      return (
-                        <div key={post.id} className="post-card" onClick={() => setSelectedPost(post)}>
-                          <div className="card-thumbnail-container">
-                            <img src={post.preview_url} alt="media preview" className="card-thumbnail" loading="lazy" />
-                            <span className="rating-badge">Public</span>
-                          </div>
-                          <div className="card-info">
-                            <span className="card-score">ID: {post.id}</span>
-                            <div className="card-actions" onClick={e => e.stopPropagation()}>
-                              <button
-                                className={`icon-btn favorite ${isFav ? "active" : ""}`}
-                                onClick={() => toggleFavorite(post)}
-                              >
-                                <Heart size={16} fill={isFav ? "currentColor" : "none"} />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div className="pagination">
-                    <button
-                      className="btn-secondary"
-                      onClick={() => fetchFriendFavs(activeFriend.user_id, friendPage - 1)}
-                      disabled={friendPage === 0}
-                    >
-                      <ChevronLeft size={16} /> Previous
-                    </button>
-                    <span className="page-num">Page {friendPage + 1}</span>
-                    <button
-                      className="btn-secondary"
-                      onClick={() => fetchFriendFavs(activeFriend.user_id, friendPage + 1)}
-                    >
-                      Next <ChevronRight size={16} />
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div style={{ textAlign: "center", color: "var(--text-muted)", marginTop: "60px" }}>
-                  <Heart size={48} style={{ marginBottom: "16px" }} />
-                  <p>No public favorites found for this friend or request blocked by Cloudflare.</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Tab: SETTINGS */}
           {activeTab === "settings" && settings && (
-            <div style={{ maxWidth: "600px" }}>
-              <div className="cred-card" style={{ width: "100%", textAlign: "left", marginBottom: "30px" }}>
-                <h3 style={{ fontSize: "16px", marginBottom: "20px" }}>Rule34 API Credentials</h3>
-                <div className="form-group">
-                  <label>User ID</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={settings.user_id}
-                    onChange={e => setSettings(p => ({ ...p, user_id: e.target.value }))}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>API Key</label>
-                  <input
-                    type="password"
-                    className="form-input"
-                    value={settings.api_key}
-                    onChange={e => setSettings(p => ({ ...p, api_key: e.target.value }))}
-                  />
-                </div>
-              </div>
-
-              <div className="cred-card" style={{ width: "100%", textAlign: "left", marginBottom: "30px" }}>
-                <h3 style={{ fontSize: "16px", marginBottom: "20px" }}>Rule34 Website Login (for Sync)</h3>
-                <div className="form-group">
-                  <label>Username</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={settings.website_username}
-                    onChange={e => setSettings(p => ({ ...p, website_username: e.target.value }))}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Password</label>
-                  <input
-                    type="password"
-                    className="form-input"
-                    value={settings.website_password}
-                    onChange={e => setSettings(p => ({ ...p, website_password: e.target.value }))}
-                  />
-                </div>
-              </div>
-
-              <div className="cred-card" style={{ width: "100%", textAlign: "left", marginBottom: "30px" }}>
-                <h3 style={{ fontSize: "16px", marginBottom: "20px" }}>Download Preferences</h3>
-                <div className="form-group">
-                  <label>Download Directory</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={settings.download_directory}
-                    onChange={e => setSettings(p => ({ ...p, download_directory: e.target.value }))}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Naming Template (e.g. &#123;id&#125; or &#123;md5&#125;)</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={settings.download_naming_template}
-                    onChange={e => setSettings(p => ({ ...p, download_naming_template: e.target.value }))}
-                  />
-                </div>
-                <div style={{ display: "flex", gap: "20px", marginTop: "16px" }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "13px" }}>
-                    <input
-                      type="checkbox"
-                      checked={settings.download_sidecar_enabled}
-                      onChange={e => setSettings(p => ({ ...p, download_sidecar_enabled: e.target.checked }))}
-                    />
-                    Save JSON/TXT tags sidecar
-                  </label>
-                  <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "13px" }}>
-                    <input
-                      type="checkbox"
-                      checked={settings.download_use_sample}
-                      onChange={e => setSettings(p => ({ ...p, download_use_sample: e.target.checked }))}
-                    />
-                    Use compressed sample files
-                  </label>
-                </div>
-              </div>
-
-              <div className="cred-card" style={{ width: "100%", textAlign: "left", marginBottom: "30px" }}>
-                <h3 style={{ fontSize: "16px", marginBottom: "20px" }}>FlareSolverr (Cloudflare Bypass)</h3>
-                <div style={{ marginBottom: "16px" }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "13px" }}>
-                    <input
-                      type="checkbox"
-                      checked={settings.flaresolverr_enabled}
-                      onChange={e => setSettings(p => ({ ...p, flaresolverr_enabled: e.target.checked }))}
-                    />
-                    Enable FlareSolverr Proxy
-                  </label>
-                </div>
-                <div className="form-group">
-                  <label>FlareSolverr URL</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={settings.flaresolverr_url}
-                    onChange={e => setSettings(p => ({ ...p, flaresolverr_url: e.target.value }))}
-                  />
-                </div>
-              </div>
-
-              {/* Sync Status Log */}
-              <div className="cred-card" style={{ width: "100%", textAlign: "left", marginBottom: "30px", background: "rgba(15,17,32,0.6)" }}>
-                <h3 style={{ fontSize: "16px", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
-                  <RefreshCw size={16} /> Favorites Sync Logs
-                </h3>
-                {syncStatus.debug || syncStatus.error ? (
-                  <div style={{ background: "rgba(0,0,0,0.3)", padding: "12px", borderRadius: "8px", maxHeight: "200px", overflowY: "auto", fontFamily: "monospace", fontSize: "12px" }}>
-                    {syncStatus.error && (
-                      <div style={{ color: "#f87171", marginBottom: "8px", fontWeight: "bold" }}>
-                        Error: {syncStatus.error}
-                      </div>
-                    )}
-                    {syncStatus.debug.split("\n").map((line, idx) => (
-                      <div key={idx} style={{ color: line.includes("[Outcome]") || line.includes("completed") ? "#34d399" : "var(--text-secondary)" }}>
-                        {line}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p style={{ fontSize: "13px", color: "var(--text-muted)" }}>No sync operation has run in this session yet.</p>
-                )}
-              </div>
-
-              <button className="btn-primary" onClick={() => saveSettings(settings)}>
-                Save All Settings
-              </button>
-            </div>
+            <SettingsTab
+              settings={settings}
+              setSettings={setSettings}
+              syncStatus={syncStatus}
+              saveSettings={saveSettings}
+              blacklistedTags={settings.blacklisted_tags || []}
+              onAddBlacklistTag={handleAddBlacklistTag}
+              onRemoveBlacklistTag={handleRemoveBlacklistTag}
+            />
           )}
         </div>
       </main>
 
       {/* Detail view Modal */}
       {selectedPost && (
-        <div className="modal-overlay" onClick={() => setSelectedPost(null)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <div className="modal-media-pane">
-              {renderMedia(selectedPost, true)}
-            </div>
-
-            <div className="modal-info-pane">
-              <div className="modal-info-header">
-                <span className="modal-title">Post #{selectedPost.id}</span>
-                <button className="icon-btn" onClick={() => setSelectedPost(null)}>
-                  <X size={20} />
-                </button>
-              </div>
-
-              <div className="modal-body-scroll">
-                {/* Stats */}
-                <div className="info-section">
-                  <h3>Metadata</h3>
-                  <div className="metadata-grid">
-                    <div className="metadata-item">
-                      <div className="metadata-label">Score</div>
-                      <div style={{ fontWeight: "600" }}>{selectedPost.score || 0}</div>
-                    </div>
-                    <div className="metadata-item">
-                      <div className="metadata-label">Rating</div>
-                      <div style={{ fontWeight: "600", textTransform: "capitalize" }}>{selectedPost.rating}</div>
-                    </div>
-                    <div className="metadata-item">
-                      <div className="metadata-label">Dimensions</div>
-                      <div style={{ fontWeight: "600" }}>{selectedPost.dimensions || "Unknown"}</div>
-                    </div>
-                    <div className="metadata-item">
-                      <div className="metadata-label">Date</div>
-                      <div style={{ fontWeight: "600" }}>
-                        {selectedPost.created_at ? new Date(parseInt(selectedPost.created_at) * 1000).toLocaleDateString() : "Unknown"}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Collections assignments */}
-                {collections.length > 0 && (
-                  <div className="info-section">
-                    <h3>Assign to Collection</h3>
-                    <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
-                      <select
-                        className="form-input"
-                        value={postCollectionAssign}
-                        onChange={e => setPostCollectionAssign(e.target.value)}
-                      >
-                        <option value="">Select collection...</option>
-                        {collections.map(c => (
-                          <option key={c} value={c}>{c}</option>
-                        ))}
-                      </select>
-                      <button
-                        className="btn-primary"
-                        style={{ width: "80px", padding: "10px" }}
-                        onClick={() => assignPostToCollection(selectedPost, postCollectionAssign)}
-                      >
-                        Assign
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Tags */}
-                {selectedPost.tags && selectedPost.tags.length > 0 ? (
-                  <div className="info-section">
-                    <h3>Associated Tags</h3>
-                    <div className="tags-container" style={{ marginTop: "8px" }}>
-                      {selectedPost.tags.map(tag => (
-                        <span key={tag} className="tag-badge" onClick={() => { handleTagClick(tag); setSelectedPost(null); }}>
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ) : !selectedPost.file_url ? (
-                  <div className="info-section">
-                    <h3>Associated Tags</h3>
-                    <div style={{ fontStyle: "italic", opacity: 0.6, marginTop: "8px" }}>
-                      Loading full post details...
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-
-              {/* Actions Footer */}
-              <div className="modal-actions">
-                <button
-                  className={`btn-action fav ${favorites.some(f => f.id === selectedPost.id) ? "active" : ""}`}
-                  onClick={() => toggleFavorite(selectedPost)}
-                >
-                  <Heart size={16} fill={favorites.some(f => f.id === selectedPost.id) ? "currentColor" : "none"} />
-                  Favorite
-                </button>
-                <button className="btn-action download" onClick={() => triggerDownload(selectedPost)}>
-                  <Download size={16} />
-                  Download
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <DetailModal
+          post={selectedPost}
+          collections={collections}
+          favorites={favorites}
+          onClose={() => setSelectedPost(null)}
+          onFavoriteToggle={toggleFavorite}
+          onDownload={triggerDownload}
+          onAssignCollection={assignPostToCollection}
+          onTagClick={handleTagClick}
+        />
       )}
+
+      {/* Bulk Operations Toolbar */}
+      <MultiSelectToolbar
+        selectedPosts={selectedPosts}
+        activeTab={activeTab}
+        collections={collections}
+        onClear={() => setSelectedPosts([])}
+        onBulkFavorite={handleBulkFavorite}
+        onBulkDownload={handleBulkDownload}
+        onBulkAssignCollection={handleBulkAssignCollection}
+      />
     </div>
   );
 }

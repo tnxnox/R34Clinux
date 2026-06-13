@@ -10,6 +10,8 @@ pub async fn sync_remote_favorites(
     debug_logs: &mut String,
     error_logs: &mut String,
     progress_opt: Option<&std::sync::Mutex<crate::models::MutationProgress>>,
+    streaks_opt: Option<&std::sync::Mutex<std::collections::HashMap<String, i32>>>,
+    has_synced_once_opt: Option<&std::sync::atomic::AtomicBool>,
 ) -> Result<Vec<Post>, String> {
     let solver_client = FlareSolverrFavoritesClient::new(
         settings.user_id.clone(),
@@ -31,12 +33,14 @@ pub async fn sync_remote_favorites(
     debug_logs.push_str("\nFetching remote favorites...");
     let mut remote_posts = Vec::new();
     let mut remote_fetch_succeeded = false;
+    let mut is_complete = false;
     let limit = std::cmp::max(settings.page_size, 200);
 
     for attempt in 1..=2 {
         match solver_client.list_favorites(limit, debug_logs).await {
-            Ok(posts) => {
+            Ok((posts, complete)) => {
                 remote_posts = posts;
+                is_complete = complete;
                 remote_fetch_succeeded = true;
                 break;
             }
@@ -52,59 +56,181 @@ pub async fn sync_remote_favorites(
         return Ok(local_posts);
     }
 
+    // Set has_synced_once to true since we successfully fetched the remote favorites!
+    if let Some(atomic) = has_synced_once_opt {
+        atomic.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
     // Load pending mutations
     let mut pending_file = crate::mutations::load_pending_mutations().unwrap_or_default();
+
+    // 1. Detect remote changes since the last session
+    let pending_add_ids: std::collections::HashSet<i64> =
+        pending_file.add.iter().map(|m| m.id).collect();
     let pending_remove_ids: std::collections::HashSet<i64> =
         pending_file.remove.iter().map(|m| m.id).collect();
+    let local_ids: std::collections::HashSet<i64> = local_posts.iter().map(|p| p.id).collect();
 
-    // Filter out pending removes from the remote list
-    let effective_remote_posts: Vec<Post> = remote_posts
-        .into_iter()
+    // Filter out pending removes from the remote list for change detection
+    let effective_remote_posts_for_detection: Vec<Post> = remote_posts
+        .iter()
         .filter(|p| !pending_remove_ids.contains(&p.id))
+        .cloned()
         .collect();
+    let remote_ids_for_detection: std::collections::HashSet<i64> =
+        effective_remote_posts_for_detection
+            .iter()
+            .map(|p| p.id)
+            .collect();
 
-    let remote_ids: std::collections::HashSet<i64> =
-        effective_remote_posts.iter().map(|p| p.id).collect();
+    let mut remote_changes_detected = false;
 
-    // Confirm pending adds that are now present on remote
+    // Check for remote additions (in remote but not in local)
+    for rid in &remote_ids_for_detection {
+        if !local_ids.contains(rid) {
+            remote_changes_detected = true;
+            break;
+        }
+    }
+
+    // Check for remote deletions (in local but not in remote, and not a local pending add or pending remove)
+    if !remote_changes_detected && is_complete {
+        for lid in &local_ids {
+            if !remote_ids_for_detection.contains(lid)
+                && !pending_add_ids.contains(lid)
+                && !pending_remove_ids.contains(lid)
+            {
+                remote_changes_detected = true;
+                break;
+            }
+        }
+    }
+
+    let strategy = settings.sync_conflict_strategy.trim().to_lowercase();
+    let use_remote_wins = strategy == "remote_wins" && remote_changes_detected && is_complete;
+
+    // Process remaining pending mutations (run process_pending_mutations_impl)
+    if settings.has_credentials()
+        && !settings.website_username.is_empty()
+        && !settings.website_password.is_empty()
+    {
+        let has_work = !pending_file.add.is_empty() || !pending_file.remove.is_empty();
+        if has_work {
+            debug_logs.push_str("\nProcessing pending mutations...");
+            if let (Some(prog), Some(streaks)) = (progress_opt, streaks_opt) {
+                // Drop client session before running mutations to let it connect again or use same client
+                solver_client.close().await;
+
+                let mutation_res =
+                    crate::mutations::process_pending_mutations_impl(settings, prog, streaks).await;
+
+                if let Err(e) = mutation_res {
+                    debug_logs.push_str(&format!("\nFailed to process pending mutations: {}", e));
+                } else {
+                    debug_logs.push_str("\nMutations processed successfully.");
+                }
+
+                // Reload pending mutations to see what succeeded
+                pending_file = crate::mutations::load_pending_mutations().unwrap_or_default();
+            }
+        }
+    }
+
+    // Now update remote_posts to reflect successfully processed mutations!
+    let raw_remote_ids_after_mut: std::collections::HashSet<i64> =
+        remote_posts.iter().map(|p| p.id).collect();
+
+    // Reload raw_remote_ids with successfully added posts and remove successfully deleted posts
+    for m in &pending_file.add {
+        let succeeded = m.attempts == 0 && m.next_attempt_at > 0.0;
+        if succeeded && !raw_remote_ids_after_mut.contains(&m.id) {
+            if let Some(post) = local_by_id.get(&m.id) {
+                remote_posts.push(post.clone());
+            }
+        }
+    }
+    for m in &pending_file.remove {
+        let succeeded = m.attempts == 0 && m.next_attempt_at > 0.0;
+        if succeeded {
+            remote_posts.retain(|p| p.id != m.id);
+        }
+    }
+
+    // Recompute raw remote ids after local mutations update
+    let raw_remote_ids_updated: std::collections::HashSet<i64> =
+        remote_posts.iter().map(|p| p.id).collect();
+
+    // Confirm successfully completed mutations and remove them from the queue!
     let mut confirmed_add_count = 0;
     pending_file.add.retain(|m| {
-        let confirmed = remote_ids.contains(&m.id);
+        let confirmed =
+            (m.attempts == 0 && m.next_attempt_at > 0.0) || raw_remote_ids_updated.contains(&m.id);
         if confirmed {
             confirmed_add_count += 1;
         }
         !confirmed
     });
 
-    if confirmed_add_count > 0 && crate::mutations::save_pending_mutations(&pending_file).is_ok() {
+    let mut confirmed_remove_count = 0;
+    pending_file.remove.retain(|m| {
+        let confirmed = (m.attempts == 0 && m.next_attempt_at > 0.0)
+            || (is_complete && !raw_remote_ids_updated.contains(&m.id));
+        if confirmed {
+            confirmed_remove_count += 1;
+        }
+        !confirmed
+    });
+
+    let total_confirmed = confirmed_add_count + confirmed_remove_count;
+    if total_confirmed > 0 && crate::mutations::save_pending_mutations(&pending_file).is_ok() {
         debug_logs.push_str(&format!(
-            "\nConfirmed {} pending adds on remote rule34 account.",
-            confirmed_add_count
+            "\nConfirmed {} pending mutations (adds/removes) on remote rule34 account.",
+            total_confirmed
         ));
         if let Some(mutex) = progress_opt {
             let mut prog = mutex.lock().unwrap();
-            prog.completed_mutations += confirmed_add_count;
-            prog.current_pending = pending_file.add.len() + pending_file.remove.len();
+            prog.completed_mutations += total_confirmed;
+            prog.current_pending = crate::mutations::count_active_mutations(&pending_file);
         }
     }
 
-    let strategy = settings.sync_conflict_strategy.trim().to_lowercase();
+    // Filter out remaining pending removes (i.e. those that failed to execute) from the remote list for database sync
+    let remaining_pending_remove_ids: std::collections::HashSet<i64> =
+        pending_file.remove.iter().map(|m| m.id).collect();
+
+    let effective_remote_posts: Vec<Post> = remote_posts
+        .into_iter()
+        .filter(|p| !remaining_pending_remove_ids.contains(&p.id))
+        .collect();
+
+    if strategy == "remote_wins" && !remote_changes_detected {
+        debug_logs.push_str("\nFavorites sync strategy remote_wins, but no remote changes detected. Keeping local cache.");
+        return Ok(local_posts);
+    }
 
     if effective_remote_posts.is_empty() {
         if strategy == "local_wins" {
             debug_logs.push_str("\nFavorites sync remote empty (local_wins). Keeping local cache.");
             return Ok(local_posts);
         }
-        if strategy == "merge" {
+        if !use_remote_wins {
             debug_logs.push_str("\nFavorites sync remote empty (merge). Keeping local cache.");
             return Ok(local_posts);
         }
-        // remote_wins: wipe local cache
-        debug_logs.push_str("\nFavorites sync remote empty (remote_wins). Clearing local cache.");
+        // remote_wins: wipe local cache but preserve pending adds
+        debug_logs.push_str("\nFavorites sync remote empty (remote_wins). Clearing local cache but preserving pending adds.");
+        let mut final_posts = Vec::new();
+        for local_post in &local_posts {
+            let pending_add_ids: std::collections::HashSet<i64> =
+                pending_file.add.iter().map(|m| m.id).collect();
+            if pending_add_ids.contains(&local_post.id) {
+                final_posts.push(local_post.clone());
+            }
+        }
         local_store
-            .replace_all(&[])
+            .replace_all(&final_posts)
             .map_err(|e| format!("Failed to clear database: {}", e))?;
-        return Ok(Vec::new());
+        return Ok(final_posts);
     }
 
     if strategy == "local_wins" {
@@ -112,19 +238,29 @@ pub async fn sync_remote_favorites(
         return Ok(local_posts);
     }
 
-    if strategy == "remote_wins" {
+    if use_remote_wins {
         debug_logs.push_str(
-            "\nFavorites sync strategy remote_wins. Replacing local cache with remote posts.",
+            "\nFavorites sync strategy remote_wins. Replacing local cache with remote posts (preserving pending additions).",
         );
+        let mut final_posts = effective_remote_posts.clone();
+        let pending_add_ids: std::collections::HashSet<i64> =
+            pending_file.add.iter().map(|m| m.id).collect();
+        for local_post in &local_posts {
+            if pending_add_ids.contains(&local_post.id)
+                && !final_posts.iter().any(|p| p.id == local_post.id)
+            {
+                final_posts.push(local_post.clone());
+            }
+        }
         local_store
-            .replace_all(&effective_remote_posts)
+            .replace_all(&final_posts)
             .map_err(|e| format!("Failed to update database: {}", e))?;
         return Ok(local_store
             .list_favorites(None, None)
-            .unwrap_or(effective_remote_posts));
+            .unwrap_or(final_posts));
     }
 
-    // Merge strategy
+    // Merge strategy (no remote changes detected, or explicit merge strategy)
     debug_logs.push_str("\nFavorites sync strategy merge. Merging local and remote favorites...");
     let merged = merge_favorites(&local_posts, &effective_remote_posts);
 

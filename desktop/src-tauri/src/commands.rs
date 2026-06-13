@@ -22,6 +22,7 @@ pub struct AppStateInner {
     pub mutation_notify: tokio::sync::Notify,
     pub mutation_progress: StdMutex<crate::models::MutationProgress>,
     pub mutation_streaks: StdMutex<std::collections::HashMap<String, i32>>,
+    pub has_synced_once: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Clone)]
@@ -45,6 +46,7 @@ pub struct SettingsUpdatePayload {
     pub download_sidecar_enabled: Option<bool>,
     pub download_sidecar_format: Option<String>,
     pub download_max_retries: Option<i32>,
+    pub blacklisted_tags: Option<Vec<String>>,
 }
 
 #[tauri::command]
@@ -72,6 +74,7 @@ pub fn get_settings(state: tauri::State<'_, AppState>) -> Value {
         "download_sidecar_enabled": s.download_sidecar_enabled,
         "download_sidecar_format": s.download_sidecar_format,
         "download_max_retries": s.download_max_retries,
+        "blacklisted_tags": s.blacklisted_tags,
         "has_credentials": s.has_credentials(),
     })
 }
@@ -119,6 +122,7 @@ pub fn update_settings(
         download_max_retries: payload
             .download_max_retries
             .unwrap_or(current.download_max_retries),
+        blacklisted_tags: payload.blacklisted_tags.unwrap_or(current.blacklisted_tags),
     };
     state.0.settings.save(&updated);
     Ok(serde_json::json!({ "status": "ok" }))
@@ -137,7 +141,21 @@ pub async fn search_posts(
     }
     let client = Rule34Client::new(s.user_id, s.api_key);
     let posts = client.search_posts(&tags, page, limit).await?;
-    Ok(posts.into_iter().map(SerializedPost::from).collect())
+
+    // Filter out posts with blacklisted tags (case-insensitive)
+    let filtered: Vec<SerializedPost> = posts
+        .into_iter()
+        .filter(|post| {
+            !post.tags.iter().any(|pt| {
+                s.blacklisted_tags
+                    .iter()
+                    .any(|bt| pt.eq_ignore_ascii_case(bt.trim()))
+            })
+        })
+        .map(SerializedPost::from)
+        .collect();
+
+    Ok(filtered)
 }
 
 #[tauri::command]
@@ -182,7 +200,7 @@ pub fn add_favorite(state: tauri::State<'_, AppState>, post: Post) -> Result<Val
         crate::mutations::queue_pending_add(post.id, "user request")?;
 
         let new_pending = if let Ok(pending_file) = crate::mutations::load_pending_mutations() {
-            pending_file.add.len() + pending_file.remove.len()
+            crate::mutations::count_active_mutations(&pending_file)
         } else {
             old_pending + 1
         };
@@ -223,7 +241,7 @@ pub fn remove_favorite(state: tauri::State<'_, AppState>, postId: i64) -> Result
         crate::mutations::queue_pending_remove(postId, "user request")?;
 
         let new_pending = if let Ok(pending_file) = crate::mutations::load_pending_mutations() {
-            pending_file.add.len() + pending_file.remove.len()
+            crate::mutations::count_active_mutations(&pending_file)
         } else {
             old_pending + 1
         };
@@ -249,7 +267,7 @@ pub fn remove_favorite(state: tauri::State<'_, AppState>, postId: i64) -> Result
 pub fn get_mutation_progress(state: tauri::State<'_, AppState>) -> crate::models::MutationProgress {
     let mut progress = state.0.mutation_progress.lock().unwrap();
     if let Ok(pending_file) = crate::mutations::load_pending_mutations() {
-        let count = pending_file.add.len() + pending_file.remove.len();
+        let count = crate::mutations::count_active_mutations(&pending_file);
         progress.current_pending = count;
         if count == 0 {
             progress.total_mutations = 0;
@@ -389,42 +407,7 @@ pub fn start_sync(state: tauri::State<'_, AppState>) -> Value {
         let mut debug_logs = "Sync started.".to_string();
         let mut error_logs = "".to_string();
 
-        let lock_guard = state_inner.sync_lock.try_lock();
-        if lock_guard.is_err() {
-            let mut status = state_inner.sync_status.lock().unwrap();
-            status.is_running = false;
-            status.error =
-                "Sync skipped: Another sync operation is already in progress.".to_string();
-            return;
-        }
-
-        // Process pending mutations first, so that remote account matches our local intentions before we fetch
-        if settings.has_credentials()
-            && !settings.website_username.is_empty()
-            && !settings.website_password.is_empty()
-        {
-            debug_logs.push_str("\nProcessing pending remote mutations first...");
-            let mutation_res = crate::mutations::process_pending_mutations_impl(
-                &settings,
-                &state_inner.mutation_progress,
-                &state_inner.mutation_streaks,
-            )
-            .await;
-
-            if let Ok(Some(delay)) = mutation_res {
-                debug_logs.push_str(&format!(
-                    "\nWarning: Some mutations are rate-limited/backed off. Remaining delay: {:.1}s.",
-                    delay
-                ));
-            } else if let Err(e) = mutation_res {
-                debug_logs.push_str(&format!(
-                    "\nWarning: Failed to process pending mutations: {}",
-                    e
-                ));
-            } else {
-                debug_logs.push_str("\nPending mutations processed successfully.");
-            }
-        }
+        let _lock_guard = state_inner.sync_lock.lock().await;
 
         let res = sync_remote_favorites(
             &settings,
@@ -432,6 +415,8 @@ pub fn start_sync(state: tauri::State<'_, AppState>) -> Value {
             &mut debug_logs,
             &mut error_logs,
             Some(&state_inner.mutation_progress),
+            Some(&state_inner.mutation_streaks),
+            Some(&state_inner.has_synced_once),
         )
         .await;
 
@@ -483,4 +468,51 @@ pub async fn get_post_by_id(
     let client = Rule34Client::new(s.user_id, s.api_key);
     let post = client.fetch_post_by_id(id).await?;
     Ok(post.map(SerializedPost::from))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::models::Post;
+
+    #[test]
+    fn test_blacklist_filtering() {
+        let post1 = Post {
+            id: 1,
+            tags: vec!["solo".to_string(), "safe".to_string()],
+            rating: "s".to_string(),
+            score: Some(10),
+            width: Some(100),
+            height: Some(100),
+            file_size: Some(100),
+            source: "".to_string(),
+            md5: "".to_string(),
+            preview_url: "".to_string(),
+            sample_url: "".to_string(),
+            file_url: "".to_string(),
+            created_at: "".to_string(),
+        };
+
+        let post2 = Post {
+            id: 2,
+            tags: vec!["explicit".to_string(), "gore".to_string()],
+            ..post1.clone()
+        };
+
+        let blacklisted_tags = ["gore".to_string()];
+
+        let posts = vec![post1, post2];
+        let filtered: Vec<Post> = posts
+            .into_iter()
+            .filter(|post| {
+                !post.tags.iter().any(|pt| {
+                    blacklisted_tags
+                        .iter()
+                        .any(|bt| pt.eq_ignore_ascii_case(bt.trim()))
+                })
+            })
+            .collect();
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, 1);
+    }
 }

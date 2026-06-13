@@ -22,6 +22,7 @@ pub struct AppSettings {
     pub download_sidecar_enabled: bool,
     pub download_sidecar_format: String,
     pub download_max_retries: i32,
+    pub blacklisted_tags: Vec<String>,
 }
 
 impl AppSettings {
@@ -41,7 +42,7 @@ impl Default for AppSettings {
             page_size: 50,
             flaresolverr_enabled: false,
             flaresolverr_url: "http://127.0.0.1:8191".to_string(),
-            sync_conflict_strategy: "merge".to_string(),
+            sync_conflict_strategy: "remote_wins".to_string(),
             background_sync_interval_minutes: 0,
             download_naming_template: "{id}".to_string(),
             download_path_template: "".to_string(),
@@ -49,6 +50,7 @@ impl Default for AppSettings {
             download_sidecar_enabled: false,
             download_sidecar_format: "json".to_string(),
             download_max_retries: 3,
+            blacklisted_tags: Vec::new(),
         }
     }
 }
@@ -81,7 +83,7 @@ fn default_flaresolverr_url() -> String {
     "http://127.0.0.1:8191".to_string()
 }
 fn default_strategy() -> String {
-    "merge".to_string()
+    "remote_wins".to_string()
 }
 
 #[derive(Serialize, Deserialize)]
@@ -116,6 +118,8 @@ fn default_max_retries() -> i32 {
 struct RawUiSettings {
     #[serde(default = "default_page_size")]
     page_size: i32,
+    #[serde(default)]
+    blacklisted_tags: Vec<String>,
 }
 
 fn default_page_size() -> i32 {
@@ -269,6 +273,11 @@ impl SettingsStore {
         let download_max_retries = guard.downloads.as_ref().map(|d| d.max_retries).unwrap_or(3);
 
         let page_size = guard.ui.as_ref().map(|u| u.page_size).unwrap_or(50);
+        let blacklisted_tags = guard
+            .ui
+            .as_ref()
+            .map(|u| u.blacklisted_tags.clone())
+            .unwrap_or_default();
 
         let settings = AppSettings {
             user_id,
@@ -287,6 +296,7 @@ impl SettingsStore {
             download_sidecar_enabled,
             download_sidecar_format,
             download_max_retries,
+            blacklisted_tags,
         };
 
         self.validate_settings(&settings)
@@ -306,7 +316,7 @@ impl SettingsStore {
             && validated.sync_conflict_strategy != "local_wins"
             && validated.sync_conflict_strategy != "remote_wins"
         {
-            validated.sync_conflict_strategy = "merge".to_string();
+            validated.sync_conflict_strategy = "remote_wins".to_string();
         }
         if validated.download_sidecar_format != "json"
             && validated.download_sidecar_format != "txt"
@@ -347,6 +357,7 @@ impl SettingsStore {
 
         guard.ui = Some(RawUiSettings {
             page_size: validated.page_size,
+            blacklisted_tags: validated.blacklisted_tags,
         });
 
         self.save_file(&guard);
@@ -424,7 +435,7 @@ mod tests {
         // sync_conflict_strategy validation
         settings.sync_conflict_strategy = "invalid".to_string();
         let validated = store.validate_settings(&settings);
-        assert_eq!(validated.sync_conflict_strategy, "merge");
+        assert_eq!(validated.sync_conflict_strategy, "remote_wins");
 
         for valid_strategy in &["merge", "local_wins", "remote_wins"] {
             settings.sync_conflict_strategy = valid_strategy.to_string();
