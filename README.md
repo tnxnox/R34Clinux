@@ -1,6 +1,6 @@
 # R34 Linux Client
 
-[![Rust](https://img.shields.io/badge/Rust-1.70%2B-orange?logo=rust)](https://rust-lang.org)
+[![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange?logo=rust)](https://rust-lang.org)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Tests](https://github.com/tnxnox/R34Clinux/actions/workflows/tests.yml/badge.svg)](https://github.com/tnxnox/R34Clinux/actions/workflows/tests.yml)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support-FF5E5B?logo=kofi)](https://ko-fi.com/thenoix)

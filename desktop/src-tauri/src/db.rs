@@ -1,5 +1,5 @@
 use crate::models::{Friend, Post};
-use rusqlite::{params, Connection, Result};
+use rusqlite::{Connection, Result, params};
 use std::env;
 use std::path::PathBuf;
 use std::time::SystemTime;
