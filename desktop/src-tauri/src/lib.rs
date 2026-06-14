@@ -18,6 +18,46 @@ use tauri::Manager;
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let app_handle = window.app_handle();
+                let state = app_handle.state::<commands::AppState>();
+                let settings = state.0.settings.load();
+                if settings.has_credentials() {
+                    // Prevent immediate window close to allow close-up sync to run
+                    api.prevent_close();
+
+                    // Notify frontend to display the exiting/sync overlay
+                    let _ = window.emit("app-exit-sync-start", ());
+
+                    let window_clone = window.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let app_handle = window_clone.app_handle();
+                        let state = app_handle.state::<commands::AppState>();
+                        let settings = state.0.settings.load();
+                        
+                        // Wait for any running sync task to finish, then run close-up sync
+                        let _guard = state.0.sync_lock.lock().await;
+
+                        let mut debug_logs = "Close up sync started.".to_string();
+                        let mut error_logs = "".to_string();
+                        let _ = sync::sync_remote_favorites(
+                            &settings,
+                            &state.0.db,
+                            &mut debug_logs,
+                            &mut error_logs,
+                            Some(&state.0.mutation_progress),
+                            Some(&state.0.mutation_streaks),
+                            Some(&state.0.has_synced_once),
+                        )
+                        .await;
+
+                        // Now exit the app safely
+                        app_handle.exit(0);
+                    });
+                }
+            }
+        })
         .setup(|app| {
             let db = db::LocalFavoritesStore::new(None);
             let settings = settings::SettingsStore::new();
@@ -180,42 +220,5 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|app_handle, event| {
-        if let tauri::RunEvent::ExitRequested { api, .. } = event {
-            let state = app_handle.state::<commands::AppState>();
-            let settings = state.0.settings.load();
-            if settings.has_credentials() {
-                // Prevent immediate exit to allow sync to complete
-                api.prevent_exit();
-
-                // Notify frontend to display the exiting/sync overlay
-                let _ = app_handle.emit("app-exit-sync-start", ());
-
-                let app_handle_clone = app_handle.clone();
-                tauri::async_runtime::spawn(async move {
-                    let state = app_handle_clone.state::<commands::AppState>();
-                    let settings = state.0.settings.load();
-                    
-                    // Wait for any running sync task to finish, then run close-up sync
-                    let _guard = state.0.sync_lock.lock().await;
-
-                    let mut debug_logs = "Close up sync started.".to_string();
-                    let mut error_logs = "".to_string();
-                    let _ = sync::sync_remote_favorites(
-                        &settings,
-                        &state.0.db,
-                        &mut debug_logs,
-                        &mut error_logs,
-                        Some(&state.0.mutation_progress),
-                        Some(&state.0.mutation_streaks),
-                        Some(&state.0.has_synced_once),
-                    )
-                    .await;
-
-                    // Now exit the app safely
-                    app_handle_clone.exit(0);
-                });
-            }
-        }
-    });
+    app.run(|_app_handle, _event| {});
 }
