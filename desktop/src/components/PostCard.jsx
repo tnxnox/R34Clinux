@@ -29,7 +29,7 @@ export function Thumbnail({ post }) {
   );
 }
 
-export function PostCard({
+export const PostCard = React.memo(function PostCard({
   post,
   isFavorite,
   onCardClick,
@@ -88,4 +88,4 @@ export function PostCard({
       </div>
     </div>
   );
-}
+});

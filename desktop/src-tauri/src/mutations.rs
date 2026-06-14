@@ -194,6 +194,22 @@ pub fn is_rate_limited_error(message: &str) -> bool {
         || lowered.contains("too many requests")
 }
 
+pub fn is_offline_error(message: &str) -> bool {
+    let lowered = message.to_lowercase();
+    lowered.contains("dns")
+        || lowered.contains("nxdomain")
+        || lowered.contains("connection error")
+        || lowered.contains("connection refused")
+        || lowered.contains("connect")
+        || lowered.contains("refused")
+        || lowered.contains("timeout")
+        || lowered.contains("unreachable")
+        || lowered.contains("network")
+        || lowered.contains("offline")
+        || lowered.contains("failed to resolve")
+        || lowered.contains("error sending request")
+}
+
 pub async fn process_pending_mutations_impl(
     settings: &AppSettings,
     progress_mutex: &std::sync::Mutex<MutationProgress>,
@@ -279,24 +295,33 @@ pub async fn process_pending_mutations_impl(
             Err(err_msg) => {
                 let mut current_file = load_pending_mutations()?;
                 let mut discarded = false;
-                if let Some(item) = current_file.remove.iter_mut().find(|item| item.id == m.id) {
-                    item.attempts += 1;
-                    if item.attempts >= 5 {
-                        discarded = true;
-                    } else {
-                        let streak = {
-                            let mut streaks = streaks_mutex.lock().unwrap();
-                            let s = streaks.entry("remove".to_string()).or_insert(0);
-                            *s += 1;
-                            *s
-                        };
+                let is_offline = is_offline_error(&err_msg);
 
-                        let delay = compute_backoff_seconds(item.attempts, &err_msg, streak);
-                        let next_attempt = now_ts + delay;
-                        item.next_attempt_at = next_attempt;
+                if let Some(item) = current_file.remove.iter_mut().find(|item| item.id == m.id) {
+                    if is_offline {
+                        item.next_attempt_at = now_ts + 30.0;
                         item.last_error = err_msg.clone();
                         next_retry_remaining =
-                            Some(next_retry_remaining.map_or(delay, |r| r.min(delay)));
+                            Some(next_retry_remaining.map_or(30.0, |r| r.min(30.0)));
+                    } else {
+                        item.attempts += 1;
+                        if item.attempts >= 5 {
+                            discarded = true;
+                        } else {
+                            let streak = {
+                                let mut streaks = streaks_mutex.lock().unwrap();
+                                let s = streaks.entry("remove".to_string()).or_insert(0);
+                                *s += 1;
+                                *s
+                            };
+
+                            let delay = compute_backoff_seconds(item.attempts, &err_msg, streak);
+                            let next_attempt = now_ts + delay;
+                            item.next_attempt_at = next_attempt;
+                            item.last_error = err_msg.clone();
+                            next_retry_remaining =
+                                Some(next_retry_remaining.map_or(delay, |r| r.min(delay)));
+                        }
                     }
                 }
 
@@ -310,7 +335,7 @@ pub async fn process_pending_mutations_impl(
                 }
                 save_pending_mutations(&current_file)?;
 
-                if is_rate_limited_error(&err_msg) && !discarded {
+                if (is_rate_limited_error(&err_msg) || is_offline) && !discarded {
                     break;
                 }
             }
@@ -349,24 +374,33 @@ pub async fn process_pending_mutations_impl(
             Err(err_msg) => {
                 let mut current_file = load_pending_mutations()?;
                 let mut discarded = false;
-                if let Some(item) = current_file.add.iter_mut().find(|item| item.id == m.id) {
-                    item.attempts += 1;
-                    if item.attempts >= 5 {
-                        discarded = true;
-                    } else {
-                        let streak = {
-                            let mut streaks = streaks_mutex.lock().unwrap();
-                            let s = streaks.entry("add".to_string()).or_insert(0);
-                            *s += 1;
-                            *s
-                        };
+                let is_offline = is_offline_error(&err_msg);
 
-                        let delay = compute_backoff_seconds(item.attempts, &err_msg, streak);
-                        let next_attempt = now_ts + delay;
-                        item.next_attempt_at = next_attempt;
+                if let Some(item) = current_file.add.iter_mut().find(|item| item.id == m.id) {
+                    if is_offline {
+                        item.next_attempt_at = now_ts + 30.0;
                         item.last_error = err_msg.clone();
                         next_retry_remaining =
-                            Some(next_retry_remaining.map_or(delay, |r| r.min(delay)));
+                            Some(next_retry_remaining.map_or(30.0, |r| r.min(30.0)));
+                    } else {
+                        item.attempts += 1;
+                        if item.attempts >= 5 {
+                            discarded = true;
+                        } else {
+                            let streak = {
+                                let mut streaks = streaks_mutex.lock().unwrap();
+                                let s = streaks.entry("add".to_string()).or_insert(0);
+                                *s += 1;
+                                *s
+                            };
+
+                            let delay = compute_backoff_seconds(item.attempts, &err_msg, streak);
+                            let next_attempt = now_ts + delay;
+                            item.next_attempt_at = next_attempt;
+                            item.last_error = err_msg.clone();
+                            next_retry_remaining =
+                                Some(next_retry_remaining.map_or(delay, |r| r.min(delay)));
+                        }
                     }
                 }
 
@@ -380,7 +414,7 @@ pub async fn process_pending_mutations_impl(
                 }
                 save_pending_mutations(&current_file)?;
 
-                if is_rate_limited_error(&err_msg) && !discarded {
+                if (is_rate_limited_error(&err_msg) || is_offline) && !discarded {
                     break;
                 }
             }
@@ -516,6 +550,48 @@ mod tests {
         let file_after = load_pending_mutations().unwrap();
         println!("DEBUG: File after second process: {:?}", file_after);
         assert_eq!(file_after.add.len(), 0);
+
+        if test_path.exists() {
+            fs::remove_file(&test_path).ok();
+        }
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn test_offline_mutation_no_discard() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let test_path = pending_mutations_path();
+        if test_path.exists() {
+            fs::remove_file(&test_path).ok();
+        }
+
+        // Set up dummy app settings with empty website login details so ensure_web_login fails immediately
+        // but with Flaresolverr url that will produce solver connection error
+        let settings = AppSettings {
+            user_id: "dummy_user".to_string(),
+            api_key: "dummy_key".to_string(),
+            website_username: "dummy_user".to_string(),
+            website_password: "dummy_password".to_string(),
+            flaresolverr_url: "http://connection-refused.invalid".to_string(),
+            ..Default::default()
+        };
+
+        // Queue a pending add
+        queue_pending_add(88888, "offline retry test").unwrap();
+
+        let progress = std::sync::Mutex::new(MutationProgress::default());
+        let streaks = std::sync::Mutex::new(HashMap::new());
+
+        // Process once - should fail with Solver connection error, but attempts must remain 0!
+        let res = process_pending_mutations_impl(&settings, &progress, &streaks).await;
+        println!("DEBUG: test_offline_mutation_no_discard result: {:?}", res);
+        
+        let file = load_pending_mutations().unwrap();
+        println!("DEBUG: file after processing: {:?}", file);
+        assert_eq!(file.add.len(), 1);
+        // The attempt count should be 0 because it's an offline error!
+        assert_eq!(file.add[0].attempts, 0);
+        assert!(file.add[0].last_error.contains("Solver connection error") || file.add[0].last_error.contains("connection"));
 
         if test_path.exists() {
             fs::remove_file(&test_path).ok();

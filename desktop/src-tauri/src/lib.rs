@@ -11,6 +11,7 @@ mod scraper;
 mod settings;
 mod sync;
 
+use tauri::Emitter;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -180,25 +181,39 @@ pub fn run() {
         .expect("error while building tauri application");
 
     app.run(|app_handle, event| {
-        if let tauri::RunEvent::ExitRequested { .. } = event {
+        if let tauri::RunEvent::ExitRequested { api, .. } = event {
             let state = app_handle.state::<commands::AppState>();
             let settings = state.0.settings.load();
             if settings.has_credentials() {
-                tauri::async_runtime::block_on(async {
-                    if let Ok(_lock) = state.0.sync_lock.try_lock() {
-                        let mut debug_logs = "Close up sync started.".to_string();
-                        let mut error_logs = "".to_string();
-                        let _ = sync::sync_remote_favorites(
-                            &settings,
-                            &state.0.db,
-                            &mut debug_logs,
-                            &mut error_logs,
-                            Some(&state.0.mutation_progress),
-                            Some(&state.0.mutation_streaks),
-                            Some(&state.0.has_synced_once),
-                        )
-                        .await;
-                    }
+                // Prevent immediate exit to allow sync to complete
+                api.prevent_exit();
+
+                // Notify frontend to display the exiting/sync overlay
+                let _ = app_handle.emit("app-exit-sync-start", ());
+
+                let app_handle_clone = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    let state = app_handle_clone.state::<commands::AppState>();
+                    let settings = state.0.settings.load();
+                    
+                    // Wait for any running sync task to finish, then run close-up sync
+                    let _guard = state.0.sync_lock.lock().await;
+
+                    let mut debug_logs = "Close up sync started.".to_string();
+                    let mut error_logs = "".to_string();
+                    let _ = sync::sync_remote_favorites(
+                        &settings,
+                        &state.0.db,
+                        &mut debug_logs,
+                        &mut error_logs,
+                        Some(&state.0.mutation_progress),
+                        Some(&state.0.mutation_streaks),
+                        Some(&state.0.has_synced_once),
+                    )
+                    .await;
+
+                    // Now exit the app safely
+                    app_handle_clone.exit(0);
                 });
             }
         }

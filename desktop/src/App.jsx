@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   AlertTriangle,
@@ -19,6 +19,9 @@ import { FavoritesTab } from "./tabs/FavoritesTab";
 import { CollectionsTab } from "./tabs/CollectionsTab";
 import { FriendsTab } from "./tabs/FriendsTab";
 import { SettingsTab } from "./tabs/SettingsTab";
+
+import { listen } from "@tauri-apps/api/event";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 function App() {
 
@@ -60,9 +63,19 @@ function App() {
 
   // Selection state for bulk operations
   const [selectedPosts, setSelectedPosts] = useState([]);
+  const [isExiting, setIsExiting] = useState(false);
   useEffect(() => {
     setSelectedPosts([]);
   }, [activeTab]);
+
+  useEffect(() => {
+    const unlistenPromise = listen("app-exit-sync-start", () => {
+      setIsExiting(true);
+    });
+    return () => {
+      unlistenPromise.then(unlisten => unlisten());
+    };
+  }, []);
 
   // Autocomplete ref
   const autocompleteRef = useRef(null);
@@ -173,21 +186,21 @@ function App() {
     prevIsRunningRef.current = syncStatus.is_running;
   }, [syncStatus.is_running, syncStatus.success, syncStatus.error]);
 
-  const showToast = (message, type = "success") => {
+  const showToast = useCallback((message, type = "success") => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
-  };
+  }, []);
 
-  const fetchSettings = async () => {
+  const fetchSettings = useCallback(async () => {
     try {
       const data = await invoke("get_settings");
       setSettings(data);
     } catch (err) {
       setError("Unable to communicate with the Tauri backend.");
     }
-  };
+  }, []);
 
-  const saveSettings = async (updated) => {
+  const saveSettings = useCallback(async (updated) => {
     setLoading(true);
     try {
       await invoke("update_settings", { payload: updated });
@@ -198,9 +211,9 @@ function App() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [showToast, fetchSettings]);
 
-  const fetchFavorites = async () => {
+  const fetchFavorites = useCallback(async () => {
     try {
       const data = await invoke("list_favorites", {
         collection: selectedCollection || null
@@ -209,45 +222,45 @@ function App() {
     } catch (err) {
       console.error("Failed to load favorites", err);
     }
-  };
+  }, [selectedCollection]);
 
-  const fetchCollections = async () => {
+  const fetchCollections = useCallback(async () => {
     try {
       const data = await invoke("list_collections");
       setCollections(data);
     } catch (err) {
       console.error("Failed to load collections", err);
     }
-  };
+  }, []);
 
-  const fetchFriends = async () => {
+  const fetchFriends = useCallback(async () => {
     try {
       const data = await invoke("list_friends");
       setFriends(data);
     } catch (err) {
       console.error("Failed to load friends", err);
     }
-  };
+  }, []);
 
-  const fetchSyncStatus = async () => {
+  const fetchSyncStatus = useCallback(async () => {
     try {
       const data = await invoke("get_sync_status");
       setSyncStatus(data);
     } catch (err) {
       console.error("Failed to load sync status", err);
     }
-  };
+  }, []);
 
-  const fetchMutationProgress = async () => {
+  const fetchMutationProgress = useCallback(async () => {
     try {
       const data = await invoke("get_mutation_progress");
       setMutationProgress(data);
     } catch (err) {
       console.error("Failed to load mutation progress", err);
     }
-  };
+  }, []);
 
-  const triggerSync = async () => {
+  const triggerSync = useCallback(async () => {
     try {
       await invoke("start_sync");
       showToast("Favorites synchronization started.");
@@ -255,9 +268,9 @@ function App() {
     } catch (err) {
       showToast("Failed to run sync: " + err, "error");
     }
-  };
+  }, [showToast, fetchSyncStatus]);
 
-  const handleSearch = async (page = 0) => {
+  const handleSearch = useCallback(async (page = 0) => {
     setLoading(true);
     try {
       const data = await invoke("search_posts", {
@@ -273,9 +286,9 @@ function App() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [searchQuery, settings?.page_size, showToast]);
 
-  const toggleFavorite = async (post) => {
+  const toggleFavorite = useCallback(async (post) => {
     const isFav = favorites.some(f => f.id === post.id);
     try {
       if (isFav) {
@@ -306,9 +319,9 @@ function App() {
     } catch (err) {
       showToast("Error updating favorites: " + err, "error");
     }
-  };
+  }, [favorites, showToast, fetchMutationProgress]);
 
-  const triggerDownload = async (post) => {
+  const triggerDownload = useCallback(async (post) => {
     showToast("Starting download...");
     try {
       const postPayload = {
@@ -335,9 +348,9 @@ function App() {
     } catch (err) {
       showToast("Error executing download: " + err, "error");
     }
-  };
+  }, [showToast]);
 
-  const createCollection = async () => {
+  const createCollection = useCallback(async () => {
     if (!newCollectionName.trim()) return;
     try {
       await invoke("create_collection", { name: newCollectionName });
@@ -347,9 +360,9 @@ function App() {
     } catch (err) {
       showToast("Error creating collection: " + err, "error");
     }
-  };
+  }, [newCollectionName, showToast, fetchCollections]);
 
-  const deleteCollection = async (name) => {
+  const deleteCollection = useCallback(async (name) => {
     if (!confirm(`Delete collection "${name}"? Posts in this collection will not be deleted.`)) return;
     try {
       await invoke("delete_collection", { name });
@@ -358,9 +371,9 @@ function App() {
     } catch (err) {
       showToast("Error deleting collection: " + err, "error");
     }
-  };
+  }, [showToast, fetchCollections]);
 
-  const assignPostToCollection = async (post, collectionName) => {
+  const assignPostToCollection = useCallback(async (post, collectionName) => {
     if (!collectionName) return;
     try {
       const postPayload = {
@@ -383,9 +396,9 @@ function App() {
     } catch (err) {
       showToast("Error assigning post: " + err, "error");
     }
-  };
+  }, [showToast]);
 
-  const addFriend = async () => {
+  const addFriend = useCallback(async () => {
     if (!friendUserId.trim() || !friendDisplayName.trim()) return;
     try {
       await invoke("add_friend", {
@@ -401,9 +414,9 @@ function App() {
     } catch (err) {
       showToast("Error adding friend: " + err, "error");
     }
-  };
+  }, [friendUserId, friendDisplayName, friendNotes, showToast, fetchFriends]);
 
-  const removeFriend = async (userId) => {
+  const removeFriend = useCallback(async (userId) => {
     if (!confirm("Remove this friend?")) return;
     try {
       await invoke("remove_friend", { userId });
@@ -412,9 +425,9 @@ function App() {
     } catch (err) {
       showToast("Error removing friend: " + err, "error");
     }
-  };
+  }, [showToast, fetchFriends]);
 
-  const fetchFriendFavs = async (userId, page = 0) => {
+  const fetchFriendFavs = useCallback(async (userId, page = 0) => {
     setLoadingFriendFavs(true);
     try {
       const data = await invoke("get_friend_favorites", { userId, page });
@@ -425,24 +438,24 @@ function App() {
     } finally {
       setLoadingFriendFavs(false);
     }
-  };
+  }, [showToast]);
 
-  const handleSuggestionClick = (value) => {
+  const handleSuggestionClick = useCallback((value) => {
     const tags = searchQuery.trim().split(/\s+/);
     tags[tags.length - 1] = value;
     setSearchQuery(tags.join(" ") + " ");
     setSuggestions([]);
-  };
+  }, [searchQuery]);
 
-  const handleTagClick = (tag) => {
+  const handleTagClick = useCallback((tag) => {
     if (!searchQuery.includes(tag)) {
       setSearchQuery(prev => (prev.trim() + " " + tag + " ").replace(/\s+/g, " "));
       setActiveTab("search");
       showToast(`Added tag: ${tag}`);
     }
-  };
+  }, [searchQuery, showToast]);
 
-  const handleAddBlacklistTag = (tag) => {
+  const handleAddBlacklistTag = useCallback((tag) => {
     if (!settings) return;
     const currentTags = settings.blacklisted_tags || [];
     if (!currentTags.includes(tag)) {
@@ -451,18 +464,18 @@ function App() {
         blacklisted_tags: [...currentTags, tag]
       }));
     }
-  };
+  }, [settings]);
 
-  const handleRemoveBlacklistTag = (tag) => {
+  const handleRemoveBlacklistTag = useCallback((tag) => {
     if (!settings) return;
     const currentTags = settings.blacklisted_tags || [];
     setSettings(prev => ({
       ...prev,
       blacklisted_tags: currentTags.filter(t => t !== tag)
     }));
-  };
+  }, [settings]);
 
-  const handleSelectToggle = (postId) => {
+  const handleSelectToggle = useCallback((postId) => {
     setSelectedPosts(prev => {
       const exists = prev.some(p => p.id === postId);
       if (exists) {
@@ -475,9 +488,9 @@ function App() {
         return prev;
       }
     });
-  };
+  }, [searchResults, favorites, friendFavorites]);
 
-  const handleBulkFavorite = async (posts, setFav) => {
+  const handleBulkFavorite = useCallback(async (posts, setFav) => {
     showToast(`${setFav ? "Favoriting" : "Unfavoriting"} ${posts.length} posts...`);
     let succeeded = 0;
     let failed = 0;
@@ -524,9 +537,9 @@ function App() {
     } else {
       showToast(`Processed posts: ${succeeded} succeeded, ${failed} failed.`, "error");
     }
-  };
+  }, [favorites, showToast, fetchMutationProgress]);
 
-  const handleBulkDownload = async (posts) => {
+  const handleBulkDownload = useCallback(async (posts) => {
     showToast(`Downloading ${posts.length} posts...`);
     let downloadedCount = 0;
     let skippedCount = 0;
@@ -567,9 +580,9 @@ function App() {
     } else {
       showToast(`Bulk download completed with errors: ${downloadedCount} downloaded, ${failedCount} failed.`, "error");
     }
-  };
+  }, [showToast]);
 
-  const handleBulkAssignCollection = async (posts, collectionName) => {
+  const handleBulkAssignCollection = useCallback(async (posts, collectionName) => {
     if (!collectionName) return;
     showToast(`Assigning ${posts.length} posts to collection "${collectionName}"...`);
     try {
@@ -595,7 +608,7 @@ function App() {
     } catch (err) {
       showToast("Error assigning posts: " + err, "error");
     }
-  };
+  }, [showToast, fetchFavorites]);
 
   // Setup Wizard if credentials missing
   if (settings && !settings.has_credentials && activeTab !== "settings") {
@@ -632,6 +645,33 @@ function App() {
               Configure Credentials
             </button>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isExiting) {
+    return (
+      <div style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: "rgba(5, 5, 10, 0.85)",
+        backdropFilter: "blur(20px)",
+        zIndex: 99999,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "white",
+        gap: "24px",
+      }}>
+        <div className="spinner" style={{ width: "48px", height: "48px" }}></div>
+        <div style={{ textAlign: "center" }}>
+          <h2 style={{ fontSize: "20px", fontWeight: "700", marginBottom: "8px" }}>Syncing to Cloud...</h2>
+          <p style={{ color: "var(--text-secondary)", fontSize: "14px" }}>Saving your favorites before exiting. Please do not force close.</p>
         </div>
       </div>
     );
@@ -734,88 +774,90 @@ function App() {
           )}
 
           {/* Tab Content */}
-          {activeTab === "search" && !activeFriend && (
-            <SearchTab
-              searchQuery={searchQuery}
-              setSearchQuery={setSearchQuery}
-              suggestions={suggestions}
-              searchResults={searchResults}
-              currentPage={currentPage}
-              hasMore={hasMore}
-              loading={loading}
-              favorites={favorites}
-              handleSearch={handleSearch}
-              toggleFavorite={toggleFavorite}
-              triggerDownload={triggerDownload}
-              setSelectedPost={setSelectedPost}
-              handleSuggestionClick={handleSuggestionClick}
-              autocompleteRef={autocompleteRef}
-              selectedPostIds={selectedPosts.map(p => p.id)}
-              onSelectToggle={handleSelectToggle}
-            />
-          )}
+          <ErrorBoundary>
+            {activeTab === "search" && !activeFriend && (
+              <SearchTab
+                searchQuery={searchQuery}
+                setSearchQuery={setSearchQuery}
+                suggestions={suggestions}
+                searchResults={searchResults}
+                currentPage={currentPage}
+                hasMore={hasMore}
+                loading={loading}
+                favorites={favorites}
+                handleSearch={handleSearch}
+                toggleFavorite={toggleFavorite}
+                triggerDownload={triggerDownload}
+                setSelectedPost={setSelectedPost}
+                handleSuggestionClick={handleSuggestionClick}
+                autocompleteRef={autocompleteRef}
+                selectedPostIds={selectedPosts.map(p => p.id)}
+                onSelectToggle={handleSelectToggle}
+              />
+            )}
 
-          {activeTab === "favorites" && !activeFriend && (
-            <FavoritesTab
-              selectedCollection={selectedCollection}
-              setSelectedCollection={setSelectedCollection}
-              collections={collections}
-              favorites={favorites}
-              syncStatus={syncStatus}
-              triggerSync={triggerSync}
-              toggleFavorite={toggleFavorite}
-              triggerDownload={triggerDownload}
-              setSelectedPost={setSelectedPost}
-              selectedPostIds={selectedPosts.map(p => p.id)}
-              onSelectToggle={handleSelectToggle}
-            />
-          )}
+            {activeTab === "favorites" && !activeFriend && (
+              <FavoritesTab
+                selectedCollection={selectedCollection}
+                setSelectedCollection={setSelectedCollection}
+                collections={collections}
+                favorites={favorites}
+                syncStatus={syncStatus}
+                triggerSync={triggerSync}
+                toggleFavorite={toggleFavorite}
+                triggerDownload={triggerDownload}
+                setSelectedPost={setSelectedPost}
+                selectedPostIds={selectedPosts.map(p => p.id)}
+                onSelectToggle={handleSelectToggle}
+              />
+            )}
 
-          {activeTab === "collections" && !activeFriend && (
-            <CollectionsTab
-              newCollectionName={newCollectionName}
-              setNewCollectionName={setNewCollectionName}
-              createCollection={createCollection}
-              collections={collections}
-              deleteCollection={deleteCollection}
-            />
-          )}
+            {activeTab === "collections" && !activeFriend && (
+              <CollectionsTab
+                newCollectionName={newCollectionName}
+                setNewCollectionName={setNewCollectionName}
+                createCollection={createCollection}
+                collections={collections}
+                deleteCollection={deleteCollection}
+              />
+            )}
 
-          {activeTab === "friends" && (
-            <FriendsTab
-              activeFriend={activeFriend}
-              setActiveFriend={setActiveFriend}
-              friendUserId={friendUserId}
-              setFriendUserId={setFriendUserId}
-              friendDisplayName={friendDisplayName}
-              setFriendDisplayName={setFriendDisplayName}
-              friendNotes={friendNotes}
-              setFriendNotes={setFriendNotes}
-              addFriend={addFriend}
-              friends={friends}
-              removeFriend={removeFriend}
-              loadingFriendFavs={loadingFriendFavs}
-              friendFavorites={friendFavorites}
-              setFriendFavorites={setFriendFavorites}
-              friendPage={friendPage}
-              fetchFriendFavs={fetchFriendFavs}
-              favorites={favorites}
-              toggleFavorite={toggleFavorite}
-              setSelectedPost={setSelectedPost}
-            />
-          )}
+            {activeTab === "friends" && (
+              <FriendsTab
+                activeFriend={activeFriend}
+                setActiveFriend={setActiveFriend}
+                friendUserId={friendUserId}
+                setFriendUserId={setFriendUserId}
+                friendDisplayName={friendDisplayName}
+                setFriendDisplayName={setFriendDisplayName}
+                friendNotes={friendNotes}
+                setFriendNotes={setFriendNotes}
+                addFriend={addFriend}
+                friends={friends}
+                removeFriend={removeFriend}
+                loadingFriendFavs={loadingFriendFavs}
+                friendFavorites={friendFavorites}
+                setFriendFavorites={setFriendFavorites}
+                friendPage={friendPage}
+                fetchFriendFavs={fetchFriendFavs}
+                favorites={favorites}
+                toggleFavorite={toggleFavorite}
+                setSelectedPost={setSelectedPost}
+              />
+            )}
 
-          {activeTab === "settings" && settings && (
-            <SettingsTab
-              settings={settings}
-              setSettings={setSettings}
-              syncStatus={syncStatus}
-              saveSettings={saveSettings}
-              blacklistedTags={settings.blacklisted_tags || []}
-              onAddBlacklistTag={handleAddBlacklistTag}
-              onRemoveBlacklistTag={handleRemoveBlacklistTag}
-            />
-          )}
+            {activeTab === "settings" && settings && (
+              <SettingsTab
+                settings={settings}
+                setSettings={setSettings}
+                syncStatus={syncStatus}
+                saveSettings={saveSettings}
+                blacklistedTags={settings.blacklisted_tags || []}
+                onAddBlacklistTag={handleAddBlacklistTag}
+                onRemoveBlacklistTag={handleRemoveBlacklistTag}
+              />
+            )}
+          </ErrorBoundary>
         </div>
       </main>
 
