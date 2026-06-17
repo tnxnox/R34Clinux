@@ -426,10 +426,11 @@ pub async fn process_pending_mutations_impl(
 }
 
 #[cfg(test)]
+pub static TEST_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+#[cfg(test)]
 mod tests {
     use super::*;
-
-    static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn test_is_rate_limited_error() {
@@ -460,7 +461,7 @@ mod tests {
 
     #[test]
     fn test_queue_and_persistence() {
-        let _guard = TEST_MUTEX.lock().unwrap();
+        let _guard = TEST_MUTEX.blocking_lock();
         let test_path = pending_mutations_path();
         if test_path.exists() {
             fs::remove_file(&test_path).ok();
@@ -499,9 +500,8 @@ mod tests {
     }
 
     #[tokio::test]
-    #[allow(clippy::await_holding_lock)]
     async fn test_discard_failing_mutation() {
-        let _guard = TEST_MUTEX.lock().unwrap();
+        let _guard = TEST_MUTEX.lock().await;
         let test_path = pending_mutations_path();
         if test_path.exists() {
             fs::remove_file(&test_path).ok();
@@ -557,9 +557,8 @@ mod tests {
     }
 
     #[tokio::test]
-    #[allow(clippy::await_holding_lock)]
     async fn test_offline_mutation_no_discard() {
-        let _guard = TEST_MUTEX.lock().unwrap();
+        let _guard = TEST_MUTEX.lock().await;
         let test_path = pending_mutations_path();
         if test_path.exists() {
             fs::remove_file(&test_path).ok();
@@ -585,13 +584,16 @@ mod tests {
         // Process once - should fail with Solver connection error, but attempts must remain 0!
         let res = process_pending_mutations_impl(&settings, &progress, &streaks).await;
         println!("DEBUG: test_offline_mutation_no_discard result: {:?}", res);
-        
+
         let file = load_pending_mutations().unwrap();
         println!("DEBUG: file after processing: {:?}", file);
         assert_eq!(file.add.len(), 1);
         // The attempt count should be 0 because it's an offline error!
         assert_eq!(file.add[0].attempts, 0);
-        assert!(file.add[0].last_error.contains("Solver connection error") || file.add[0].last_error.contains("connection"));
+        assert!(
+            file.add[0].last_error.contains("Solver connection error")
+                || file.add[0].last_error.contains("connection")
+        );
 
         if test_path.exists() {
             fs::remove_file(&test_path).ok();

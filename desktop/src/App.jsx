@@ -159,16 +159,12 @@ function App() {
 
   // Poll sync status and mutation progress
   useEffect(() => {
-    let interval;
-    const shouldPoll = syncStatus.is_running || mutationProgress.current_pending > 0;
-    if (shouldPoll) {
-      interval = setInterval(() => {
-        fetchSyncStatus();
-        fetchMutationProgress();
-      }, 2000);
-    }
+    const interval = setInterval(() => {
+      fetchSyncStatus();
+      fetchMutationProgress();
+    }, 3000);
     return () => clearInterval(interval);
-  }, [syncStatus.is_running, mutationProgress.current_pending]);
+  }, [fetchSyncStatus, fetchMutationProgress]);
 
   // Fetch favorites and collections when sync completes
   const prevIsRunningRef = useRef(false);

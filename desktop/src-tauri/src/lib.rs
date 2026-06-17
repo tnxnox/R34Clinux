@@ -35,7 +35,7 @@ pub fn run() {
                         let app_handle = window_clone.app_handle();
                         let state = app_handle.state::<commands::AppState>();
                         let settings = state.0.settings.load();
-                        
+
                         // Wait for any running sync task to finish, then run close-up sync
                         let _guard = state.0.sync_lock.lock().await;
 

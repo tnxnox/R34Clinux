@@ -21,6 +21,11 @@ pub async fn sync_remote_favorites(
         settings.flaresolverr_url.clone(),
     );
 
+    let now_ts = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs_f64();
+
     let local_posts = local_store
         .list_favorites(None, None)
         .map_err(|e| format!("Failed to read local favorites: {}", e))?;
@@ -53,6 +58,86 @@ pub async fn sync_remote_favorites(
 
     if !remote_fetch_succeeded {
         debug_logs.push_str("\nFavorites sync fallback to local cache. Outcome: remote favorites empty or unavailable.");
+        if settings.has_credentials()
+            && !settings.website_username.is_empty()
+            && !settings.website_password.is_empty()
+        {
+            let mut pending_file = crate::mutations::load_pending_mutations().unwrap_or_default();
+            let has_work = !pending_file.add.is_empty() || !pending_file.remove.is_empty();
+            if has_work {
+                debug_logs.push_str("\nProcessing pending mutations during fallback...");
+                if let (Some(prog), Some(streaks)) = (progress_opt, streaks_opt) {
+                    let due_add_ids: std::collections::HashSet<i64> = pending_file
+                        .add
+                        .iter()
+                        .filter(|m| m.next_attempt_at <= now_ts)
+                        .map(|m| m.id)
+                        .collect();
+                    let due_remove_ids: std::collections::HashSet<i64> = pending_file
+                        .remove
+                        .iter()
+                        .filter(|m| m.next_attempt_at <= now_ts)
+                        .map(|m| m.id)
+                        .collect();
+
+                    solver_client.close().await;
+
+                    let mutation_res =
+                        crate::mutations::process_pending_mutations_impl(settings, prog, streaks)
+                            .await;
+
+                    if let Err(e) = mutation_res {
+                        debug_logs
+                            .push_str(&format!("\nFailed to process pending mutations: {}", e));
+                    } else {
+                        debug_logs.push_str("\nMutations processed successfully.");
+                    }
+
+                    // Reload pending mutations to see what succeeded
+                    pending_file = crate::mutations::load_pending_mutations().unwrap_or_default();
+
+                    // Confirm successfully completed mutations and remove them from the queue!
+                    let mut confirmed_add_count = 0;
+                    pending_file.add.retain(|m| {
+                        let confirmed = due_add_ids.contains(&m.id)
+                            && m.attempts == 0
+                            && (m.next_attempt_at - now_ts) > 100.0;
+                        if confirmed {
+                            confirmed_add_count += 1;
+                        }
+                        !confirmed
+                    });
+
+                    let mut confirmed_remove_count = 0;
+                    pending_file.remove.retain(|m| {
+                        let confirmed = due_remove_ids.contains(&m.id)
+                            && m.attempts == 0
+                            && (m.next_attempt_at - now_ts) > 100.0;
+                        if confirmed {
+                            confirmed_remove_count += 1;
+                        }
+                        !confirmed
+                    });
+
+                    let total_confirmed = confirmed_add_count + confirmed_remove_count;
+                    if total_confirmed > 0
+                        && crate::mutations::save_pending_mutations(&pending_file).is_ok()
+                    {
+                        debug_logs.push_str(&format!(
+                            "\nConfirmed {} pending mutations (adds/removes) on remote rule34 account.",
+                            total_confirmed
+                        ));
+                        if let Some(mutex) = progress_opt {
+                            let mut prog = mutex.lock().unwrap();
+                            prog.completed_mutations += total_confirmed;
+                            prog.current_pending =
+                                crate::mutations::count_active_mutations(&pending_file);
+                        }
+                    }
+                }
+            }
+        }
+        solver_client.close().await;
         return Ok(local_posts);
     }
 
@@ -110,6 +195,9 @@ pub async fn sync_remote_favorites(
     let use_remote_wins = strategy == "remote_wins" && remote_changes_detected && is_complete;
 
     // Process remaining pending mutations (run process_pending_mutations_impl)
+    let mut due_add_ids = std::collections::HashSet::new();
+    let mut due_remove_ids = std::collections::HashSet::new();
+
     if settings.has_credentials()
         && !settings.website_username.is_empty()
         && !settings.website_password.is_empty()
@@ -118,6 +206,19 @@ pub async fn sync_remote_favorites(
         if has_work {
             debug_logs.push_str("\nProcessing pending mutations...");
             if let (Some(prog), Some(streaks)) = (progress_opt, streaks_opt) {
+                due_add_ids = pending_file
+                    .add
+                    .iter()
+                    .filter(|m| m.next_attempt_at <= now_ts)
+                    .map(|m| m.id)
+                    .collect();
+                due_remove_ids = pending_file
+                    .remove
+                    .iter()
+                    .filter(|m| m.next_attempt_at <= now_ts)
+                    .map(|m| m.id)
+                    .collect();
+
                 // Drop client session before running mutations to let it connect again or use same client
                 solver_client.close().await;
 
@@ -142,7 +243,8 @@ pub async fn sync_remote_favorites(
 
     // Reload raw_remote_ids with successfully added posts and remove successfully deleted posts
     for m in &pending_file.add {
-        let succeeded = m.attempts == 0 && m.next_attempt_at > 0.0;
+        let succeeded =
+            due_add_ids.contains(&m.id) && m.attempts == 0 && (m.next_attempt_at - now_ts) > 100.0;
         if succeeded && !raw_remote_ids_after_mut.contains(&m.id) {
             if let Some(post) = local_by_id.get(&m.id) {
                 remote_posts.push(post.clone());
@@ -150,7 +252,9 @@ pub async fn sync_remote_favorites(
         }
     }
     for m in &pending_file.remove {
-        let succeeded = m.attempts == 0 && m.next_attempt_at > 0.0;
+        let succeeded = due_remove_ids.contains(&m.id)
+            && m.attempts == 0
+            && (m.next_attempt_at - now_ts) > 100.0;
         if succeeded {
             remote_posts.retain(|p| p.id != m.id);
         }
@@ -163,8 +267,10 @@ pub async fn sync_remote_favorites(
     // Confirm successfully completed mutations and remove them from the queue!
     let mut confirmed_add_count = 0;
     pending_file.add.retain(|m| {
-        let confirmed =
-            (m.attempts == 0 && m.next_attempt_at > 0.0) || raw_remote_ids_updated.contains(&m.id);
+        let confirmed = (due_add_ids.contains(&m.id)
+            && m.attempts == 0
+            && (m.next_attempt_at - now_ts) > 100.0)
+            || raw_remote_ids_updated.contains(&m.id);
         if confirmed {
             confirmed_add_count += 1;
         }
@@ -173,7 +279,9 @@ pub async fn sync_remote_favorites(
 
     let mut confirmed_remove_count = 0;
     pending_file.remove.retain(|m| {
-        let confirmed = (m.attempts == 0 && m.next_attempt_at > 0.0)
+        let confirmed = (due_remove_ids.contains(&m.id)
+            && m.attempts == 0
+            && (m.next_attempt_at - now_ts) > 100.0)
             || (is_complete && !raw_remote_ids_updated.contains(&m.id));
         if confirmed {
             confirmed_remove_count += 1;
@@ -494,5 +602,81 @@ mod tests {
         assert_eq!(p1.score, Some(10));
         assert_eq!(p1.width, Some(100));
         assert_eq!(p1.source, "src_local");
+    }
+
+    #[tokio::test]
+    async fn test_sync_remote_favorites_fallback_mutations() {
+        let _guard = crate::mutations::TEST_MUTEX.lock().await;
+
+        let mut path = std::env::temp_dir();
+        let name = format!(
+            "r34_sync_test_{}.db",
+            std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        path.push(name);
+        let store = LocalFavoritesStore::new(Some(path.clone()));
+
+        // Settings with invalid flaresolverr_url to force remote fetch failure
+        let settings = AppSettings {
+            user_id: "dummy_user".to_string(),
+            api_key: "dummy_key".to_string(),
+            website_username: "dummy_user".to_string(),
+            website_password: "dummy_password".to_string(),
+            flaresolverr_url: "http://127.0.0.2:9999".to_string(),
+            ..Default::default()
+        };
+
+        // Clear existing test pending mutations if any
+        let pm_path = crate::mutations::pending_mutations_path();
+        if pm_path.exists() {
+            std::fs::remove_file(&pm_path).ok();
+        }
+
+        // Queue a pending add so we have work in the queue
+        crate::mutations::queue_pending_add(77777, "fallback test").unwrap();
+
+        let mut debug_logs = String::new();
+        let mut error_logs = String::new();
+        let progress = std::sync::Mutex::new(crate::models::MutationProgress::default());
+        let streaks = std::sync::Mutex::new(std::collections::HashMap::new());
+        let has_synced_once = std::sync::atomic::AtomicBool::new(false);
+
+        // Run sync_remote_favorites
+        // Since flaresolverr_url is invalid, fetching remote favorites fails.
+        // It should fallback to local, but it should still call process_pending_mutations_impl.
+        let res = sync_remote_favorites(
+            &settings,
+            &store,
+            &mut debug_logs,
+            &mut error_logs,
+            Some(&progress),
+            Some(&streaks),
+            Some(&has_synced_once),
+        )
+        .await;
+
+        assert!(res.is_ok());
+
+        let pending = crate::mutations::load_pending_mutations().unwrap();
+        assert_eq!(pending.add.len(), 1);
+        assert!(!pending.add[0].last_error.is_empty());
+        assert!(
+            pending.add[0].last_error.contains("connection")
+                || pending.add[0]
+                    .last_error
+                    .contains("Solver connection error")
+                || pending.add[0].last_error.contains("refused")
+                || pending.add[0].last_error.contains("9999")
+        );
+
+        if pm_path.exists() {
+            std::fs::remove_file(&pm_path).ok();
+        }
+        if path.exists() {
+            std::fs::remove_file(&path).ok();
+        }
     }
 }
