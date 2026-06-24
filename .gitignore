@@ -56,3 +56,6 @@ AUDIT_REPORT.md
 # Local scratch directory
 scratch/
 
+# Agent skills (local only)
+.agents/
+
