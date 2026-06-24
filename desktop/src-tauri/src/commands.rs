@@ -39,9 +39,7 @@ pub struct SettingsUpdatePayload {
     pub flaresolverr_enabled: Option<bool>,
     pub flaresolverr_url: Option<String>,
     pub sync_conflict_strategy: Option<String>,
-    pub background_sync_interval_minutes: Option<i32>,
     pub download_naming_template: Option<String>,
-    pub download_path_template: Option<String>,
     pub download_use_sample: Option<bool>,
     pub download_sidecar_enabled: Option<bool>,
     pub download_sidecar_format: Option<String>,
@@ -67,9 +65,7 @@ pub fn get_settings(state: tauri::State<'_, AppState>) -> Value {
         "flaresolverr_enabled": s.flaresolverr_enabled,
         "flaresolverr_url": s.flaresolverr_url,
         "sync_conflict_strategy": s.sync_conflict_strategy,
-        "background_sync_interval_minutes": s.background_sync_interval_minutes,
         "download_naming_template": s.download_naming_template,
-        "download_path_template": s.download_path_template,
         "download_use_sample": s.download_use_sample,
         "download_sidecar_enabled": s.download_sidecar_enabled,
         "download_sidecar_format": s.download_sidecar_format,
@@ -101,15 +97,9 @@ pub fn update_settings(
         sync_conflict_strategy: payload
             .sync_conflict_strategy
             .unwrap_or(current.sync_conflict_strategy),
-        background_sync_interval_minutes: payload
-            .background_sync_interval_minutes
-            .unwrap_or(current.background_sync_interval_minutes),
         download_naming_template: payload
             .download_naming_template
             .unwrap_or(current.download_naming_template),
-        download_path_template: payload
-            .download_path_template
-            .unwrap_or(current.download_path_template),
         download_use_sample: payload
             .download_use_sample
             .unwrap_or(current.download_use_sample),

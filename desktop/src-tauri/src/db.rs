@@ -649,27 +649,6 @@ impl LocalFavoritesStore {
         }
         Ok(friends)
     }
-
-    #[allow(dead_code)]
-    pub fn get_friend(&self, user_id: &str) -> Result<Option<Friend>> {
-        let conn = self.connect()?;
-        let mut stmt = conn.prepare(
-            "SELECT user_id, display_name, notes, added_at FROM friends WHERE user_id = ?1",
-        )?;
-        let mut rows = stmt.query_map([user_id.trim()], |row| {
-            Ok(Friend {
-                user_id: row.get(0)?,
-                display_name: row.get(1)?,
-                notes: row.get(2)?,
-                added_at: row.get(3)?,
-            })
-        })?;
-        if let Some(res) = rows.next() {
-            Ok(Some(res?))
-        } else {
-            Ok(None)
-        }
-    }
 }
 
 #[cfg(test)]
@@ -840,14 +819,6 @@ mod tests {
         store
             .add_friend("friend123", "Nice Friend", "A cool friend")
             .unwrap();
-
-        // Get friend
-        let friend = store.get_friend("friend123").unwrap();
-        assert!(friend.is_some());
-        let f = friend.unwrap();
-        assert_eq!(f.user_id, "friend123");
-        assert_eq!(f.display_name, "Nice Friend");
-        assert_eq!(f.notes, "A cool friend");
 
         // List friends
         let friends = store.list_friends().unwrap();

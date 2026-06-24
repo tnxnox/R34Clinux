@@ -15,9 +15,7 @@ pub struct AppSettings {
     pub flaresolverr_enabled: bool,
     pub flaresolverr_url: String,
     pub sync_conflict_strategy: String,
-    pub background_sync_interval_minutes: i32,
     pub download_naming_template: String,
-    pub download_path_template: String,
     pub download_use_sample: bool,
     pub download_sidecar_enabled: bool,
     pub download_sidecar_format: String,
@@ -43,9 +41,7 @@ impl Default for AppSettings {
             flaresolverr_enabled: false,
             flaresolverr_url: "http://127.0.0.1:8191".to_string(),
             sync_conflict_strategy: "remote_wins".to_string(),
-            background_sync_interval_minutes: 0,
             download_naming_template: "{id}".to_string(),
-            download_path_template: "".to_string(),
             download_use_sample: false,
             download_sidecar_enabled: false,
             download_sidecar_format: "json".to_string(),
@@ -75,8 +71,6 @@ struct RawSyncSettings {
     flaresolverr_url: String,
     #[serde(default = "default_strategy")]
     conflict_strategy: String,
-    #[serde(default)]
-    background_interval_minutes: i32,
 }
 
 fn default_flaresolverr_url() -> String {
@@ -92,8 +86,6 @@ struct RawDownloadsSettings {
     directory: String,
     #[serde(default = "default_naming")]
     naming_template: String,
-    #[serde(default)]
-    path_template: String,
     #[serde(default)]
     use_sample: bool,
     #[serde(default)]
@@ -228,11 +220,6 @@ impl SettingsStore {
             .as_ref()
             .map(|s| s.conflict_strategy.clone())
             .unwrap_or_else(default_strategy);
-        let background_sync_interval_minutes = guard
-            .sync
-            .as_ref()
-            .map(|s| s.background_interval_minutes)
-            .unwrap_or(0);
 
         let download_directory = guard
             .downloads
@@ -250,11 +237,6 @@ impl SettingsStore {
             .as_ref()
             .map(|d| d.naming_template.clone())
             .unwrap_or_else(default_naming);
-        let download_path_template = guard
-            .downloads
-            .as_ref()
-            .map(|d| d.path_template.clone())
-            .unwrap_or_default();
         let download_use_sample = guard
             .downloads
             .as_ref()
@@ -289,9 +271,7 @@ impl SettingsStore {
             flaresolverr_enabled,
             flaresolverr_url,
             sync_conflict_strategy,
-            background_sync_interval_minutes,
             download_naming_template,
-            download_path_template,
             download_use_sample,
             download_sidecar_enabled,
             download_sidecar_format,
@@ -342,13 +322,11 @@ impl SettingsStore {
             flaresolverr_enabled: validated.flaresolverr_enabled,
             flaresolverr_url: validated.flaresolverr_url,
             conflict_strategy: validated.sync_conflict_strategy,
-            background_interval_minutes: validated.background_sync_interval_minutes,
         });
 
         guard.downloads = Some(RawDownloadsSettings {
             directory: validated.download_directory,
             naming_template: validated.download_naming_template,
-            path_template: validated.download_path_template,
             use_sample: validated.download_use_sample,
             sidecar_enabled: validated.download_sidecar_enabled,
             sidecar_format: validated.download_sidecar_format,

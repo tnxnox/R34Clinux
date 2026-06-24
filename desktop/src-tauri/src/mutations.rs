@@ -127,20 +127,6 @@ pub fn queue_pending_remove(post_id: i64, reason: &str) -> Result<(), String> {
     save_pending_mutations(&file)
 }
 
-#[allow(dead_code)]
-pub fn clear_pending_add(post_id: i64) -> Result<(), String> {
-    let mut file = load_pending_mutations()?;
-    file.add.retain(|m| m.id != post_id);
-    save_pending_mutations(&file)
-}
-
-#[allow(dead_code)]
-pub fn clear_pending_remove(post_id: i64) -> Result<(), String> {
-    let mut file = load_pending_mutations()?;
-    file.remove.retain(|m| m.id != post_id);
-    save_pending_mutations(&file)
-}
-
 fn extract_retry_after_seconds(message: &str) -> Option<f64> {
     let re = regex::Regex::new(r"(?i)retry[-_ ]?after[^0-9]*(\d+)").unwrap();
     if let Some(cap) = re.captures(message) {
@@ -487,12 +473,6 @@ mod tests {
         assert_eq!(after_remove.remove.len(), 1);
         assert_eq!(after_remove.remove[0].id, 1001);
         assert_eq!(after_remove.remove[0].last_error, "test remove");
-
-        // Clear it
-        clear_pending_remove(1001).unwrap();
-        let cleared = load_pending_mutations().unwrap();
-        assert_eq!(cleared.add.len(), 0);
-        assert_eq!(cleared.remove.len(), 0);
 
         if test_path.exists() {
             fs::remove_file(&test_path).ok();

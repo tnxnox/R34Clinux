@@ -188,13 +188,6 @@ impl DownloadManager {
         };
         let base_dir = Path::new(&base_dir_str);
 
-        // Subfolder template
-        let subfolder = if !settings.download_path_template.is_empty() {
-            self.format_template(&settings.download_path_template, post, true)
-        } else {
-            "".to_string()
-        };
-
         let template = if settings.download_naming_template.is_empty() {
             "{id}"
         } else {
@@ -202,7 +195,7 @@ impl DownloadManager {
         };
 
         let filename = self.format_filename(post, template, settings.download_use_sample);
-        let mut dest = base_dir.join(&subfolder).join(&filename);
+        let mut dest = base_dir.join(&filename);
 
         // Make sure parent folder exists
         if let Some(parent) = dest.parent() {

@@ -86,22 +86,6 @@ async fn probe_flaresolverr(solver_url: &str, timeout_secs: u64) -> bool {
     false
 }
 
-fn is_container_running(cmd: &[String], container_name: &str) -> bool {
-    let mut child = Command::new(&cmd[0]);
-    for arg in &cmd[1..] {
-        child.arg(arg);
-    }
-    child.args(["ps", "--format", "{{.Names}}"]);
-
-    if let Ok(output) = child.output() {
-        if output.status.success() {
-            let text = String::from_utf8_lossy(&output.stdout);
-            return text.lines().any(|l| l.trim() == container_name);
-        }
-    }
-    false
-}
-
 pub async fn start_flaresolverr_container(solver_url: &str) -> bool {
     if probe_flaresolverr(solver_url, 2).await {
         return true;
