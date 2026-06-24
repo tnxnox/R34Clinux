@@ -111,6 +111,14 @@ pub async fn start_flaresolverr_container(solver_url: &str) -> bool {
         return false;
     }
 
+    if let Ok(parsed) = url::Url::parse(solver_url) {
+        if let Some(port) = parsed.port() {
+            if port != 8191 {
+                return false;
+            }
+        }
+    }
+
     let cmd = match detect_container_cmd() {
         Some(c) => c,
         None => return false,
@@ -186,6 +194,7 @@ impl FlareSolverrSession {
             session_name,
             solver_url,
             client: Client::builder()
+                .connect_timeout(Duration::from_secs(1))
                 .timeout(Duration::from_secs(60))
                 .build()
                 .unwrap_or_default(),
@@ -248,7 +257,10 @@ impl FlareSolverrSession {
                     last_err = e.to_string();
                     if attempt == 1 {
                         debug_logs.push_str("\nConnection failed, attempting to auto-start FlareSolverr container...");
-                        start_flaresolverr_container(&self.solver_url).await;
+                        let started = start_flaresolverr_container(&self.solver_url).await;
+                        if !started {
+                            break;
+                        }
                     }
                     tokio::time::sleep(Duration::from_secs(attempt)).await;
                 }

@@ -513,7 +513,7 @@ mod tests {
             api_key: "dummy_key".to_string(),
             website_username: "".to_string(),
             website_password: "".to_string(),
-            flaresolverr_url: "http://nonexistent.invalid".to_string(),
+            flaresolverr_url: "http://127.0.0.1:9999".to_string(),
             ..Default::default()
         };
 
@@ -571,7 +571,7 @@ mod tests {
             api_key: "dummy_key".to_string(),
             website_username: "dummy_user".to_string(),
             website_password: "dummy_password".to_string(),
-            flaresolverr_url: "http://connection-refused.invalid".to_string(),
+            flaresolverr_url: "http://127.0.0.1:9999".to_string(),
             ..Default::default()
         };
 
@@ -590,10 +590,7 @@ mod tests {
         assert_eq!(file.add.len(), 1);
         // The attempt count should be 0 because it's an offline error!
         assert_eq!(file.add[0].attempts, 0);
-        assert!(
-            file.add[0].last_error.contains("Solver connection error")
-                || file.add[0].last_error.contains("connection")
-        );
+        assert!(is_offline_error(&file.add[0].last_error));
 
         if test_path.exists() {
             fs::remove_file(&test_path).ok();

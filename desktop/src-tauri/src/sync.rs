@@ -625,7 +625,7 @@ mod tests {
             api_key: "dummy_key".to_string(),
             website_username: "dummy_user".to_string(),
             website_password: "dummy_password".to_string(),
-            flaresolverr_url: "http://127.0.0.2:9999".to_string(),
+            flaresolverr_url: "http://127.0.0.1:9999".to_string(),
             ..Default::default()
         };
 
@@ -658,6 +658,8 @@ mod tests {
         )
         .await;
 
+        println!("SYNC_TEST_DEBUG_LOGS:\n{}", debug_logs);
+        println!("SYNC_TEST_ERROR_LOGS:\n{}", error_logs);
         assert!(res.is_ok());
 
         let pending = crate::mutations::load_pending_mutations().unwrap();
