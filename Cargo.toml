@@ -4,8 +4,9 @@ members = ["app/src-tauri"]
 
 [package]
 name = "r34-client"
-version = "2.2.2"
+version = "2.3.0"
 edition = "2024"
+
 
 [[bin]]
 name = "r34-client"
