@@ -1005,7 +1005,7 @@ fn extract_body_text(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::FlareSolverrFavoritesClient;
 
     #[test]
     fn test_looks_rate_limited() {
@@ -1027,7 +1027,10 @@ mod tests {
             </div>
             <a href="index.php?page=favorites&s=view&id=4291234&limit=50">Next Page</a>
         "#;
-        assert!(!client.looks_rate_limited(normal_html), "Should not be rate limited on normal HTML with post ID 429 and rating");
+        assert!(
+            !client.looks_rate_limited(normal_html),
+            "Should not be rate limited on normal HTML with post ID 429 and rating"
+        );
 
         // Rate limited cases
         assert!(client.looks_rate_limited("429 Too Many Requests"));
