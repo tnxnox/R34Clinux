@@ -64,123 +64,9 @@ function App() {
   // Selection state for bulk operations
   const [selectedPosts, setSelectedPosts] = useState([]);
   const [isExiting, setIsExiting] = useState(false);
-  useEffect(() => {
-    setSelectedPosts([]);
-  }, [activeTab]);
-
-  useEffect(() => {
-    const unlistenPromise = listen("app-exit-sync-start", () => {
-      setIsExiting(true);
-    });
-    return () => {
-      unlistenPromise.then(unlisten => unlisten());
-    };
-  }, []);
 
   // Autocomplete ref
   const autocompleteRef = useRef(null);
-
-  // Fetch settings on mount
-  useEffect(() => {
-    fetchSettings();
-    fetchCollections();
-    fetchFriends();
-    fetchSyncStatus();
-    fetchMutationProgress();
-  }, []);
-
-  // Fetch favorites when selected collection changes
-  useEffect(() => {
-    fetchFavorites();
-  }, [selectedCollection]);
-
-  // Fetch full post detail on-demand when selected (useful for scraped friend favorites)
-  useEffect(() => {
-    if (!selectedPost) return;
-
-    const needsDetail =
-      !selectedPost.file_url ||
-      selectedPost.sample_url === selectedPost.preview_url ||
-      !selectedPost.tags ||
-      selectedPost.tags.length === 0;
-
-    if (!needsDetail) return;
-
-    const loadPostDetail = async () => {
-      try {
-        const fullPost = await invoke("get_post_by_id", { id: selectedPost.id });
-        if (fullPost) {
-          setSelectedPost(fullPost);
-        }
-      } catch (err) {
-        console.error("Failed to load post detail:", err);
-      }
-    };
-
-    loadPostDetail();
-  }, [selectedPost?.id]);
-
-  // Handle autocomplete search
-  useEffect(() => {
-    if (searchQuery.trim() === "") {
-      setSuggestions([]);
-      return;
-    }
-
-    const delayDebounce = setTimeout(async () => {
-      const tags = searchQuery.trim().split(/\s+/);
-      const lastTag = tags[tags.length - 1];
-      if (lastTag.length < 2) {
-        setSuggestions([]);
-        return;
-      }
-
-      try {
-        const data = await invoke("autocomplete_tags", { prefix: lastTag });
-        setSuggestions(data);
-      } catch (err) {
-        console.error(err);
-      }
-    }, 300);
-
-    return () => clearTimeout(delayDebounce);
-  }, [searchQuery]);
-
-  // Click outside autocomplete to dismiss
-  useEffect(() => {
-    function handleClickOutside(event) {
-      if (autocompleteRef.current && !autocompleteRef.current.contains(event.target)) {
-        setSuggestions([]);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  // Poll sync status and mutation progress
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetchSyncStatus();
-      fetchMutationProgress();
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [fetchSyncStatus, fetchMutationProgress]);
-
-  // Fetch favorites and collections when sync completes
-  const prevIsRunningRef = useRef(false);
-  useEffect(() => {
-    if (prevIsRunningRef.current && !syncStatus.is_running) {
-      fetchFavorites();
-      fetchCollections();
-      fetchMutationProgress();
-      if (syncStatus.success) {
-        showToast("Sync completed successfully!");
-      } else if (syncStatus.error) {
-        showToast("Sync completed with errors.", "error");
-      }
-    }
-    prevIsRunningRef.current = syncStatus.is_running;
-  }, [syncStatus.is_running, syncStatus.success, syncStatus.error]);
 
   const showToast = useCallback((message, type = "success") => {
     setToast({ message, type });
@@ -605,6 +491,123 @@ function App() {
       showToast("Error assigning posts: " + err, "error");
     }
   }, [showToast, fetchFavorites]);
+
+  // --- Effects ---
+
+  useEffect(() => {
+    setSelectedPosts([]);
+  }, [activeTab]);
+
+  useEffect(() => {
+    const unlistenPromise = listen("app-exit-sync-start", () => {
+      setIsExiting(true);
+    });
+    return () => {
+      unlistenPromise.then(unlisten => unlisten());
+    };
+  }, []);
+
+  // Fetch settings on mount
+  useEffect(() => {
+    fetchSettings();
+    fetchCollections();
+    fetchFriends();
+    fetchSyncStatus();
+    fetchMutationProgress();
+  }, []);
+
+  // Fetch favorites when selected collection changes
+  useEffect(() => {
+    fetchFavorites();
+  }, [selectedCollection]);
+
+  // Fetch full post detail on-demand when selected (useful for scraped friend favorites)
+  useEffect(() => {
+    if (!selectedPost) return;
+
+    const needsDetail =
+      !selectedPost.file_url ||
+      selectedPost.sample_url === selectedPost.preview_url ||
+      !selectedPost.tags ||
+      selectedPost.tags.length === 0;
+
+    if (!needsDetail) return;
+
+    const loadPostDetail = async () => {
+      try {
+        const fullPost = await invoke("get_post_by_id", { id: selectedPost.id });
+        if (fullPost) {
+          setSelectedPost(fullPost);
+        }
+      } catch (err) {
+        console.error("Failed to load post detail:", err);
+      }
+    };
+
+    loadPostDetail();
+  }, [selectedPost?.id]);
+
+  // Handle autocomplete search
+  useEffect(() => {
+    if (searchQuery.trim() === "") {
+      setSuggestions([]);
+      return;
+    }
+
+    const delayDebounce = setTimeout(async () => {
+      const tags = searchQuery.trim().split(/\s+/);
+      const lastTag = tags[tags.length - 1];
+      if (lastTag.length < 2) {
+        setSuggestions([]);
+        return;
+      }
+
+      try {
+        const data = await invoke("autocomplete_tags", { prefix: lastTag });
+        setSuggestions(data);
+      } catch (err) {
+        console.error(err);
+      }
+    }, 300);
+
+    return () => clearTimeout(delayDebounce);
+  }, [searchQuery]);
+
+  // Click outside autocomplete to dismiss
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (autocompleteRef.current && !autocompleteRef.current.contains(event.target)) {
+        setSuggestions([]);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Poll sync status and mutation progress
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchSyncStatus();
+      fetchMutationProgress();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [fetchSyncStatus, fetchMutationProgress]);
+
+  // Fetch favorites and collections when sync completes
+  const prevIsRunningRef = useRef(false);
+  useEffect(() => {
+    if (prevIsRunningRef.current && !syncStatus.is_running) {
+      fetchFavorites();
+      fetchCollections();
+      fetchMutationProgress();
+      if (syncStatus.success) {
+        showToast("Sync completed successfully!");
+      } else if (syncStatus.error) {
+        showToast("Sync completed with errors.", "error");
+      }
+    }
+    prevIsRunningRef.current = syncStatus.is_running;
+  }, [syncStatus.is_running, syncStatus.success, syncStatus.error]);
 
   // Setup Wizard if credentials missing
   if (settings && !settings.has_credentials && activeTab !== "settings") {

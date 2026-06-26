@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["desktop/src-tauri"]
+
+[package]
+name = "r34-client"
+version = "2.2.2"
+edition = "2024"
+
+[[bin]]
+name = "r34-client"
+path = "desktop/src-tauri/src/main.rs"
+
+[dependencies]
+desktop_lib = { package = "desktop", path = "desktop/src-tauri" }

@@ -716,7 +716,7 @@ dependencies = [
 
 [[package]]
 name = "desktop"
-version = "2.2.1"
+version = "2.2.2"
 dependencies = [
  "futures-util",
  "html-escape",
@@ -2868,6 +2868,13 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
+
+[[package]]
+name = "r34-client"
+version = "2.2.2"
+dependencies = [
+ "desktop",
+]
 
 [[package]]
 name = "raw-window-handle"

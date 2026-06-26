@@ -20,6 +20,7 @@ apikey.txt
 *.egg-info/
 build/
 dist/
+target/
 
 # IDE and editor configs
 .vscode/

@@ -485,8 +485,13 @@ impl FlareSolverrFavoritesClient {
 
     fn looks_rate_limited(&self, text: &str) -> bool {
         let lowered = text.to_lowercase();
-        (lowered.contains("429") && lowered.contains("rate"))
-            || lowered.contains("too many requests")
+        lowered.contains("too many requests")
+            || lowered.contains("rate limit")
+            || lowered.contains("rate-limit")
+            || lowered.contains("rate limited")
+            || lowered.contains("retry after")
+            || lowered.contains("retry-after")
+            || lowered.contains("429 too many")
     }
 
     fn looks_logged_in(&self, text: &str) -> bool {
@@ -995,5 +1000,40 @@ fn extract_body_text(text: &str) -> String {
         cap[1].trim().to_string()
     } else {
         text.trim().to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_looks_rate_limited() {
+        let client = FlareSolverrFavoritesClient::new(
+            "1234429".to_string(), // User ID containing 429
+            "".to_string(),
+            "".to_string(),
+            "".to_string(),
+            "".to_string(),
+        );
+
+        // A mock normal Rule34 page containing post with ID containing 429, and tag rating:questionable
+        let normal_html = r#"
+            <div class="post">
+                <a href="index.php?page=post&s=view&id=4291234">
+                    <img src="thumbs/429/thumbnail.jpg" />
+                </a>
+                <span class="rating">rating:questionable</span>
+            </div>
+            <a href="index.php?page=favorites&s=view&id=4291234&limit=50">Next Page</a>
+        "#;
+        assert!(!client.looks_rate_limited(normal_html), "Should not be rate limited on normal HTML with post ID 429 and rating");
+
+        // Rate limited cases
+        assert!(client.looks_rate_limited("429 Too Many Requests"));
+        assert!(client.looks_rate_limited("too many requests"));
+        assert!(client.looks_rate_limited("rate limit exceeded"));
+        assert!(client.looks_rate_limited("retry-after: 60"));
+        assert!(client.looks_rate_limited("HTTP 429 Rate Limited"));
     }
 }
