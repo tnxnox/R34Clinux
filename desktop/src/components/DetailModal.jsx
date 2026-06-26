@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { Heart, Download, X } from "lucide-react";
+import React, { useState, useEffect, useRef } from "react";
+import { Heart, Download, X, Maximize, Minimize, ChevronLeft, ChevronRight } from "lucide-react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import "./DetailModal.css";
 
@@ -17,8 +17,8 @@ const VideoPlayer = React.memo(function VideoPlayer({ src }) {
 
 export const DetailModal = React.memo(function DetailModal({
   post,
-  collections,
-  favorites,
+  collections = [],
+  favorites = [],
   onClose,
   onFavoriteToggle,
   onDownload,
@@ -26,6 +26,13 @@ export const DetailModal = React.memo(function DetailModal({
   onTagClick,
 }) {
   const [postCollectionAssign, setPostCollectionAssign] = useState("");
+  const [isMetadataCollapsed, setIsMetadataCollapsed] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [localUrl, setLocalUrl] = useState(null);
+
+  const mediaPaneRef = useRef(null);
+  const imgRef = useRef(null);
+  const isFullscreenPending = useRef(false);
 
   // Zoom & Pan state
   const [zoomScale, setZoomScale] = useState(1);
@@ -33,26 +40,70 @@ export const DetailModal = React.memo(function DetailModal({
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
-  // Reset zoom & pan when post changes
+  const remoteUrl = post?.file_url || post?.sample_url || post?.preview_url;
+  const url = localUrl || remoteUrl;
+
+  // Reset zoom & pan, sidebar state, and fullscreen when post changes
   useEffect(() => {
     setZoomScale(1);
     setPanOffset({ x: 0, y: 0 });
     setIsDragging(false);
+    setIsMetadataCollapsed(false);
+    setLocalUrl(null);
+    if (document.fullscreenElement && document.fullscreenElement === mediaPaneRef.current) {
+      if (typeof document.exitFullscreen === "function") {
+        document.exitFullscreen().catch((err) => console.error("Exit fullscreen error on post change:", err));
+      }
+    }
   }, [post?.id]);
 
-  const handleWheel = (e) => {
-    if (e.ctrlKey) {
-      e.preventDefault();
-      const delta = e.deltaY < 0 ? 0.25 : -0.25;
-      setZoomScale((prev) => {
-        const next = Math.min(Math.max(prev + delta, 1), 8);
-        if (next === 1) {
-          setPanOffset({ x: 0, y: 0 });
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(document.fullscreenElement === mediaPaneRef.current);
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+
+    const currentMediaPane = mediaPaneRef.current;
+
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      // Clean up fullscreen state if modal unmounts while in fullscreen
+      if (document.fullscreenElement && document.fullscreenElement === currentMediaPane) {
+        if (typeof document.exitFullscreen === "function") {
+          document.exitFullscreen().catch((err) => console.error("Exit fullscreen error on unmount:", err));
         }
-        return next;
-      });
-    }
-  };
+      }
+    };
+  }, []);
+
+  // ponytail: native non-passive wheel listener avoids browser warnings when preventing zoom
+  useEffect(() => {
+    const currentImg = imgRef.current;
+    if (!currentImg) return;
+
+    const handleNativeWheel = (e) => {
+      if (e.ctrlKey) {
+        e.preventDefault();
+        const delta = e.deltaY < 0 ? 0.25 : -0.25;
+        setZoomScale((prev) => {
+          const next = Math.min(Math.max(prev + delta, 1), 8);
+          if (next === 1) {
+            setPanOffset({ x: 0, y: 0 });
+          }
+          return next;
+        });
+      }
+    };
+
+    currentImg.addEventListener("wheel", handleNativeWheel, { passive: false });
+
+    return () => {
+      if (currentImg) {
+        currentImg.removeEventListener("wheel", handleNativeWheel);
+      }
+    };
+  }, [url]);
 
   const handleMouseDown = (e) => {
     if (zoomScale > 1 && e.button === 0) {
@@ -85,12 +136,10 @@ export const DetailModal = React.memo(function DetailModal({
     setPanOffset({ x: 0, y: 0 });
   };
 
-  const [localUrl, setLocalUrl] = useState(null);
-
   useEffect(() => {
     let active = true;
     const checkLocalFile = async () => {
-      if (!post.id) return;
+      if (!post?.id) return;
       try {
         const path = await invoke("get_downloaded_path", { postId: post.id, md5: post.md5 || "" });
         if (path && active) {
@@ -107,12 +156,32 @@ export const DetailModal = React.memo(function DetailModal({
     return () => {
       active = false;
     };
-  }, [post.id, post.md5]);
+  }, [post?.id, post?.md5]);
+
+  if (!post) return null;
 
   const isFav = favorites.some((f) => f.id === post.id);
-  const remoteUrl = post.file_url || post.sample_url || post.preview_url;
-  const url = localUrl || remoteUrl;
   const isVideo = remoteUrl?.endsWith(".mp4") || remoteUrl?.endsWith(".webm");
+
+  const toggleFullscreen = async () => {
+    if (!url || isFullscreenPending.current) return;
+    try {
+      isFullscreenPending.current = true;
+      if (!document.fullscreenElement) {
+        if (mediaPaneRef.current) {
+          await mediaPaneRef.current.requestFullscreen();
+        }
+      } else {
+        if (typeof document.exitFullscreen === "function") {
+          await document.exitFullscreen();
+        }
+      }
+    } catch (err) {
+      console.error("Fullscreen toggle error:", err);
+    } finally {
+      isFullscreenPending.current = false;
+    }
+  };
 
   const renderModalMedia = () => {
     if (isVideo) {
@@ -121,6 +190,7 @@ export const DetailModal = React.memo(function DetailModal({
 
     return (
       <img
+        ref={imgRef}
         src={url}
         alt="modal media"
         className="modal-media"
@@ -131,7 +201,6 @@ export const DetailModal = React.memo(function DetailModal({
           transition: isDragging ? "none" : "transform 0.1s ease-out",
           transformOrigin: "center center",
         }}
-        onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -141,12 +210,35 @@ export const DetailModal = React.memo(function DetailModal({
     );
   };
 
+  const mediaPaneClasses = `modal-media-pane${isFullscreen ? " is-fullscreen" : ""}${isMetadataCollapsed ? " expanded-full" : ""}`;
+  const infoPaneClasses = `modal-info-pane${isMetadataCollapsed ? " collapsed" : ""}`;
+
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-media-pane">{renderModalMedia()}</div>
+      <div className="modal-content modal-large" onClick={(e) => e.stopPropagation()}>
+        <div className={mediaPaneClasses} ref={mediaPaneRef}>
+          {renderModalMedia()}
+          <button
+            data-testid="fullscreen-btn"
+            className="fullscreen-btn"
+            onClick={toggleFullscreen}
+            disabled={!url}
+            aria-label="Toggle Fullscreen"
+          >
+            {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+          </button>
+        </div>
 
-        <div className="modal-info-pane">
+        <div className={infoPaneClasses}>
+          <button
+            data-testid="sidebar-toggle-btn"
+            className="sidebar-toggle-btn"
+            onClick={() => setIsMetadataCollapsed(!isMetadataCollapsed)}
+            aria-label="Toggle Side Panel"
+          >
+            {isMetadataCollapsed ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+          </button>
+
           <div className="modal-info-header">
             <span className="modal-title">Post #{post.id}</span>
             <button className="icon-btn" onClick={onClose}>

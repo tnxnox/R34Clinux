@@ -72,4 +72,47 @@ describe("DetailModal component", () => {
     fireEvent.click(screen.getByText("Download"));
     expect(onDownload).toHaveBeenCalledWith(mockPost);
   });
+
+  it("does not crash when collections and favorites props are omitted", () => {
+    const onClose = vi.fn();
+    const onFavoriteToggle = vi.fn();
+    const onDownload = vi.fn();
+
+    render(
+      <DetailModal
+        post={mockPost}
+        onClose={onClose}
+        onFavoriteToggle={onFavoriteToggle}
+        onDownload={onDownload}
+      />
+    );
+
+    expect(screen.getByText("Post #12345")).toBeInTheDocument();
+  });
+
+  it("attaches a native non-passive wheel event listener that handles zoom", () => {
+    render(
+      <DetailModal
+        post={mockPost}
+        collections={[]}
+        favorites={[]}
+      />
+    );
+
+    const img = screen.getByAltText("modal media");
+    expect(img).toBeInTheDocument();
+
+    // Create and dispatch native wheel event with ctrlKey
+    const wheelEvent = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: true,
+      deltaY: -100,
+    });
+
+    const preventDefaultSpy = vi.spyOn(wheelEvent, "preventDefault");
+    img.dispatchEvent(wheelEvent);
+
+    expect(preventDefaultSpy).toHaveBeenCalled();
+  });
 });

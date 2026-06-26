@@ -27,6 +27,13 @@
   animation: slideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
+/* R1: Larger Media Layout styling */
+.modal-content.modal-large {
+  width: 95%;
+  max-width: 1600px;
+  height: 90vh;
+}
+
 .modal-media-pane {
   flex: 7;
   background: #05060b;
@@ -53,6 +60,8 @@
   flex-direction: column;
   height: 100%;
   background: rgba(11, 12, 21, 0.5);
+  position: relative;
+  transition: flex 0.3s ease, width 0.3s ease;
 }
 
 .modal-info-header {
@@ -176,4 +185,90 @@
 .btn-action.fav.active {
   background: #f43f5e;
   color: white;
+}
+
+/* R2: Native Fullscreen styling */
+.fullscreen-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 10;
+  width: 40px;
+  height: 40px;
+  background: rgba(15, 17, 31, 0.75);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-sm);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.fullscreen-btn:hover {
+  background: rgba(15, 17, 31, 0.95);
+  transform: scale(1.05);
+}
+
+.fullscreen-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.modal-media-pane.is-fullscreen {
+  width: 100vw;
+  height: 100vh;
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 9999;
+}
+
+/* R3: Collapsible Side Panel styling */
+.sidebar-toggle-btn {
+  position: absolute;
+  left: -24px;
+  top: 16px;
+  width: 24px;
+  height: 24px;
+  background: #0f111f;
+  border: 1px solid var(--border-glass);
+  border-right: none;
+  border-radius: 4px 0 0 4px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 11;
+  transition: all 0.3s ease;
+}
+
+.sidebar-toggle-btn:hover {
+  color: white;
+  background: #1e2238;
+}
+
+.modal-info-pane.collapsed {
+  flex: 0;
+  width: 0;
+  min-width: 0;
+  border-left: none;
+  overflow: visible;
+}
+
+.modal-info-pane.collapsed > :not(.sidebar-toggle-btn) {
+  display: none;
+}
+
+.modal-info-pane.collapsed .sidebar-toggle-btn {
+  left: -24px;
+  border-right: 1px solid var(--border-glass);
+  border-radius: 4px;
+}
+
+.modal-media-pane.expanded-full {
+  flex: 10;
+  width: 100%;
 }
