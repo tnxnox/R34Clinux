@@ -21,7 +21,7 @@ jobs:
         with:
           node-version: 20
           cache: 'npm'
-          cache-dependency-path: desktop/package-lock.json
+          cache-dependency-path: app/package-lock.json
 
       - name: Install system dependencies (Tauri on Linux)
         run: |
@@ -30,11 +30,11 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm ci
-        working-directory: desktop
+        working-directory: app
 
       - name: Build frontend
         run: npm run build
-        working-directory: desktop
+        working-directory: app
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -44,16 +44,16 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: desktop/src-tauri -> target
+          workspaces: app/src-tauri -> target
 
       - name: Cargo fmt check
         run: cargo fmt --all -- --check
-        working-directory: desktop/src-tauri
+        working-directory: app/src-tauri
 
       - name: Cargo clippy check
         run: cargo clippy --all-targets -- -D warnings
-        working-directory: desktop/src-tauri
+        working-directory: app/src-tauri
 
       - name: Run backend unit tests
         run: cargo test
-        working-directory: desktop/src-tauri
+        working-directory: app/src-tauri
