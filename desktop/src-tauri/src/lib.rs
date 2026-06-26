@@ -216,6 +216,7 @@ pub fn run() {
             commands::get_friend_favorites,
             commands::get_mutation_progress,
             commands::get_post_by_id,
+            commands::get_downloaded_path,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

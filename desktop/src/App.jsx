@@ -58,8 +58,11 @@ function App() {
   const [syncStatus, setSyncStatus] = useState({ is_running: false, debug: "", error: "", success: false });
   const [mutationProgress, setMutationProgress] = useState({ total_mutations: 0, completed_mutations: 0, current_pending: 0 });
 
-  // Detail view state
   const [selectedPost, setSelectedPost] = useState(null);
+
+  const handleCloseDetail = useCallback(() => {
+    setSelectedPost(null);
+  }, []);
 
   // Selection state for bulk operations
   const [selectedPosts, setSelectedPosts] = useState([]);
@@ -866,7 +869,7 @@ function App() {
           post={selectedPost}
           collections={collections}
           favorites={favorites}
-          onClose={() => setSelectedPost(null)}
+          onClose={handleCloseDetail}
           onFavoriteToggle={toggleFavorite}
           onDownload={triggerDownload}
           onAssignCollection={assignPostToCollection}

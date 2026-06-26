@@ -1,8 +1,21 @@
 import React, { useState, useEffect } from "react";
 import { Heart, Download, X } from "lucide-react";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import "./DetailModal.css";
 
-export function DetailModal({
+const VideoPlayer = React.memo(function VideoPlayer({ src }) {
+  return (
+    <video
+      src={src}
+      className="modal-media"
+      controls
+      autoPlay
+      loop
+    />
+  );
+});
+
+export const DetailModal = React.memo(function DetailModal({
   post,
   collections,
   favorites,
@@ -72,21 +85,38 @@ export function DetailModal({
     setPanOffset({ x: 0, y: 0 });
   };
 
+  const [localUrl, setLocalUrl] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    const checkLocalFile = async () => {
+      if (!post.id) return;
+      try {
+        const path = await invoke("get_downloaded_path", { postId: post.id, md5: post.md5 || "" });
+        if (path && active) {
+          const assetUrl = convertFileSrc(path);
+          setLocalUrl(assetUrl);
+        } else if (active) {
+          setLocalUrl(prev => prev !== null ? null : prev);
+        }
+      } catch (err) {
+        console.error("Failed to check local download path:", err);
+      }
+    };
+    checkLocalFile();
+    return () => {
+      active = false;
+    };
+  }, [post.id, post.md5]);
+
   const isFav = favorites.some((f) => f.id === post.id);
-  const url = post.file_url || post.sample_url || post.preview_url;
-  const isVideo = url?.endsWith(".mp4") || url?.endsWith(".webm");
+  const remoteUrl = post.file_url || post.sample_url || post.preview_url;
+  const url = localUrl || remoteUrl;
+  const isVideo = remoteUrl?.endsWith(".mp4") || remoteUrl?.endsWith(".webm");
 
   const renderModalMedia = () => {
     if (isVideo) {
-      return (
-        <video
-          src={url}
-          className="modal-media"
-          controls
-          autoPlay
-          loop
-        />
-      );
+      return <VideoPlayer src={url} />;
     }
 
     return (
@@ -229,4 +259,4 @@ export function DetailModal({
       </div>
     </div>
   );
-}
+});

@@ -163,6 +163,23 @@ impl LocalFavoritesStore {
         Ok(())
     }
 
+    pub fn get_download_path(&self, post_id: i64, md5: &str) -> Result<Option<String>> {
+        let conn = self.connect()?;
+        let mut stmt =
+            conn.prepare("SELECT file_path FROM downloads WHERE post_id = ?1 OR md5 = ?2 LIMIT 1")?;
+        let mut rows = stmt.query(params![post_id, md5])?;
+        if let Some(row) = rows.next()? {
+            let path: String = row.get(0)?;
+            if std::path::Path::new(&path).exists() {
+                Ok(Some(path))
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn list_favorites(
         &self,
         limit: Option<u32>,

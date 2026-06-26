@@ -460,6 +460,19 @@ pub async fn get_post_by_id(
     Ok(post.map(SerializedPost::from))
 }
 
+#[tauri::command]
+pub fn get_downloaded_path(
+    state: tauri::State<'_, AppState>,
+    postId: i64,
+    md5: String,
+) -> Result<Option<String>, String> {
+    state
+        .0
+        .db
+        .get_download_path(postId, &md5)
+        .map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::models::Post;

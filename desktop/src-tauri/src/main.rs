@@ -10,6 +10,12 @@ fn main() {
                 std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
             }
         }
+        // Fix for GStreamer stuttering/buffering issues on WebKitGTK
+        if std::env::var("WEBKIT_GST_DMABUF_SINK_DISABLED").is_err() {
+            unsafe {
+                std::env::set_var("WEBKIT_GST_DMABUF_SINK_DISABLED", "1");
+            }
+        }
     }
     desktop_lib::run()
 }
