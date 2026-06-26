@@ -11,15 +11,27 @@ I'm also planning a windows release soon.
 
 ## Quick Start
 
-Get your API credentials from rule34.xxx (Account → My Settings → API), then clone and start the app:
+Get your API credentials from rule34.xxx (Account → My Settings → API), then:
+
+### Option 1: Run from source (development mode)
 
 ```bash
 git clone https://github.com/tnxnox/R34Clinux.git
 cd R34Clinux
-
-# Setup dependencies and start the app automatically
 ./start_r34.sh
 ```
+
+### Option 2: Install system-wide
+
+```bash
+git clone https://github.com/tnxnox/R34Clinux.git
+cd R34Clinux
+cargo install --path . --locked
+```
+
+The binary `r34-client` is installed to `~/.cargo/bin/`. The build automatically
+checks for system prerequisites and compiles the frontend assets.
+You can reclaim build disk space afterwards with `cargo clean`.
 
 The app will prompt you to enter credentials on first launch.
 
