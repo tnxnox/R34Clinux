@@ -321,6 +321,10 @@ video::-webkit-media-controls-fullscreen-button {
   background: #05060b;
 }
 
+.video-player-container video {
+  pointer-events: none !important;
+}
+
 .video-controls-overlay {
   position: absolute;
   bottom: 0;
