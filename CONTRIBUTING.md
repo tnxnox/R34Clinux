@@ -15,7 +15,7 @@ To maintain the security and cleanliness of this repository:
 1. Fork and clone the repo
 2. Install system dependencies using `./scripts/setup.sh` or the guide in `README.md`
 3. Start the development server using `./start_r34.sh` or `make dev`
-4. Run unit tests using `make test` or `cd desktop/src-tauri && cargo test`
+4. Run unit tests using `make test` or `cd app/src-tauri && cargo test`
 
 ## Code Style
 

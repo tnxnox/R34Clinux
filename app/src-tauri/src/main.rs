@@ -17,5 +17,5 @@ fn main() {
             }
         }
     }
-    desktop_lib::run()
+    r34client_lib::run()
 }

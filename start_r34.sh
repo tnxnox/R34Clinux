@@ -41,9 +41,9 @@ if [ "$MISSING_PREREQ" = true ]; then
     fi
 else
     # Auto install npm packages if node_modules is missing
-    if [ ! -d "$SCRIPTPATH/desktop/node_modules" ]; then
+    if [ ! -d "$SCRIPTPATH/app/node_modules" ]; then
         echo "Installing frontend dependencies..."
-        cd "$SCRIPTPATH/desktop"
+        cd "$SCRIPTPATH/app"
         npm install
         cd "$SCRIPTPATH"
     fi

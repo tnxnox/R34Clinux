@@ -715,25 +715,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "desktop"
-version = "2.2.2"
-dependencies = [
- "futures-util",
- "html-escape",
- "libc",
- "regex",
- "reqwest 0.12.28",
- "rusqlite",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
- "tokio",
- "url",
-]
-
-[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2873,7 +2854,26 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 name = "r34-client"
 version = "2.2.2"
 dependencies = [
- "desktop",
+ "r34client",
+]
+
+[[package]]
+name = "r34client"
+version = "2.2.2"
+dependencies = [
+ "futures-util",
+ "html-escape",
+ "libc",
+ "regex",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+ "tokio",
+ "url",
 ]
 
 [[package]]

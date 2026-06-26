@@ -1,29 +1,29 @@
 .PHONY: dev build check test clean setup
 
 dev:
-	@if [ ! -d "desktop/node_modules" ]; then \
+	@if [ ! -d "app/node_modules" ]; then \
 		echo "Installing frontend dependencies..."; \
-		cd desktop && npm install; \
+		cd app && npm install; \
 	fi
-	cd desktop && npm run tauri dev
+	cd app && npm run tauri dev
 
 build:
-	@if [ ! -d "desktop/node_modules" ]; then \
+	@if [ ! -d "app/node_modules" ]; then \
 		echo "Installing frontend dependencies..."; \
-		cd desktop && npm install; \
+		cd app && npm install; \
 	fi
-	cd desktop && npm run tauri build
+	cd app && npm run tauri build
 
 setup:
 	bash scripts/setup.sh
 
 check:
-	cd desktop/src-tauri && cargo check
+	cd app/src-tauri && cargo check
 
 test:
-	cd desktop/src-tauri && cargo test
+	cd app/src-tauri && cargo test
 
 clean:
-	cd desktop/src-tauri && cargo clean
-	rm -rf desktop/dist
+	cd app/src-tauri && cargo clean
+	rm -rf app/dist
 

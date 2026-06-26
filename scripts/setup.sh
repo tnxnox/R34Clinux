@@ -107,7 +107,7 @@ echo "Installing project dependencies (npm install)..."
 SCRIPTPATH="$(cd "$(dirname "$0")" >/dev/null 2>&1 && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPTPATH")"
 
-cd "$PROJECT_ROOT/desktop"
+cd "$PROJECT_ROOT/app"
 npm install
 
 echo ""
