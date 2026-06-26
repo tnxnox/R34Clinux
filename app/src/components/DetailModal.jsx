@@ -11,6 +11,8 @@ const VideoPlayer = React.memo(function VideoPlayer({ src }) {
       controls
       autoPlay
       loop
+      disablePictureInPicture
+      controlsList="nofullscreen"
     />
   );
 });

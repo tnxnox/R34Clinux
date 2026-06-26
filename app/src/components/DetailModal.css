@@ -220,13 +220,42 @@
   cursor: not-allowed;
 }
 
+.modal-media-pane:fullscreen {
+  width: 100vw !important;
+  height: 100vh !important;
+  background: #000000 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
 .modal-media-pane.is-fullscreen {
-  width: 100vw;
-  height: 100vh;
-  position: fixed;
-  top: 0;
-  left: 0;
-  z-index: 9999;
+  width: 100vw !important;
+  height: 100vh !important;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  z-index: 9999 !important;
+  background: #000000 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+/* Ensure the media fits the screen size in fullscreen, maintaining aspect ratio */
+.modal-media-pane:fullscreen .modal-media,
+.modal-media-pane.is-fullscreen .modal-media {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  object-fit: contain !important;
+}
+
+/* Hide WebKit native picture-in-picture and fullscreen buttons */
+video::-webkit-media-controls-picture-in-picture-button,
+video::-webkit-media-controls-fullscreen-button {
+  display: none !important;
 }
 
 /* R3: Collapsible Side Panel styling */
