@@ -35,7 +35,7 @@
 }
 
 .modal-media-pane {
-  flex: 7;
+  flex: 1;
   background: #05060b;
   display: flex;
   align-items: center;
@@ -54,14 +54,18 @@
 }
 
 .modal-info-pane {
-  flex: 3;
+  width: 380px;
+  min-width: 380px;
+  max-width: 380px;
   border-left: 1px solid var(--border-glass);
   display: flex;
   flex-direction: column;
   height: 100%;
   background: rgba(11, 12, 21, 0.5);
   position: relative;
-  transition: flex 0.3s ease, width 0.3s ease;
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              min-width 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              max-width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .modal-info-header {
@@ -229,7 +233,7 @@
 .sidebar-toggle-btn {
   position: absolute;
   left: -24px;
-  top: 16px;
+  top: 80px;
   width: 24px;
   height: 24px;
   background: #0f111f;
@@ -251,9 +255,9 @@
 }
 
 .modal-info-pane.collapsed {
-  flex: 0;
   width: 0;
   min-width: 0;
+  max-width: 0;
   border-left: none;
   overflow: visible;
 }
@@ -269,6 +273,5 @@
 }
 
 .modal-media-pane.expanded-full {
-  flex: 10;
-  width: 100%;
+  /* Handled by flex: 1 and sidebar width: 0 */
 }
