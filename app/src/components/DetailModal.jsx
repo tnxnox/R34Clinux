@@ -1,19 +1,148 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Heart, Download, X, Maximize, Minimize, ChevronLeft, ChevronRight } from "lucide-react";
+import { Heart, Download, X, Maximize, Minimize, ChevronLeft, ChevronRight, Play, Pause, Volume2, VolumeX } from "lucide-react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import "./DetailModal.css";
 
 const VideoPlayer = React.memo(function VideoPlayer({ src }) {
+  const videoRef = useRef(null);
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [isMuted, setIsMuted] = useState(false);
+  const [showControls, setShowControls] = useState(false);
+  const controlsTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    setIsPlaying(true);
+    if (videoRef.current) {
+      if (typeof videoRef.current.load === "function") {
+        videoRef.current.load();
+      }
+      if (typeof videoRef.current.play === "function") {
+        const playPromise = videoRef.current.play();
+        if (playPromise && typeof playPromise.catch === "function") {
+          playPromise.catch((err) => console.error("Auto-play error on source change:", err));
+        }
+      }
+    }
+  }, [src]);
+
+  const handlePlayPause = (e) => {
+    if (videoRef.current) {
+      if (isPlaying) {
+        if (typeof videoRef.current.pause === "function") {
+          videoRef.current.pause();
+        }
+        setIsPlaying(false);
+      } else {
+        if (typeof videoRef.current.play === "function") {
+          const playPromise = videoRef.current.play();
+          if (playPromise && typeof playPromise.catch === "function") {
+            playPromise.catch((err) => console.error(err));
+          }
+        }
+        setIsPlaying(true);
+      }
+    }
+  };
+
+  const handleTimeUpdate = () => {
+    if (videoRef.current) {
+      setCurrentTime(videoRef.current.currentTime);
+    }
+  };
+
+  const handleLoadedMetadata = () => {
+    if (videoRef.current) {
+      setDuration(videoRef.current.duration);
+    }
+  };
+
+  const handleSeek = (e) => {
+    e.stopPropagation();
+    if (!videoRef.current || !duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const percentage = clickX / rect.width;
+    const newTime = percentage * duration;
+    videoRef.current.currentTime = newTime;
+    setCurrentTime(newTime);
+  };
+
+  const toggleMute = (e) => {
+    e.stopPropagation();
+    if (videoRef.current) {
+      const nextMute = !isMuted;
+      videoRef.current.muted = nextMute;
+      setIsMuted(nextMute);
+    }
+  };
+
+  const formatTime = (seconds) => {
+    if (isNaN(seconds)) return "00:00";
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const handleMouseMove = () => {
+    setShowControls(true);
+    if (controlsTimeoutRef.current) {
+      clearTimeout(controlsTimeoutRef.current);
+    }
+    controlsTimeoutRef.current = setTimeout(() => {
+      setShowControls(false);
+    }, 2000);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const progressPercent = duration ? (currentTime / duration) * 100 : 0;
+
   return (
-    <video
-      src={src}
-      className="modal-media"
-      controls
-      autoPlay
-      loop
-      disablePictureInPicture
-      controlsList="nofullscreen"
-    />
+    <div
+      className="video-player-container"
+      onMouseMove={handleMouseMove}
+      onMouseLeave={() => setShowControls(false)}
+      onClick={handlePlayPause}
+    >
+      <video
+        ref={videoRef}
+        src={src}
+        className="modal-media"
+        autoPlay
+        loop
+        muted={isMuted}
+        onTimeUpdate={handleTimeUpdate}
+        onLoadedMetadata={handleLoadedMetadata}
+        playsInline
+      />
+      <div className={`video-controls-overlay ${showControls ? "visible" : ""}`} onClick={(e) => e.stopPropagation()}>
+        <button className="video-control-btn" onClick={handlePlayPause} aria-label={isPlaying ? "Pause" : "Play"}>
+          {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+        </button>
+
+        <div className="video-time-display">{formatTime(currentTime)}</div>
+
+        <div className="video-progress-bar-container" onClick={handleSeek}>
+          <div className="video-progress-bar-bg">
+            <div className="video-progress-bar-fill" style={{ width: `${progressPercent}%` }} />
+          </div>
+        </div>
+
+        <div className="video-time-display">{formatTime(duration)}</div>
+
+        <button className="video-control-btn" onClick={toggleMute} aria-label={isMuted ? "Unmute" : "Mute"}>
+          {isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+        </button>
+      </div>
+    </div>
   );
 });
 
