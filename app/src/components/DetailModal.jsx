@@ -208,6 +208,21 @@ export const DetailModal = React.memo(function DetailModal({
     };
   }, []);
 
+  // Handle Escape key to close the modal
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") {
+        if (!document.fullscreenElement) {
+          onClose();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
   // ponytail: native non-passive wheel listener avoids browser warnings when preventing zoom
   useEffect(() => {
     const currentImg = imgRef.current;

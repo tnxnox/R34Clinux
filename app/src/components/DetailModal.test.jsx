@@ -115,4 +115,18 @@ describe("DetailModal component", () => {
 
     expect(preventDefaultSpy).toHaveBeenCalled();
   });
+
+  it("closes the modal when Escape key is pressed", () => {
+    const onClose = vi.fn();
+    render(
+      <DetailModal
+        post={mockPost}
+        onClose={onClose}
+      />
+    );
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose).toHaveBeenCalled();
+  });
 });
+
