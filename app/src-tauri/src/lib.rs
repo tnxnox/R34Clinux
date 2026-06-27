@@ -93,6 +93,7 @@ pub fn run() {
                 mutation_progress: std::sync::Mutex::new(initial_progress),
                 mutation_streaks: std::sync::Mutex::new(std::collections::HashMap::new()),
                 has_synced_once: std::sync::atomic::AtomicBool::new(false),
+                current_viewing_post_id: std::sync::atomic::AtomicI64::new(0),
             }));
 
             app.manage(state.clone());
@@ -217,6 +218,8 @@ pub fn run() {
             commands::get_mutation_progress,
             commands::get_post_by_id,
             commands::get_downloaded_path,
+            commands::get_tags_with_types,
+            commands::cancel_tag_fetching,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

@@ -377,6 +377,118 @@ impl Rule34Client {
         Ok(posts.into_iter().next())
     }
 
+    pub async fn fetch_single_tag_type(&self, name: &str) -> Result<(String, i32), String> {
+        let mut query_params = self.auth_params();
+        query_params.extend([
+            ("page", "dapi"),
+            ("s", "tag"),
+            ("q", "index"),
+            ("name", name),
+        ]);
+
+        let tag_regex = regex::Regex::new(r"<tag\s+([^>]+)/>").unwrap();
+        let attr_regex = regex::Regex::new(r#"(\w+)\s*=\s*"([^"]*)""#).unwrap();
+
+        let mut retries = 3;
+        let mut delay_ms = 500;
+
+        loop {
+            let response = self
+                .client
+                .get("https://api.rule34.xxx/index.php")
+                .query(&query_params)
+                .send()
+                .await
+                .map_err(|e| format!("Tag request network error: {}", e))?;
+
+            let status = response.status();
+            if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                if retries > 0 {
+                    retries -= 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                    delay_ms *= 2;
+                    continue;
+                } else {
+                    return Err("Rule34 Tag API rate limited (429 Too Many Requests)".to_string());
+                }
+            }
+
+            if status.is_client_error() || status.is_server_error() {
+                return Err(format!("Rule34 Tag API returned HTTP status {}", status));
+            }
+
+            let text = response
+                .text()
+                .await
+                .map_err(|e| format!("Failed to read tag response body: {}", e))?;
+
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                return Ok((name.to_string(), 0));
+            }
+
+            if let Some(cap) = tag_regex.captures(trimmed) {
+                let attrs_str = &cap[1];
+                let mut resolved_name = String::new();
+                let mut type_id = 0;
+
+                for attr_cap in attr_regex.captures_iter(attrs_str) {
+                    let key = &attr_cap[1];
+                    let val = html_escape::decode_html_entities(&attr_cap[2]).into_owned();
+
+                    match key {
+                        "name" => resolved_name = val,
+                        "type" => type_id = val.parse().unwrap_or(0),
+                        _ => {}
+                    }
+                }
+
+                if !resolved_name.is_empty() {
+                    return Ok((resolved_name, type_id));
+                }
+            }
+
+            break;
+        }
+
+        // Default to General (0) if not found in the response
+        Ok((name.to_string(), 0))
+    }
+
+    pub async fn fetch_tag_types(
+        &self,
+        names: &[String],
+    ) -> Result<std::collections::HashMap<String, i32>, String> {
+        if names.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        use futures_util::stream::{self, StreamExt};
+
+        let mut map = std::collections::HashMap::new();
+
+        // Query up to 3 tags concurrently
+        let mut stream = stream::iter(names.iter().cloned())
+            .map(|name| {
+                let client = self;
+                async move { client.fetch_single_tag_type(&name).await }
+            })
+            .buffer_unordered(3);
+
+        while let Some(res) = stream.next().await {
+            match res {
+                Ok((name, type_id)) => {
+                    map.insert(name, type_id);
+                }
+                Err(e) => {
+                    eprintln!("Failed to fetch tag type: {}", e);
+                }
+            }
+        }
+
+        Ok(map)
+    }
+
     fn sanitize_autocomplete_val(&self, val: &str) -> String {
         let normalized = val.split_whitespace().collect::<Vec<_>>().join(" ");
         if normalized.is_empty() {

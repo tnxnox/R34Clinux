@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { DetailModal } from "./DetailModal";
 
@@ -127,6 +127,60 @@ describe("DetailModal component", () => {
 
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("renders categorized tag sections and badges when tag types are resolved", async () => {
+    const mockPostCategorized = {
+      ...mockPost,
+      tags: ["artist_tag", "char_tag", "copy_tag", "meta_tag", "general_tag"],
+    };
+
+    const { invoke } = await import("@tauri-apps/api/core");
+    invoke.mockImplementation((cmd) => {
+      if (cmd === "get_tags_with_types") {
+        return Promise.resolve({
+          artist_tag: 1,
+          char_tag: 4,
+          copy_tag: 3,
+          meta_tag: 5,
+          general_tag: 0,
+        });
+      }
+      return Promise.resolve(null);
+    });
+
+    await act(async () => {
+      render(
+        <DetailModal
+          post={mockPostCategorized}
+          collections={[]}
+          favorites={[]}
+        />
+      );
+    });
+
+    const artistBadge = await screen.findByText("artist_tag");
+    expect(artistBadge).toBeInTheDocument();
+    expect(artistBadge).toHaveClass("tag-badge", "artist");
+
+    const charBadge = screen.getByText("char_tag");
+    expect(charBadge).toHaveClass("tag-badge", "character");
+
+    const copyBadge = screen.getByText("copy_tag");
+    expect(copyBadge).toHaveClass("tag-badge", "copyright");
+
+    const metaBadge = screen.getByText("meta_tag");
+    expect(metaBadge).toHaveClass("tag-badge", "metadata");
+
+    const generalBadge = screen.getByText("general_tag");
+    expect(generalBadge).toHaveClass("tag-badge", "general");
+
+    expect(screen.getByText("Artists")).toBeInTheDocument();
+    expect(screen.getByText("Characters")).toBeInTheDocument();
+    expect(screen.getByText("Copyrights")).toBeInTheDocument();
+    const metadataHeaders = screen.getAllByText("Metadata");
+    expect(metadataHeaders.length).toBe(2);
+    expect(screen.getByText("General")).toBeInTheDocument();
   });
 });
 

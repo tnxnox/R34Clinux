@@ -160,6 +160,7 @@ export const DetailModal = React.memo(function DetailModal({
   const [isMetadataCollapsed, setIsMetadataCollapsed] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [localUrl, setLocalUrl] = useState(null);
+  const [tagTypes, setTagTypes] = useState({});
 
   const mediaPaneRef = useRef(null);
   const imgRef = useRef(null);
@@ -173,6 +174,73 @@ export const DetailModal = React.memo(function DetailModal({
 
   const remoteUrl = post?.file_url || post?.sample_url || post?.preview_url;
   const url = localUrl || remoteUrl;
+
+  // Fetch tag types from backend
+  useEffect(() => {
+    let active = true;
+    const fetchTypes = async () => {
+      if (!post?.tags || post.tags.length === 0) {
+        if (active) setTagTypes({});
+        return;
+      }
+      try {
+        const res = await invoke("get_tags_with_types", {
+          postId: post.id,
+          tags: post.tags,
+        });
+        if (active) {
+          setTagTypes(res || {});
+        }
+      } catch (err) {
+        console.error("Failed to fetch tag types:", err);
+      }
+    };
+    fetchTypes();
+    return () => {
+      active = false;
+      const p = invoke("cancel_tag_fetching");
+      if (p && typeof p.catch === "function") {
+        p.catch(() => {});
+      }
+    };
+  }, [post?.id, post?.tags]);
+
+  // Group tags by their type
+  const groupedTags = React.useMemo(() => {
+    const groups = {
+      artist: [],
+      character: [],
+      copyright: [],
+      metadata: [],
+      general: [],
+    };
+
+    if (!post?.tags) return groups;
+
+    post.tags.forEach((tag) => {
+      const type = tagTypes[tag];
+      if (type === 1) {
+        groups.artist.push(tag);
+      } else if (type === 4) {
+        groups.character.push(tag);
+      } else if (type === 3) {
+        groups.copyright.push(tag);
+      } else if (type === 5) {
+        groups.metadata.push(tag);
+      } else {
+        groups.general.push(tag);
+      }
+    });
+
+    // Sort tags alphabetically within their respective groups
+    groups.artist.sort();
+    groups.character.sort();
+    groups.copyright.sort();
+    groups.metadata.sort();
+    groups.general.sort();
+
+    return groups;
+  }, [post?.tags, tagTypes]);
 
   // Reset zoom & pan, sidebar state, and fullscreen when post changes
   useEffect(() => {
@@ -455,20 +523,97 @@ export const DetailModal = React.memo(function DetailModal({
 
             {/* Tags */}
             {post.tags && post.tags.length > 0 ? (
-              <div className="info-section">
-                <h3>Associated Tags</h3>
-                <div className="tags-container" style={{ marginTop: "8px" }}>
-                  {post.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="tag-badge"
-                      onClick={() => onTagClick(tag)}
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              </div>
+              <>
+                {/* Artists */}
+                {groupedTags.artist.length > 0 && (
+                  <div className="info-section">
+                    <h3 className="tag-group-title artist">Artists</h3>
+                    <div className="tags-container" style={{ marginTop: "8px" }}>
+                      {groupedTags.artist.map((tag) => (
+                        <span
+                          key={tag}
+                          className="tag-badge artist"
+                          onClick={() => onTagClick(tag)}
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Characters */}
+                {groupedTags.character.length > 0 && (
+                  <div className="info-section">
+                    <h3 className="tag-group-title character">Characters</h3>
+                    <div className="tags-container" style={{ marginTop: "8px" }}>
+                      {groupedTags.character.map((tag) => (
+                        <span
+                          key={tag}
+                          className="tag-badge character"
+                          onClick={() => onTagClick(tag)}
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Copyrights */}
+                {groupedTags.copyright.length > 0 && (
+                  <div className="info-section">
+                    <h3 className="tag-group-title copyright">Copyrights</h3>
+                    <div className="tags-container" style={{ marginTop: "8px" }}>
+                      {groupedTags.copyright.map((tag) => (
+                        <span
+                          key={tag}
+                          className="tag-badge copyright"
+                          onClick={() => onTagClick(tag)}
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* General */}
+                {groupedTags.general.length > 0 && (
+                  <div className="info-section">
+                    <h3 className="tag-group-title general">General</h3>
+                    <div className="tags-container" style={{ marginTop: "8px" }}>
+                      {groupedTags.general.map((tag) => (
+                        <span
+                          key={tag}
+                          className="tag-badge general"
+                          onClick={() => onTagClick(tag)}
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Metadata */}
+                {groupedTags.metadata.length > 0 && (
+                  <div className="info-section">
+                    <h3 className="tag-group-title metadata">Metadata</h3>
+                    <div className="tags-container" style={{ marginTop: "8px" }}>
+                      {groupedTags.metadata.map((tag) => (
+                        <span
+                          key={tag}
+                          className="tag-badge metadata"
+                          onClick={() => onTagClick(tag)}
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
             ) : !post.file_url ? (
               <div className="info-section">
                 <h3>Associated Tags</h3>

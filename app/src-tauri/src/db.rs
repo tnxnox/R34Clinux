@@ -139,6 +139,42 @@ impl LocalFavoritesStore {
             [],
         )?;
 
+        // Drop the old tag cache table that cached everything as type 0
+        let _ = conn.execute("DROP TABLE IF EXISTS tags_cache", []);
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS tags_cache_v2 (
+                name TEXT PRIMARY KEY,
+                type_id INTEGER NOT NULL
+            )",
+            [],
+        )?;
+
+        {
+            let mut conn2 = self.connect()?;
+            let count: i64 = conn2
+                .query_row("SELECT COUNT(*) FROM tags_cache_v2", [], |row| row.get(0))
+                .unwrap_or(0);
+
+            if count == 0 {
+                let seed_str = include_str!("tags_seed.json");
+                if let Ok(seed_data) =
+                    serde_json::from_str::<std::collections::HashMap<String, i32>>(seed_str)
+                {
+                    let tx = conn2.transaction()?;
+                    {
+                        let mut stmt = tx.prepare(
+                            "INSERT OR REPLACE INTO tags_cache_v2 (name, type_id) VALUES (?1, ?2)",
+                        )?;
+                        for (name, type_id) in seed_data {
+                            let _ = stmt.execute(params![name, type_id]);
+                        }
+                    }
+                    tx.commit()?;
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -666,6 +702,52 @@ impl LocalFavoritesStore {
         }
         Ok(friends)
     }
+
+    pub fn get_cached_tag_types(
+        &self,
+        names: &[String],
+    ) -> Result<std::collections::HashMap<String, i32>> {
+        let conn = self.connect()?;
+        if names.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        // Build query using placeholders for names
+        let placeholders = names.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let query = format!(
+            "SELECT name, type_id FROM tags_cache_v2 WHERE name IN ({})",
+            placeholders
+        );
+
+        let mut stmt = conn.prepare(&query)?;
+
+        // Bind parameters dynamically
+        let params = rusqlite::params_from_iter(names.iter());
+        let mut rows = stmt.query(params)?;
+
+        let mut map = std::collections::HashMap::new();
+        while let Some(row) = rows.next()? {
+            let name: String = row.get(0)?;
+            let type_id: i32 = row.get(1)?;
+            map.insert(name, type_id);
+        }
+
+        Ok(map)
+    }
+
+    pub fn insert_tag_types(&self, tags: &std::collections::HashMap<String, i32>) -> Result<()> {
+        let mut conn = self.connect()?;
+        let tx = conn.transaction()?;
+        {
+            let mut stmt =
+                tx.prepare("INSERT OR REPLACE INTO tags_cache_v2 (name, type_id) VALUES (?1, ?2)")?;
+            for (name, type_id) in tags {
+                stmt.execute(params![name, type_id])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -846,6 +928,33 @@ mod tests {
         store.remove_friend("friend123").unwrap();
         let friends = store.list_friends().unwrap();
         assert_eq!(friends.len(), 0);
+
+        let _ = std::fs::remove_file(&store.database_path);
+    }
+
+    #[test]
+    fn test_tags_cache() {
+        let store = temp_db();
+
+        let mut tags = std::collections::HashMap::new();
+        tags.insert("solo".to_string(), 0);
+        tags.insert("artist_name".to_string(), 1);
+        tags.insert("character_name".to_string(), 4);
+
+        store.insert_tag_types(&tags).unwrap();
+
+        let cached = store
+            .get_cached_tag_types(&[
+                "solo".to_string(),
+                "artist_name".to_string(),
+                "unknown_tag".to_string(),
+            ])
+            .unwrap();
+
+        assert_eq!(cached.len(), 2);
+        assert_eq!(cached.get("solo"), Some(&0));
+        assert_eq!(cached.get("artist_name"), Some(&1));
+        assert_eq!(cached.get("unknown_tag"), None);
 
         let _ = std::fs::remove_file(&store.database_path);
     }

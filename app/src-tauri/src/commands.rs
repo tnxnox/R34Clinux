@@ -23,6 +23,7 @@ pub struct AppStateInner {
     pub mutation_progress: StdMutex<crate::models::MutationProgress>,
     pub mutation_streaks: StdMutex<std::collections::HashMap<String, i32>>,
     pub has_synced_once: std::sync::atomic::AtomicBool,
+    pub current_viewing_post_id: std::sync::atomic::AtomicI64,
 }
 
 #[derive(Clone)]
@@ -471,6 +472,94 @@ pub fn get_downloaded_path(
         .db
         .get_download_path(postId, &md5)
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_tags_with_types(
+    state: tauri::State<'_, AppState>,
+    postId: i64,
+    tags: Vec<String>,
+) -> Result<std::collections::HashMap<String, i32>, String> {
+    if tags.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+
+    // Set the currently active viewing post ID
+    state
+        .0
+        .current_viewing_post_id
+        .store(postId, std::sync::atomic::Ordering::Relaxed);
+
+    // 1. Check local database cache
+    let mut result_map = state
+        .0
+        .db
+        .get_cached_tag_types(&tags)
+        .map_err(|e| format!("Database error checking tag cache: {}", e))?;
+
+    // 2. Identify missing tags
+    let missing_tags: Vec<String> = tags
+        .iter()
+        .filter(|t| !result_map.contains_key(*t))
+        .cloned()
+        .collect();
+
+    if !missing_tags.is_empty() {
+        let settings = state.0.settings.load();
+        let client = Rule34Client::new(settings.user_id.clone(), settings.api_key.clone());
+
+        // Process in chunks of 3 and check for cancellation in between
+        for chunk in missing_tags.chunks(3) {
+            // Check if the user closed or switched the post
+            if state
+                .0
+                .current_viewing_post_id
+                .load(std::sync::atomic::Ordering::Relaxed)
+                != postId
+            {
+                return Ok(result_map); // Abort further tag loading early
+            }
+
+            let fetched_types = client.fetch_tag_types(chunk).await?;
+
+            if !fetched_types.is_empty() {
+                state
+                    .0
+                    .db
+                    .insert_tag_types(&fetched_types)
+                    .map_err(|e| format!("Database error inserting tag cache: {}", e))?;
+
+                result_map.extend(fetched_types);
+            }
+
+            // Default any unresolved tags to 0 and cache them
+            let mut unresolved = std::collections::HashMap::new();
+            for tag in chunk {
+                if !result_map.contains_key(tag) {
+                    result_map.insert(tag.clone(), 0);
+                    unresolved.insert(tag.clone(), 0);
+                }
+            }
+
+            if !unresolved.is_empty() {
+                state
+                    .0
+                    .db
+                    .insert_tag_types(&unresolved)
+                    .map_err(|e| format!("Database error caching unresolved tags: {}", e))?;
+            }
+        }
+    }
+
+    Ok(result_map)
+}
+
+#[tauri::command]
+pub fn cancel_tag_fetching(state: tauri::State<'_, AppState>) {
+    state
+        .0
+        .current_viewing_post_id
+        .store(0, std::sync::atomic::Ordering::Relaxed);
 }
 
 #[cfg(test)]
