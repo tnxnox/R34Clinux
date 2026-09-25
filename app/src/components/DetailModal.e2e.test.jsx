@@ -66,7 +66,8 @@ describe("DetailModal E2E and Integration Tests", () => {
     });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await act(async () => {});
     vi.restoreAllMocks();
     Element.prototype.requestFullscreen = originalRequestFullscreen;
     document.exitFullscreen = originalExitFullscreen;
