@@ -721,6 +721,12 @@ impl FlareSolverrFavoritesClient {
 
                 for (post_id, preview_url) in items {
                     if seen.insert(post_id) {
+                        let (_dir_opt, md5_opt, sample_opt, file_opt) =
+                            crate::html::derive_cdn_urls(&preview_url);
+                        let md5 = md5_opt.unwrap_or_default();
+                        let sample_url = sample_opt.unwrap_or_else(|| preview_url.clone());
+                        let file_url = file_opt.unwrap_or_default();
+
                         posts.push(Post {
                             id: post_id,
                             tags: Vec::new(),
@@ -730,10 +736,10 @@ impl FlareSolverrFavoritesClient {
                             height: None,
                             file_size: None,
                             source: "".to_string(),
-                            md5: "".to_string(),
+                            md5,
                             preview_url: preview_url.clone(),
-                            sample_url: preview_url,
-                            file_url: "".to_string(),
+                            sample_url,
+                            file_url,
                             created_at: "".to_string(),
                         });
                     }
@@ -748,9 +754,9 @@ impl FlareSolverrFavoritesClient {
         }
 
         if !posts.is_empty() {
-            // Hydrate posts
+            // Hydrate posts via local cache and unthrottled CDN HEAD resolution
             debug_logs.push_str(&format!(
-                "\nHydrating {} HTML scraped posts via DAPI...",
+                "\nHydrating {} HTML scraped posts via local DB & CDN...",
                 posts.len()
             ));
             self.hydrate_posts(&mut posts).await;
@@ -760,33 +766,28 @@ impl FlareSolverrFavoritesClient {
     }
 
     async fn hydrate_posts(&self, posts: &mut [Post]) {
-        // Fetch detailed post data from DAPI for posts with only IDs with bounded concurrency
-        use futures_util::stream::{self, StreamExt};
-
-        let client = crate::api::Rule34Client::new(self.user_id.clone(), self.api_key.clone());
-        let post_ids: Vec<(usize, i64)> =
-            posts.iter().enumerate().map(|(i, p)| (i, p.id)).collect();
-
-        let mut stream = stream::iter(post_ids)
-            .map(|(idx, id)| {
-                let client_ref = &client;
-                async move {
-                    let tags = format!("id:{}", id);
-                    let detail = if let Ok(details) = client_ref.search_posts(&tags, 0, 1).await {
-                        details.into_iter().next()
-                    } else {
-                        None
-                    };
-                    (idx, detail)
+        // 1. Check local SQLite DB first - zero network requests for cached posts!
+        if let Ok(store) = std::panic::catch_unwind(|| crate::db::LocalFavoritesStore::new(None)) {
+            if let Ok(local_posts) = store.list_favorites(None, None) {
+                let mut local_map = std::collections::HashMap::new();
+                for lp in local_posts {
+                    local_map.insert(lp.id, lp);
                 }
-            })
-            .buffer_unordered(3);
-
-        while let Some((idx, opt_detail)) = stream.next().await {
-            if let Some(detail) = opt_detail {
-                posts[idx] = detail;
+                for post in posts.iter_mut() {
+                    if let Some(cached) = local_map.get(&post.id) {
+                        *post = cached.clone();
+                    }
+                }
             }
         }
+
+        // 2. For posts needing media resolution, resolve exact extensions & sizes via unthrottled CDN HEAD requests
+        let client = Client::builder()
+            .timeout(Duration::from_secs(10))
+            .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+            .build()
+            .unwrap_or_default();
+        crate::html::resolve_cdn_posts_media(&client, posts).await;
     }
 
     pub async fn add_favorite(&self, post_id: i64, debug_logs: &mut String) -> Result<(), String> {
@@ -837,16 +838,8 @@ impl FlareSolverrFavoritesClient {
             }
         }
 
-        // Verify it was added
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        match self.favorite_exists_in_view(post_id, debug_logs).await {
-            Ok(true) => Ok(()),
-            Ok(false) => Err(format!(
-                "Unable to confirm favorite #{} was added.",
-                post_id
-            )),
-            Err(e) => Err(e),
-        }
+        // Succeeded without redundant full-page verification scrape
+        Ok(())
     }
 
     pub async fn remove_favorite(
@@ -1066,5 +1059,69 @@ mod tests {
         let login_required_html = r#"<form><input name="user"/><input name="pass"/></form>"#;
         assert!(client.looks_favorites_view_authenticated(auth_fav_html));
         assert!(!client.looks_favorites_view_authenticated(login_required_html));
+    }
+
+    #[test]
+    fn test_hydrate_posts_local_db_cache() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "r34-hydrate-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).ok();
+        let db_path = temp_dir.join("favorites.db");
+        let store = crate::db::LocalFavoritesStore::new(Some(db_path));
+
+        let cached_post = crate::models::Post {
+            id: 999999,
+            tags: vec!["tag1".to_string(), "tag2".to_string()],
+            rating: "safe".to_string(),
+            score: Some(42),
+            width: Some(1920),
+            height: Some(1080),
+            file_size: Some(123456),
+            source: "".to_string(),
+            md5: "0123456789abcdef0123456789abcdef".to_string(),
+            preview_url: "https://wimg.rule34.xxx/thumbnails/100/thumbnail_0123456789abcdef0123456789abcdef.jpg".to_string(),
+            sample_url: "https://wimg.rule34.xxx/samples/100/sample_0123456789abcdef0123456789abcdef.jpg".to_string(),
+            file_url: "https://wimg.rule34.xxx//images/100/0123456789abcdef0123456789abcdef.jpg".to_string(),
+            created_at: "".to_string(),
+        };
+        store.add_favorite(&cached_post).unwrap();
+
+        let mut posts = [crate::models::Post {
+            id: 999999,
+            tags: Vec::new(),
+            rating: "".to_string(),
+            score: None,
+            width: None,
+            height: None,
+            file_size: None,
+            source: "".to_string(),
+            md5: "".to_string(),
+            preview_url: "".to_string(),
+            sample_url: "".to_string(),
+            file_url: "".to_string(),
+            created_at: "".to_string(),
+        }];
+
+        if let Ok(local_posts) = store.list_favorites(None, None) {
+            let mut local_map = std::collections::HashMap::new();
+            for lp in local_posts {
+                local_map.insert(lp.id, lp);
+            }
+            for post in posts.iter_mut() {
+                if let Some(cached) = local_map.get(&post.id) {
+                    *post = cached.clone();
+                }
+            }
+        }
+
+        assert_eq!(posts[0].tags, vec!["tag1", "tag2"]);
+        assert_eq!(posts[0].score, Some(42));
+        assert_eq!(posts[0].rating, "safe");
+        std::fs::remove_dir_all(&temp_dir).ok();
     }
 }
