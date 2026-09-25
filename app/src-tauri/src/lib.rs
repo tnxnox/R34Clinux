@@ -5,6 +5,7 @@ mod commands;
 mod db;
 mod downloader;
 mod flaresolverr;
+mod html;
 mod models;
 mod mutations;
 mod scraper;
@@ -36,21 +37,30 @@ pub fn run() {
                         let state = app_handle.state::<commands::AppState>();
                         let settings = state.0.settings.load();
 
-                        // Wait for any running sync task to finish, then run close-up sync
-                        let _guard = state.0.sync_lock.lock().await;
+                        let close_sync = async {
+                            // Wait for any running sync task to finish, then run close-up sync
+                            let _guard = state.0.sync_lock.lock().await;
 
-                        let mut debug_logs = "Close up sync started.".to_string();
-                        let mut error_logs = "".to_string();
-                        let _ = sync::sync_remote_favorites(
-                            &settings,
-                            &state.0.db,
-                            &mut debug_logs,
-                            &mut error_logs,
-                            Some(&state.0.mutation_progress),
-                            Some(&state.0.mutation_streaks),
-                            Some(&state.0.has_synced_once),
-                        )
-                        .await;
+                            let mut debug_logs = "Close up sync started.".to_string();
+                            let mut error_logs = "".to_string();
+                            let _ = sync::sync_remote_favorites(
+                                &settings,
+                                &state.0.db,
+                                &mut debug_logs,
+                                &mut error_logs,
+                                Some(&state.0.mutation_progress),
+                                Some(&state.0.mutation_streaks),
+                                Some(&state.0.has_synced_once),
+                            )
+                            .await;
+                        };
+
+                        if tokio::time::timeout(std::time::Duration::from_secs(15), close_sync)
+                            .await
+                            .is_err()
+                        {
+                            eprintln!("Close-up sync timed out after 15 seconds; forcing exit.");
+                        }
 
                         // Now exit the app safely
                         app_handle.exit(0);
@@ -65,6 +75,12 @@ pub fn run() {
             // We recreate a db handle for downloader just to avoid sharing issues, or use the cloned/created one
             let downloader_db = db::LocalFavoritesStore::new(None);
             let downloader = downloader::DownloadManager::new(downloader_db);
+
+            let client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                .build()
+                .unwrap_or_default();
 
             let initial_progress = if let Ok(pending_file) = mutations::load_pending_mutations() {
                 let count = mutations::count_active_mutations(&pending_file);
@@ -82,6 +98,7 @@ pub fn run() {
                 db,
                 settings,
                 downloader,
+                client,
                 sync_lock: tokio::sync::Mutex::new(()),
                 sync_status: std::sync::Mutex::new(models::SyncStatus {
                     is_running: false,
