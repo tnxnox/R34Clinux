@@ -15,12 +15,12 @@ To maintain the security and cleanliness of this repository:
 1. Fork and clone the repo
 2. Install system dependencies using `./scripts/setup.sh` or the guide in `README.md`
 3. Start the development server using `./start_r34.sh` or `make dev`
-4. Run unit tests using `make test` or `cd app/src-tauri && cargo test`
+4. Run unit tests using `make test` (or `cargo test --workspace` & `npm --prefix app test`)
 
 ## Code Style
 
-- Ensure all Rust code is formatted via `cargo fmt` and matches `clippy` checks (`cargo clippy --all-targets -- -D warnings`)
-- Keep UI components responsive, modular, and use vanilla CSS (or components styles) adhering to design system tokens
+- Ensure all Rust code is formatted via `cargo fmt --all -- --check` and matches `clippy` checks (`cargo clippy --workspace --all-targets -- -D warnings`)
+- Keep UI components responsive, modular, and adhering to the design system tokens and test coverage
 
 ## Commit Messages
 
@@ -44,8 +44,12 @@ Types: `feat`, `fix`, `refactor`, `perf`, `docs`, `chore`, `test`, `build`
 ## Running Tests
 
 ```bash
-# Run backend unit tests
+# Run all tests (Rust backend + Frontend Vitest suites)
 make test
+
+# Or run backend / frontend suites individually:
+cargo test --workspace
+npm --prefix app test
 ```
 
 ## License
