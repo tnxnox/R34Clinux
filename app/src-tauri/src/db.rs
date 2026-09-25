@@ -43,13 +43,14 @@ impl LocalFavoritesStore {
             "
             PRAGMA journal_mode = WAL;
             PRAGMA busy_timeout = 30000;
+            PRAGMA foreign_keys = ON;
         ",
         )?;
         Ok(conn)
     }
 
     fn init_schema(&self) -> Result<()> {
-        let conn = self.connect()?;
+        let mut conn = self.connect()?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS favorites (
                 id INTEGER PRIMARY KEY,
@@ -71,16 +72,19 @@ impl LocalFavoritesStore {
         )?;
 
         // Migration: Add is_favorite column if it doesn't exist
-        let mut check_col = conn.prepare("PRAGMA table_info(favorites)")?;
-        let mut rows = check_col.query([])?;
-        let mut has_is_favorite = false;
-        while let Some(row) = rows.next()? {
-            let col_name: String = row.get(1)?;
-            if col_name == "is_favorite" {
-                has_is_favorite = true;
-                break;
+        let has_is_favorite = {
+            let mut check_col = conn.prepare("PRAGMA table_info(favorites)")?;
+            let mut rows = check_col.query([])?;
+            let mut found = false;
+            while let Some(row) = rows.next()? {
+                let col_name: String = row.get(1)?;
+                if col_name == "is_favorite" {
+                    found = true;
+                    break;
+                }
             }
-        }
+            found
+        };
         if !has_is_favorite {
             conn.execute(
                 "ALTER TABLE favorites ADD COLUMN is_favorite INTEGER DEFAULT 1",
@@ -139,9 +143,6 @@ impl LocalFavoritesStore {
             [],
         )?;
 
-        // Drop the old tag cache table that cached everything as type 0
-        let _ = conn.execute("DROP TABLE IF EXISTS tags_cache", []);
-
         conn.execute(
             "CREATE TABLE IF NOT EXISTS tags_cache_v2 (
                 name TEXT PRIMARY KEY,
@@ -151,8 +152,7 @@ impl LocalFavoritesStore {
         )?;
 
         {
-            let mut conn2 = self.connect()?;
-            let count: i64 = conn2
+            let count: i64 = conn
                 .query_row("SELECT COUNT(*) FROM tags_cache_v2", [], |row| row.get(0))
                 .unwrap_or(0);
 
@@ -161,7 +161,7 @@ impl LocalFavoritesStore {
                 if let Ok(seed_data) =
                     serde_json::from_str::<std::collections::HashMap<String, i32>>(seed_str)
                 {
-                    let tx = conn2.transaction()?;
+                    let tx = conn.transaction()?;
                     {
                         let mut stmt = tx.prepare(
                             "INSERT OR REPLACE INTO tags_cache_v2 (name, type_id) VALUES (?1, ?2)",
@@ -226,48 +226,51 @@ impl LocalFavoritesStore {
 
         match collection_name {
             Some(name) => {
-                let query = if let Some(l) = limit {
-                    format!(
-                        "SELECT f.id, f.tags, f.rating, f.score, f.width, f.height, f.file_size, f.source, f.md5, \
-                         f.preview_url, f.sample_url, f.file_url, f.created_at \
-                         FROM favorites f \
-                         INNER JOIN favorite_collection_items ci ON ci.post_id = f.id \
-                         WHERE ci.collection_name = ?1 \
-                         ORDER BY f.favorited_at DESC LIMIT {}",
-                        l
-                    )
+                let query = if limit.is_some() {
+                    "SELECT f.id, f.tags, f.rating, f.score, f.width, f.height, f.file_size, f.source, f.md5, \
+                     f.preview_url, f.sample_url, f.file_url, f.created_at \
+                     FROM favorites f \
+                     INNER JOIN favorite_collection_items ci ON ci.post_id = f.id \
+                     WHERE ci.collection_name = ?1 \
+                     ORDER BY f.favorited_at DESC LIMIT ?2"
                 } else {
                     "SELECT f.id, f.tags, f.rating, f.score, f.width, f.height, f.file_size, f.source, f.md5, \
                      f.preview_url, f.sample_url, f.file_url, f.created_at \
                      FROM favorites f \
                      INNER JOIN favorite_collection_items ci ON ci.post_id = f.id \
                      WHERE ci.collection_name = ?1 \
-                     ORDER BY f.favorited_at DESC".to_string()
+                     ORDER BY f.favorited_at DESC"
                 };
-                let mut stmt = conn.prepare(&query)?;
-                let mapped = stmt.query_map([name], |row| self.row_to_post(row))?;
-                for p in mapped {
-                    posts.push(p?);
+                let mut stmt = conn.prepare(query)?;
+                if let Some(l) = limit {
+                    for p in stmt.query_map(params![name, l], |row| self.row_to_post(row))? {
+                        posts.push(p?);
+                    }
+                } else {
+                    for p in stmt.query_map(params![name], |row| self.row_to_post(row))? {
+                        posts.push(p?);
+                    }
                 }
             }
             None => {
-                let query = if let Some(l) = limit {
-                    format!(
-                        "SELECT id, tags, rating, score, width, height, file_size, source, md5, \
-                         preview_url, sample_url, file_url, created_at \
-                         FROM favorites WHERE is_favorite = 1 ORDER BY favorited_at DESC LIMIT {}",
-                        l
-                    )
+                let query = if limit.is_some() {
+                    "SELECT id, tags, rating, score, width, height, file_size, source, md5, \
+                     preview_url, sample_url, file_url, created_at \
+                     FROM favorites WHERE is_favorite = 1 ORDER BY favorited_at DESC LIMIT ?1"
                 } else {
                     "SELECT id, tags, rating, score, width, height, file_size, source, md5, \
                      preview_url, sample_url, file_url, created_at \
                      FROM favorites WHERE is_favorite = 1 ORDER BY favorited_at DESC"
-                        .to_string()
                 };
-                let mut stmt = conn.prepare(&query)?;
-                let mapped = stmt.query_map([], |row| self.row_to_post(row))?;
-                for p in mapped {
-                    posts.push(p?);
+                let mut stmt = conn.prepare(query)?;
+                if let Some(l) = limit {
+                    for p in stmt.query_map(params![l], |row| self.row_to_post(row))? {
+                        posts.push(p?);
+                    }
+                } else {
+                    for p in stmt.query_map([], |row| self.row_to_post(row))? {
+                        posts.push(p?);
+                    }
                 }
             }
         };
@@ -755,7 +758,24 @@ mod tests {
     use super::*;
     use crate::models::Post;
 
-    fn temp_db() -> LocalFavoritesStore {
+    struct TempDbGuard {
+        store: LocalFavoritesStore,
+    }
+
+    impl std::ops::Deref for TempDbGuard {
+        type Target = LocalFavoritesStore;
+        fn deref(&self) -> &Self::Target {
+            &self.store
+        }
+    }
+
+    impl Drop for TempDbGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.store.database_path);
+        }
+    }
+
+    fn temp_db() -> TempDbGuard {
         let mut path = std::env::temp_dir();
         let name = format!(
             "r34_test_{}.db",
@@ -765,7 +785,9 @@ mod tests {
                 .as_nanos()
         );
         path.push(name);
-        LocalFavoritesStore::new(Some(path))
+        TempDbGuard {
+            store: LocalFavoritesStore::new(Some(path)),
+        }
     }
 
     #[test]
@@ -955,7 +977,65 @@ mod tests {
         assert_eq!(cached.get("solo"), Some(&0));
         assert_eq!(cached.get("artist_name"), Some(&1));
         assert_eq!(cached.get("unknown_tag"), None);
+    }
 
-        let _ = std::fs::remove_file(&store.database_path);
+    #[test]
+    fn test_get_download_path() {
+        let store = temp_db();
+
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_download_file_123.jpg");
+        std::fs::write(&test_file, b"content").unwrap();
+        let test_file_str = test_file.to_str().unwrap();
+
+        assert_eq!(store.get_download_path(123, "md5hash").unwrap(), None);
+
+        store
+            .record_download(123, "md5hash", test_file_str)
+            .unwrap();
+
+        assert_eq!(
+            store.get_download_path(123, "md5hash").unwrap(),
+            Some(test_file_str.to_string())
+        );
+        // Different MD5 or ID returns None
+        assert_eq!(store.get_download_path(999, "other_md5").unwrap(), None);
+
+        // After the file is deleted from disk, get_download_path returns None
+        let _ = std::fs::remove_file(&test_file);
+        assert_eq!(store.get_download_path(123, "md5hash").unwrap(), None);
+    }
+
+    #[test]
+    fn test_remove_favorites_batch() {
+        let store = temp_db();
+
+        let post1 = Post {
+            id: 101,
+            tags: vec![],
+            rating: "s".to_string(),
+            score: None,
+            width: None,
+            height: None,
+            file_size: None,
+            source: "".to_string(),
+            md5: "m1".to_string(),
+            preview_url: "".to_string(),
+            sample_url: "".to_string(),
+            file_url: "".to_string(),
+            created_at: "".to_string(),
+        };
+        let post2 = Post {
+            id: 102,
+            md5: "m2".to_string(),
+            ..post1.clone()
+        };
+
+        store.upsert_many(&[post1, post2]).unwrap();
+        assert_eq!(store.list_favorites(None, None).unwrap().len(), 2);
+
+        let removed = store.remove_favorites(&[101, 102, 999]).unwrap();
+        assert_eq!(removed, 2);
+        assert_eq!(store.list_favorites(None, None).unwrap().len(), 0);
     }
 }
