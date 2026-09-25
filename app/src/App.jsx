@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { api } from "./services/api";
 import {
   AlertTriangle,
   Check,
@@ -78,7 +78,7 @@ function App() {
 
   const fetchSettings = useCallback(async () => {
     try {
-      const data = await invoke("get_settings");
+      const data = await api.getSettings();
       setSettings(data);
     } catch (err) {
       setError("Unable to communicate with the Tauri backend.");
@@ -88,7 +88,7 @@ function App() {
   const saveSettings = useCallback(async (updated) => {
     setLoading(true);
     try {
-      await invoke("update_settings", { payload: updated });
+      await api.updateSettings(updated);
       showToast("Settings saved successfully.");
       fetchSettings();
     } catch (err) {
@@ -100,7 +100,7 @@ function App() {
 
   const fetchFavorites = useCallback(async () => {
     try {
-      const data = await invoke("list_favorites", {
+      const data = await api.listFavorites({
         collection: selectedCollection || null
       });
       setFavorites(data);
@@ -111,7 +111,7 @@ function App() {
 
   const fetchCollections = useCallback(async () => {
     try {
-      const data = await invoke("list_collections");
+      const data = await api.listCollections();
       setCollections(data);
     } catch (err) {
       console.error("Failed to load collections", err);
@@ -120,7 +120,7 @@ function App() {
 
   const fetchFriends = useCallback(async () => {
     try {
-      const data = await invoke("list_friends");
+      const data = await api.listFriends();
       setFriends(data);
     } catch (err) {
       console.error("Failed to load friends", err);
@@ -129,7 +129,7 @@ function App() {
 
   const fetchSyncStatus = useCallback(async () => {
     try {
-      const data = await invoke("get_sync_status");
+      const data = await api.getSyncStatus();
       setSyncStatus(data);
     } catch (err) {
       console.error("Failed to load sync status", err);
@@ -138,7 +138,7 @@ function App() {
 
   const fetchMutationProgress = useCallback(async () => {
     try {
-      const data = await invoke("get_mutation_progress");
+      const data = await api.getMutationProgress();
       setMutationProgress(data);
     } catch (err) {
       console.error("Failed to load mutation progress", err);
@@ -147,7 +147,7 @@ function App() {
 
   const triggerSync = useCallback(async () => {
     try {
-      await invoke("start_sync");
+      await api.startSync();
       showToast("Favorites synchronization started.");
       fetchSyncStatus();
     } catch (err) {
@@ -158,7 +158,7 @@ function App() {
   const handleSearch = useCallback(async (page = 0) => {
     setLoading(true);
     try {
-      const data = await invoke("search_posts", {
+      const data = await api.searchPosts({
         tags: searchQuery,
         page: page,
         limit: settings?.page_size || 50
@@ -177,7 +177,7 @@ function App() {
     const isFav = favorites.some(f => f.id === post.id);
     try {
       if (isFav) {
-        await invoke("remove_favorite", { postId: post.id });
+        await api.removeFavorite(post.id);
         setFavorites(prev => prev.filter(f => f.id !== post.id));
         showToast("Post removed from favorites.");
       } else {
@@ -196,7 +196,7 @@ function App() {
           file_url: post.file_url || "",
           created_at: post.created_at || ""
         };
-        await invoke("add_favorite", { post: postPayload });
+        await api.addFavorite(postPayload);
         setFavorites(prev => [post, ...prev]);
         showToast("Post added to favorites.");
       }
@@ -224,21 +224,23 @@ function App() {
         file_url: post.file_url || "",
         created_at: post.created_at || ""
       };
-      const data = await invoke("download_post", { post: postPayload });
+      const data = await api.downloadPost(postPayload);
       if (data.status === "downloaded") {
         showToast(`Downloaded to: ${data.path}`);
       } else {
         showToast("Post already downloaded.", "info");
       }
+      return data;
     } catch (err) {
       showToast("Error executing download: " + err, "error");
     }
   }, [showToast]);
 
-  const createCollection = useCallback(async () => {
-    if (!newCollectionName.trim()) return;
+  const createCollection = useCallback(async (nameParam) => {
+    const targetName = typeof nameParam === "string" ? nameParam : newCollectionName;
+    if (!targetName.trim()) return;
     try {
-      await invoke("create_collection", { name: newCollectionName });
+      await api.createCollection(targetName.trim());
       showToast("Collection created.");
       setNewCollectionName("");
       fetchCollections();
@@ -250,7 +252,7 @@ function App() {
   const deleteCollection = useCallback(async (name) => {
     if (!confirm(`Delete collection "${name}"? Posts in this collection will not be deleted.`)) return;
     try {
-      await invoke("delete_collection", { name });
+      await api.deleteCollection(name);
       showToast("Collection deleted.");
       fetchCollections();
     } catch (err) {
@@ -276,20 +278,24 @@ function App() {
         file_url: post.file_url || "",
         created_at: post.created_at || ""
       };
-      await invoke("assign_posts_to_collection", { name: collectionName, posts: [postPayload] });
+      await api.assignPostsToCollection(collectionName, [postPayload]);
       showToast(`Post assigned to ${collectionName}.`);
     } catch (err) {
       showToast("Error assigning post: " + err, "error");
     }
   }, [showToast]);
 
-  const addFriend = useCallback(async () => {
-    if (!friendUserId.trim() || !friendDisplayName.trim()) return;
+  const addFriend = useCallback(async (friendData) => {
+    const targetUserId = friendData?.userId || friendUserId;
+    const targetDisplayName = friendData?.displayName || friendDisplayName;
+    const targetNotes = friendData?.notes !== undefined ? friendData.notes : friendNotes;
+
+    if (!targetUserId.trim() || !targetDisplayName.trim()) return;
     try {
-      await invoke("add_friend", {
-        userId: friendUserId,
-        displayName: friendDisplayName,
-        notes: friendNotes || null
+      await api.addFriend({
+        userId: targetUserId.trim(),
+        displayName: targetDisplayName.trim(),
+        notes: targetNotes || null
       });
       showToast("Friend added.");
       setFriendUserId("");
@@ -304,7 +310,7 @@ function App() {
   const removeFriend = useCallback(async (userId) => {
     if (!confirm("Remove this friend?")) return;
     try {
-      await invoke("remove_friend", { userId });
+      await api.removeFriend(userId);
       showToast("Friend removed.");
       fetchFriends();
     } catch (err) {
@@ -315,7 +321,7 @@ function App() {
   const fetchFriendFavs = useCallback(async (userId, page = 0) => {
     setLoadingFriendFavs(true);
     try {
-      const data = await invoke("get_friend_favorites", { userId, page });
+      const data = await api.getFriendFavorites({ userId, page });
       setFriendFavorites(data);
       setFriendPage(page);
     } catch (err) {
@@ -400,11 +406,11 @@ function App() {
               file_url: post.file_url || "",
               created_at: post.created_at || ""
             };
-            await invoke("add_favorite", { post: postPayload });
+            await api.addFavorite(postPayload);
             setFavorites(prev => [post, ...prev]);
           }
         } else {
-          await invoke("remove_favorite", { postId: post.id });
+          await api.removeFavorite(post.id);
           setFavorites(prev => prev.filter(f => f.id !== post.id));
         }
         succeeded++;
@@ -447,7 +453,7 @@ function App() {
           file_url: post.file_url || "",
           created_at: post.created_at || ""
         };
-        const data = await invoke("download_post", { post: postPayload });
+        const data = await api.downloadPost(postPayload);
         if (data.status === "downloaded") {
           downloadedCount++;
         } else {
@@ -486,7 +492,7 @@ function App() {
         file_url: post.file_url || "",
         created_at: post.created_at || ""
       }));
-      await invoke("assign_posts_to_collection", { name: collectionName, posts: postPayloads });
+      await api.assignPostsToCollection(collectionName, postPayloads);
       showToast(`Successfully assigned ${posts.length} posts to collection "${collectionName}".`);
       setSelectedPosts([]);
       fetchFavorites();
@@ -538,7 +544,7 @@ function App() {
 
     const loadPostDetail = async () => {
       try {
-        const fullPost = await invoke("get_post_by_id", { id: selectedPost.id });
+        const fullPost = await api.getPostById(selectedPost.id);
         if (fullPost) {
           setSelectedPost(fullPost);
         }
@@ -566,7 +572,7 @@ function App() {
       }
 
       try {
-        const data = await invoke("autocomplete_tags", { prefix: lastTag });
+        const data = await api.autocompleteTags(lastTag);
         setSuggestions(data);
       } catch (err) {
         console.error(err);
@@ -865,28 +871,32 @@ function App() {
 
       {/* Detail view Modal */}
       {selectedPost && (
-        <DetailModal
-          post={selectedPost}
-          collections={collections}
-          favorites={favorites}
-          onClose={handleCloseDetail}
-          onFavoriteToggle={toggleFavorite}
-          onDownload={triggerDownload}
-          onAssignCollection={assignPostToCollection}
-          onTagClick={handleTagClick}
-        />
+        <ErrorBoundary>
+          <DetailModal
+            post={selectedPost}
+            collections={collections}
+            favorites={favorites}
+            onClose={handleCloseDetail}
+            onFavoriteToggle={toggleFavorite}
+            onDownload={triggerDownload}
+            onAssignCollection={assignPostToCollection}
+            onTagClick={handleTagClick}
+          />
+        </ErrorBoundary>
       )}
 
       {/* Bulk Operations Toolbar */}
-      <MultiSelectToolbar
-        selectedPosts={selectedPosts}
-        activeTab={activeTab}
-        collections={collections}
-        onClear={() => setSelectedPosts([])}
-        onBulkFavorite={handleBulkFavorite}
-        onBulkDownload={handleBulkDownload}
-        onBulkAssignCollection={handleBulkAssignCollection}
-      />
+      <ErrorBoundary>
+        <MultiSelectToolbar
+          selectedPosts={selectedPosts}
+          activeTab={activeTab}
+          collections={collections}
+          onClear={() => setSelectedPosts([])}
+          onBulkFavorite={handleBulkFavorite}
+          onBulkDownload={handleBulkDownload}
+          onBulkAssignCollection={handleBulkAssignCollection}
+        />
+      </ErrorBoundary>
     </div>
   );
 }
