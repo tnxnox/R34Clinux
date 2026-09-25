@@ -56,4 +56,51 @@ describe("MultiSelectToolbar component", () => {
     fireEvent.click(screen.getByText("Download"));
     expect(onBulkDownload).toHaveBeenCalledWith(mockPosts);
   });
+
+  it("triggers onClear when the close button is clicked", () => {
+    const onClear = vi.fn();
+
+    render(
+      <MultiSelectToolbar
+        selectedPosts={mockPosts}
+        activeTab="search"
+        collections={[]}
+        onClear={onClear}
+        onBulkFavorite={vi.fn()}
+        onBulkDownload={vi.fn()}
+        onBulkAssignCollection={vi.fn()}
+      />
+    );
+
+    const closeBtn = document.querySelector(".close-btn");
+    expect(closeBtn).toBeInTheDocument();
+    fireEvent.click(closeBtn);
+    expect(onClear).toHaveBeenCalled();
+  });
+
+  it("handles assigning posts to a selected collection", () => {
+    const onBulkAssignCollection = vi.fn();
+
+    render(
+      <MultiSelectToolbar
+        selectedPosts={mockPosts}
+        activeTab="search"
+        collections={["Wallpaper", "Gamer"]}
+        onClear={vi.fn()}
+        onBulkFavorite={vi.fn()}
+        onBulkDownload={vi.fn()}
+        onBulkAssignCollection={onBulkAssignCollection}
+      />
+    );
+
+    const select = screen.getByRole("combobox");
+    const assignBtn = screen.getByRole("button", { name: "Assign" });
+    expect(assignBtn).toBeDisabled();
+
+    fireEvent.change(select, { target: { value: "Wallpaper" } });
+    expect(assignBtn).not.toBeDisabled();
+
+    fireEvent.click(assignBtn);
+    expect(onBulkAssignCollection).toHaveBeenCalledWith(mockPosts, "Wallpaper");
+  });
 });
