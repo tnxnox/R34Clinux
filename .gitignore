@@ -1,26 +1,18 @@
-# Python caches
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-
-# Virtual envs
-.venv/
-venv/
-
 # Local credentials/secrets
 id.txt
 apikey.txt
 
 # Build/package artifacts
-*.egg-info/
 build/
 dist/
+app/dist/
 target/
+app/src-tauri/target/
+node_modules/
+app/node_modules/
+
+# Tauri generated schemas
+app/src-tauri/gen/schemas/
 
 # IDE and editor configs
 .vscode/
@@ -45,7 +37,6 @@ logs/
 # Local mutations state
 pending-mutations.json
 
-
 # Internal project notes/agent configs
 .github/ROADMAP_INTERNAL.md
 .github/agents/
@@ -59,4 +50,3 @@ scratch/
 
 # Agent skills (local only)
 .agents/
-
