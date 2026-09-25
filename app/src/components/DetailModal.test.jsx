@@ -1,7 +1,7 @@
 import React from "react";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
-import { DetailModal } from "./DetailModal";
+import { DetailModal, formatPostDate, isMediaVideo } from "./DetailModal";
 
 const mockPost = {
   id: 12345,
@@ -15,6 +15,10 @@ const mockPost = {
 };
 
 describe("DetailModal component", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("renders detail modal fields correctly", () => {
     const onClose = vi.fn();
     const onFavoriteToggle = vi.fn();
@@ -111,7 +115,9 @@ describe("DetailModal component", () => {
     });
 
     const preventDefaultSpy = vi.spyOn(wheelEvent, "preventDefault");
-    img.dispatchEvent(wheelEvent);
+    act(() => {
+      img.dispatchEvent(wheelEvent);
+    });
 
     expect(preventDefaultSpy).toHaveBeenCalled();
   });
@@ -181,6 +187,44 @@ describe("DetailModal component", () => {
     const metadataHeaders = screen.getAllByText("Metadata");
     expect(metadataHeaders.length).toBe(2);
     expect(screen.getByText("General")).toBeInTheDocument();
+  });
+});
+
+describe("DetailModal helper functions", () => {
+  it("formatPostDate formats unix timestamps and ISO date strings correctly", () => {
+    // Unix epoch seconds
+    const fromSec = formatPostDate("1620000000");
+    expect(fromSec).toBe(new Date(1620000000 * 1000).toLocaleDateString());
+
+    // Unix epoch ms
+    const fromMs = formatPostDate("1620000000000");
+    expect(fromMs).toBe(new Date(1620000000000).toLocaleDateString());
+
+    // ISO date string (previously evaluated to 1970!)
+    const fromIso = formatPostDate("2024-05-12T14:30:00Z");
+    expect(fromIso).toBe(new Date("2024-05-12T14:30:00Z").toLocaleDateString());
+    expect(fromIso).not.toContain("1970");
+
+    // Standard date string
+    const fromDateStr = formatPostDate("2024-05-12");
+    expect(fromDateStr).toBe(new Date("2024-05-12").toLocaleDateString());
+
+    // Falsy / invalid
+    expect(formatPostDate(null)).toBe("Unknown");
+    expect(formatPostDate(undefined)).toBe("Unknown");
+    expect(formatPostDate("")).toBe("Unknown");
+    expect(formatPostDate("invalid-date-string")).toBe("Unknown");
+  });
+
+  it("isMediaVideo detects mp4 and webm URLs with or without query params", () => {
+    expect(isMediaVideo("http://example.com/video.mp4")).toBe(true);
+    expect(isMediaVideo("http://example.com/video.webm")).toBe(true);
+    expect(isMediaVideo("http://example.com/video.MP4?token=123#frag")).toBe(true);
+    expect(isMediaVideo("http://example.com/video.WEBM?key=abc")).toBe(true);
+    expect(isMediaVideo("http://example.com/image.jpg")).toBe(false);
+    expect(isMediaVideo("http://example.com/image.png?url=video.mp4")).toBe(false);
+    expect(isMediaVideo(null)).toBe(false);
+    expect(isMediaVideo(undefined)).toBe(false);
   });
 });
 
