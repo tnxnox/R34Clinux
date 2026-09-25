@@ -89,17 +89,20 @@ impl DownloadManager {
     }
 
     fn validate_path_within_base(&self, full_path: &Path, base_dir: &Path) -> Result<(), String> {
-        let resolved_full = full_path
+        let parent = full_path
+            .parent()
+            .ok_or_else(|| "Invalid destination path: no parent directory".to_string())?;
+        let resolved_parent = parent
             .canonicalize()
-            .unwrap_or_else(|_| full_path.to_path_buf());
+            .map_err(|e| format!("Failed to canonicalize destination directory: {}", e))?;
         let resolved_base = base_dir
             .canonicalize()
             .map_err(|e| format!("Failed to canonicalize base directory: {}", e))?;
 
-        if !resolved_full.starts_with(&resolved_base) {
+        if !resolved_parent.starts_with(&resolved_base) {
             return Err(format!(
                 "Path traversal detected: {:?} is outside {:?}",
-                resolved_full, resolved_base
+                resolved_parent, resolved_base
             ));
         }
         Ok(())
@@ -260,10 +263,10 @@ impl DownloadManager {
                             ));
                         }
                         if let Some(parent) = dest.parent() {
-                            self.check_disk_space(parent, content_length * 2).ok();
+                            self.check_disk_space(parent, content_length * 2)?;
                         }
                     } else if let Some(parent) = dest.parent() {
-                        self.check_disk_space(parent, MAX_DOWNLOAD_BYTES).ok();
+                        self.check_disk_space(parent, MAX_DOWNLOAD_BYTES)?;
                     }
 
                     // Stream download
@@ -486,6 +489,87 @@ mod tests {
         // Test empty name fallback to ID
         assert_eq!(manager.format_filename(&post, "", false), "12345.jpg");
 
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_validate_path_within_base() {
+        let (db, path) = temp_db();
+        let manager = DownloadManager::new(db);
+
+        let temp_dir = std::env::temp_dir();
+        let non_existent_file = temp_dir.join("test_non_existent_12345.jpg");
+
+        // Should succeed for a path inside base_dir even if the file itself does not exist yet
+        assert!(
+            manager
+                .validate_path_within_base(&non_existent_file, &temp_dir)
+                .is_ok()
+        );
+
+        // Should detect traversal if trying to write outside base_dir
+        let outside_dir = temp_dir.join("subfolder_outside");
+        std::fs::create_dir_all(&outside_dir).ok();
+        let traversal_target = temp_dir.join("test_file_traversal.jpg");
+        assert!(
+            manager
+                .validate_path_within_base(&traversal_target, &outside_dir)
+                .is_err()
+        );
+
+        let _ = std::fs::remove_dir_all(&outside_dir);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_write_sidecar() {
+        let (db, path) = temp_db();
+        let manager = DownloadManager::new(db);
+
+        let temp_dir = std::env::temp_dir();
+        let media_path = temp_dir.join("test_sidecar_media_12345.jpg");
+        let json_path = temp_dir.join("test_sidecar_media_12345.json");
+        let txt_path = temp_dir.join("test_sidecar_media_12345.txt");
+
+        let post = Post {
+            id: 12345,
+            tags: vec!["cat".to_string(), "cute".to_string()],
+            rating: "s".to_string(),
+            score: Some(50),
+            width: None,
+            height: None,
+            file_size: None,
+            source: "pixiv".to_string(),
+            md5: "sidecar_md5".to_string(),
+            preview_url: "".to_string(),
+            sample_url: "".to_string(),
+            file_url: "".to_string(),
+            created_at: "2026-06-12".to_string(),
+        };
+
+        // Test format = "json"
+        manager.write_sidecar(&media_path, &post, "json");
+        assert!(json_path.exists());
+        assert!(!txt_path.exists());
+        let json_content = std::fs::read_to_string(&json_path).unwrap();
+        assert!(json_content.contains("\"id\": 12345"));
+        assert!(json_content.contains("\"cat\""));
+        let _ = std::fs::remove_file(&json_path);
+
+        // Test format = "txt"
+        manager.write_sidecar(&media_path, &post, "txt");
+        assert!(!json_path.exists());
+        assert!(txt_path.exists());
+        let txt_content = std::fs::read_to_string(&txt_path).unwrap();
+        assert_eq!(txt_content, "cat cute");
+        let _ = std::fs::remove_file(&txt_path);
+
+        // Test format = "both"
+        manager.write_sidecar(&media_path, &post, "both");
+        assert!(json_path.exists());
+        assert!(txt_path.exists());
+        let _ = std::fs::remove_file(&json_path);
+        let _ = std::fs::remove_file(&txt_path);
         let _ = std::fs::remove_file(&path);
     }
 }
