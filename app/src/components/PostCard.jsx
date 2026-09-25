@@ -2,9 +2,15 @@ import React from "react";
 import { Heart, Download, Play } from "lucide-react";
 import "./PostCard.css";
 
+export function isMediaVideo(url) {
+  if (!url || typeof url !== "string") return false;
+  const cleanUrl = url.split("?")[0].split("#")[0].toLowerCase();
+  return cleanUrl.endsWith(".mp4") || cleanUrl.endsWith(".webm");
+}
+
 export function Thumbnail({ post }) {
   const url = post.preview_url || post.sample_url || post.file_url;
-  const isVideo = url?.endsWith(".mp4") || url?.endsWith(".webm");
+  const isVideo = isMediaVideo(url);
 
   if (isVideo) {
     return (
@@ -20,7 +26,7 @@ export function Thumbnail({ post }) {
 
   return (
     <img
-      src={url}
+      src={url || undefined}
       alt="media preview"
       className="card-thumbnail"
       loading="lazy"
@@ -40,7 +46,7 @@ export const PostCard = React.memo(function PostCard({
   isSelected = false,
   onSelectToggle,
 }) {
-  const isVideo = post.file_url?.endsWith(".mp4") || post.preview_url?.endsWith(".mp4");
+  const isVideo = isMediaVideo(post.file_url) || isMediaVideo(post.preview_url) || isMediaVideo(post.sample_url);
 
   return (
     <div
