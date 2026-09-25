@@ -225,13 +225,7 @@ impl SettingsStore {
             .downloads
             .as_ref()
             .map(|d| d.directory.clone())
-            .unwrap_or_else(|| {
-                let home = env::var("HOME").unwrap_or_else(|_| "/".to_string());
-                PathBuf::from(home)
-                    .join("Downloads")
-                    .to_string_lossy()
-                    .to_string()
-            });
+            .unwrap_or_else(Self::default_download_directory);
         let download_naming_template = guard
             .downloads
             .as_ref()
@@ -303,6 +297,9 @@ impl SettingsStore {
             && validated.download_sidecar_format != "both"
         {
             validated.download_sidecar_format = "json".to_string();
+        }
+        if validated.download_directory.trim().is_empty() {
+            validated.download_directory = Self::default_download_directory();
         }
         validated
     }
@@ -431,5 +428,17 @@ mod tests {
             let validated = store.validate_settings(&settings);
             assert_eq!(validated.download_sidecar_format, *valid_format);
         }
+
+        // download_directory validation
+        settings.download_directory = "   ".to_string();
+        let validated = store.validate_settings(&settings);
+        assert_eq!(
+            validated.download_directory,
+            SettingsStore::default_download_directory()
+        );
+
+        settings.download_directory = "/custom/path".to_string();
+        let validated = store.validate_settings(&settings);
+        assert_eq!(validated.download_directory, "/custom/path");
     }
 }
