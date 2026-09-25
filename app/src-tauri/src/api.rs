@@ -4,6 +4,18 @@ use reqwest::Client;
 use serde_json::Value;
 use std::time::Duration;
 
+static POST_REGEX: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r"<post\s+([^>]+)/>").unwrap());
+
+static ATTR_REGEX: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r#"(\w+)\s*=\s*"([^"]*)""#).unwrap());
+
+static LABEL_COUNT_REGEX: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r"\s*\((\d+)\)\s*$").unwrap());
+
+static TAG_REGEX: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r"<tag\s+([^>]+)/>").unwrap());
+
 pub struct Rule34Client {
     client: Client,
     user_id: String,
@@ -12,12 +24,17 @@ pub struct Rule34Client {
 
 impl Rule34Client {
     pub fn new(user_id: String, api_key: String) -> Self {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+            .build()
+            .unwrap_or_default();
+        Self::with_client(client, user_id, api_key)
+    }
+
+    pub fn with_client(client: Client, user_id: String, api_key: String) -> Self {
         Self {
-            client: Client::builder()
-                .timeout(Duration::from_secs(30))
-                .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-                .build()
-                .unwrap_or_default(),
+            client,
             user_id: user_id.trim().to_string(),
             api_key: api_key.trim().to_string(),
         }
@@ -196,11 +213,8 @@ impl Rule34Client {
     }
 
     fn parse_xml_posts(&self, text: &str) -> Result<Vec<Post>, String> {
-        let post_regex = Regex::new(r"<post\s+([^>]+)/>").unwrap();
-        let attr_regex = Regex::new(r#"(\w+)\s*=\s*"([^"]*)""#).unwrap();
-
         let mut posts = Vec::new();
-        for cap in post_regex.captures_iter(text) {
+        for cap in POST_REGEX.captures_iter(text) {
             let attrs_str = &cap[1];
             let mut id = 0;
             let mut tags = Vec::new();
@@ -216,7 +230,7 @@ impl Rule34Client {
             let mut file_url = String::new();
             let mut created_at = String::new();
 
-            for attr_cap in attr_regex.captures_iter(attrs_str) {
+            for attr_cap in ATTR_REGEX.captures_iter(attrs_str) {
                 let key = &attr_cap[1];
                 let val = html_escape::decode_html_entities(&attr_cap[2]).into_owned();
 
@@ -298,8 +312,6 @@ impl Rule34Client {
         let mut suggestions = Vec::new();
         let mut seen = std::collections::HashSet::new();
 
-        let label_count_regex = Regex::new(r"\s*\((\d+)\)\s*$").unwrap();
-
         for item in arr {
             if let Some(obj) = item.as_object() {
                 let raw_val = obj.get("value").and_then(|v| v.as_str()).unwrap_or("");
@@ -317,7 +329,7 @@ impl Rule34Client {
                     .collect::<Vec<_>>()
                     .join(" ");
 
-                let count = label_count_regex
+                let count = LABEL_COUNT_REGEX
                     .captures(&normalized_label)
                     .and_then(|cap| cap[1].parse::<i32>().ok());
 
@@ -386,9 +398,6 @@ impl Rule34Client {
             ("name", name),
         ]);
 
-        let tag_regex = regex::Regex::new(r"<tag\s+([^>]+)/>").unwrap();
-        let attr_regex = regex::Regex::new(r#"(\w+)\s*=\s*"([^"]*)""#).unwrap();
-
         let mut retries = 3;
         let mut delay_ms = 500;
 
@@ -427,12 +436,12 @@ impl Rule34Client {
                 return Ok((name.to_string(), 0));
             }
 
-            if let Some(cap) = tag_regex.captures(trimmed) {
+            if let Some(cap) = TAG_REGEX.captures(trimmed) {
                 let attrs_str = &cap[1];
                 let mut resolved_name = String::new();
                 let mut type_id = 0;
 
-                for attr_cap in attr_regex.captures_iter(attrs_str) {
+                for attr_cap in ATTR_REGEX.captures_iter(attrs_str) {
                     let key = &attr_cap[1];
                     let val = html_escape::decode_html_entities(&attr_cap[2]).into_owned();
 
