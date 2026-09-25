@@ -188,6 +188,100 @@ describe("DetailModal component", () => {
     expect(metadataHeaders.length).toBe(2);
     expect(screen.getByText("General")).toBeInTheDocument();
   });
+
+  it("defaults to fit-width mode and renders vertical navigation slider for vertical strip posts", async () => {
+    const stripPost = {
+      ...mockPost,
+      id: 99999,
+      width: 800,
+      height: 8000,
+      preview_url: "http://example.com/strip.jpg",
+      file_url: "http://example.com/strip.jpg",
+    };
+
+    await act(async () => {
+      render(
+        <DetailModal
+          post={stripPost}
+          collections={[]}
+          favorites={[]}
+        />
+      );
+    });
+
+    const img = screen.getByAltText("modal media");
+    expect(img).toHaveClass("is-fit-width");
+
+    // Slider should be rendered
+    const slider = screen.getByTestId("vertical-strip-slider");
+    expect(slider).toBeInTheDocument();
+
+    // Fit mode toggle button should exist
+    const fitBtn = screen.getByTestId("fit-mode-btn");
+    expect(fitBtn).toBeInTheDocument();
+
+    // Clicking fit mode button toggles between fit-width and contain
+    act(() => {
+      fireEvent.click(fitBtn);
+    });
+    expect(img).not.toHaveClass("is-fit-width");
+
+    act(() => {
+      fireEvent.click(fitBtn);
+    });
+    expect(img).toHaveClass("is-fit-width");
+  });
+
+  it("does not render fit-mode-btn for non-strip standard images", async () => {
+    const standardPost = {
+      ...mockPost,
+      id: 99999,
+      width: 1200,
+      height: 900,
+    };
+
+    await act(async () => {
+      render(
+        <DetailModal
+          post={standardPost}
+          collections={[]}
+          favorites={[]}
+        />
+      );
+    });
+
+    expect(screen.queryByTestId("fit-mode-btn")).not.toBeInTheDocument();
+  });
+
+  it("handles jump-to-top and jump-to-bottom clicks on vertical strip slider", async () => {
+    const stripPost = {
+      ...mockPost,
+      id: 88888,
+      width: 800,
+      height: 8000,
+    };
+
+    await act(async () => {
+      render(
+        <DetailModal
+          post={stripPost}
+          collections={[]}
+          favorites={[]}
+        />
+      );
+    });
+
+    const topBtn = screen.getByTitle("Jump to Top");
+    const bottomBtn = screen.getByTitle("Jump to Bottom");
+
+    expect(topBtn).toBeInTheDocument();
+    expect(bottomBtn).toBeInTheDocument();
+
+    act(() => {
+      fireEvent.click(bottomBtn);
+      fireEvent.click(topBtn);
+    });
+  });
 });
 
 describe("DetailModal helper functions", () => {
