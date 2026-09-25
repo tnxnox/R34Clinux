@@ -1,16 +1,4 @@
 [workspace]
 resolver = "2"
 members = ["app/src-tauri"]
-
-[package]
-name = "r34-client"
-version = "2.4.0"
-edition = "2024"
-
-
-[[bin]]
-name = "r34-client"
-path = "app/src-tauri/src/main.rs"
-
-[dependencies]
-r34client_lib = { package = "r34client", path = "app/src-tauri" }
+default-members = ["app/src-tauri"]
