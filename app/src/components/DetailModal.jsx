@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Heart, Download, X, Maximize, Minimize, ChevronLeft, ChevronRight, Play, Pause, Volume2, VolumeX } from "lucide-react";
+import { Heart, Download, X, Maximize, Minimize, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Expand, Shrink, Play, Pause, Volume2, VolumeX } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { api } from "../services/api";
+import { getStripType } from "./PostCard";
 import "./DetailModal.css";
 
 export function isMediaVideo(url) {
@@ -185,6 +186,28 @@ export const DetailModal = React.memo(function DetailModal({
   const imgRef = useRef(null);
   const isFullscreenPending = useRef(false);
 
+  const [naturalDims, setNaturalDims] = useState({ width: 0, height: 0 });
+
+  const stripType = getStripType(post);
+  const effectiveStripType = stripType || (
+    naturalDims.width > 0 && naturalDims.height > 0
+      ? (naturalDims.height / naturalDims.width >= 2.0 ? "vertical" : (naturalDims.height / naturalDims.width <= 0.5 ? "horizontal" : null))
+      : null
+  );
+  const isVerticalStrip = effectiveStripType === "vertical";
+  const isHorizontalStrip = effectiveStripType === "horizontal";
+  const isStrip = isVerticalStrip || isHorizontalStrip;
+
+  // Fit mode: "contain" | "fit-width" | "fit-height"
+  const [fitMode, setFitMode] = useState(() => {
+    if (isVerticalStrip) return "fit-width";
+    if (isHorizontalStrip) return "fit-height";
+    return "contain";
+  });
+
+  const sliderTrackRef = useRef(null);
+  const sliderTrackXRef = useRef(null);
+
   // Zoom & Pan state
   const [zoomScale, setZoomScale] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
@@ -193,6 +216,118 @@ export const DetailModal = React.memo(function DetailModal({
 
   const remoteUrl = post?.file_url || post?.sample_url || post?.preview_url;
   const url = localUrl || remoteUrl;
+
+  // Dimension metrics for strip navigation
+  const paneHeight = mediaPaneRef.current?.clientHeight || 800;
+  const paneWidth = mediaPaneRef.current?.clientWidth || 1000;
+  const naturalRatio = (post?.width && post?.height) ? (Number(post.height) / Number(post.width)) : 1;
+
+  let renderedHeight = paneHeight;
+  let renderedWidth = paneWidth;
+
+  if (imgRef.current && imgRef.current.offsetHeight > 0) {
+    renderedHeight = imgRef.current.offsetHeight;
+    renderedWidth = imgRef.current.offsetWidth;
+  } else if (fitMode === "fit-width") {
+    renderedWidth = paneWidth;
+    renderedHeight = paneWidth * naturalRatio;
+  } else if (fitMode === "fit-height") {
+    renderedHeight = paneHeight;
+    renderedWidth = naturalRatio > 0 ? paneHeight / naturalRatio : paneWidth;
+  }
+
+  const effectiveHeight = renderedHeight * zoomScale;
+  const effectiveWidth = renderedWidth * zoomScale;
+
+  const maxScrollY = Math.max(0, effectiveHeight - paneHeight);
+  const maxScrollX = Math.max(0, effectiveWidth - paneWidth);
+
+  const maxScrollYRef = useRef(maxScrollY);
+  const maxScrollXRef = useRef(maxScrollX);
+  useEffect(() => {
+    maxScrollYRef.current = maxScrollY;
+    maxScrollXRef.current = maxScrollX;
+  }, [maxScrollY, maxScrollX]);
+
+  const scrollPercentY = maxScrollY > 0 ? Math.min(100, Math.max(0, (-panOffset.y / maxScrollY) * 100)) : 0;
+  const scrollPercentX = maxScrollX > 0 ? Math.min(100, Math.max(0, (-panOffset.x / maxScrollX) * 100)) : 0;
+
+  const scrollToRatioY = (ratio) => {
+    const clampedRatio = Math.min(1, Math.max(0, ratio));
+    setPanOffset((prev) => ({
+      ...prev,
+      y: -clampedRatio * maxScrollYRef.current,
+    }));
+  };
+
+  const handleTrackMouseDownY = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const track = sliderTrackRef.current;
+    if (!track) return;
+    const rect = track.getBoundingClientRect();
+    const clickY = e.clientY - rect.top;
+    const ratio = rect.height > 0 ? clickY / rect.height : 0;
+    scrollToRatioY(ratio);
+
+    const onMouseMove = (moveEvent) => {
+      const curY = moveEvent.clientY - rect.top;
+      const moveRatio = rect.height > 0 ? curY / rect.height : 0;
+      scrollToRatioY(moveRatio);
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
+
+  const scrollToRatioX = (ratio) => {
+    const clampedRatio = Math.min(1, Math.max(0, ratio));
+    setPanOffset((prev) => ({
+      ...prev,
+      x: -clampedRatio * maxScrollXRef.current,
+    }));
+  };
+
+  const handleTrackMouseDownX = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const track = sliderTrackXRef.current;
+    if (!track) return;
+    const rect = track.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const ratio = rect.width > 0 ? clickX / rect.width : 0;
+    scrollToRatioX(ratio);
+
+    const onMouseMove = (moveEvent) => {
+      const curX = moveEvent.clientX - rect.left;
+      const moveRatio = rect.width > 0 ? curX / rect.width : 0;
+      scrollToRatioX(moveRatio);
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
+
+  const toggleFitMode = () => {
+    setFitMode((prev) => {
+      if (prev === "contain") {
+        return isHorizontalStrip ? "fit-height" : "fit-width";
+      }
+      return "contain";
+    });
+    setZoomScale(1);
+    setPanOffset({ x: 0, y: 0 });
+  };
 
   // Fetch tag types from backend
   useEffect(() => {
@@ -263,6 +398,10 @@ export const DetailModal = React.memo(function DetailModal({
 
   // Reset zoom & pan, sidebar state, and fullscreen when post changes
   useEffect(() => {
+    setNaturalDims({ width: 0, height: 0 });
+    const nextStrip = getStripType(post);
+    const targetMode = nextStrip === "vertical" ? "fit-width" : (nextStrip === "horizontal" ? "fit-height" : "contain");
+    setFitMode((prev) => (prev === targetMode ? prev : targetMode));
     setZoomScale(1);
     setPanOffset({ x: 0, y: 0 });
     setIsDragging(false);
@@ -274,6 +413,17 @@ export const DetailModal = React.memo(function DetailModal({
       }
     }
   }, [post?.id]);
+
+  useEffect(() => {
+    if (!stripType && naturalDims.width > 0 && naturalDims.height > 0) {
+      const ratio = naturalDims.height / naturalDims.width;
+      if (ratio >= 2.0) {
+        setFitMode("fit-width");
+      } else if (ratio <= 0.5) {
+        setFitMode("fit-height");
+      }
+    }
+  }, [stripType, naturalDims.width, naturalDims.height]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -310,10 +460,11 @@ export const DetailModal = React.memo(function DetailModal({
     };
   }, [onClose]);
 
-  // ponytail: native non-passive wheel listener avoids browser warnings when preventing zoom
+  // Wheel listener: Ctrl+wheel for zoom, non-Ctrl wheel for scrolling through overflowing/strip content
   useEffect(() => {
     const currentImg = imgRef.current;
-    if (!currentImg) return;
+    const currentPane = mediaPaneRef.current;
+    if (!currentImg && !currentPane) return;
 
     const handleNativeWheel = (e) => {
       if (e.ctrlKey) {
@@ -321,25 +472,53 @@ export const DetailModal = React.memo(function DetailModal({
         const delta = e.deltaY < 0 ? 0.25 : -0.25;
         setZoomScale((prev) => {
           const next = Math.min(Math.max(prev + delta, 1), 8);
-          if (next === 1) {
+          if (next === 1 && fitMode === "contain") {
             setPanOffset({ x: 0, y: 0 });
           }
           return next;
         });
+      } else {
+        const curMaxY = maxScrollYRef.current;
+        const curMaxX = maxScrollXRef.current;
+
+        if (curMaxY > 0 && Math.abs(e.deltaY) > 0) {
+          e.preventDefault();
+          setPanOffset((prev) => {
+            const nextY = Math.min(0, Math.max(-curMaxY, prev.y - e.deltaY));
+            return { ...prev, y: nextY };
+          });
+        } else if (curMaxX > 0 && (Math.abs(e.deltaX) > 0 || (e.shiftKey && Math.abs(e.deltaY) > 0))) {
+          e.preventDefault();
+          const delta = e.deltaX !== 0 ? e.deltaX : e.deltaY;
+          setPanOffset((prev) => {
+            const nextX = Math.min(0, Math.max(-curMaxX, prev.x - delta));
+            return { ...prev, x: nextX };
+          });
+        }
       }
     };
 
-    currentImg.addEventListener("wheel", handleNativeWheel, { passive: false });
+    if (currentImg) {
+      currentImg.addEventListener("wheel", handleNativeWheel, { passive: false });
+    }
+    if (currentPane) {
+      currentPane.addEventListener("wheel", handleNativeWheel, { passive: false });
+    }
 
     return () => {
       if (currentImg) {
         currentImg.removeEventListener("wheel", handleNativeWheel);
       }
+      if (currentPane) {
+        currentPane.removeEventListener("wheel", handleNativeWheel);
+      }
     };
-  }, [url]);
+  }, [url, fitMode]);
+
+  const canPan = zoomScale > 1 || maxScrollY > 0 || maxScrollX > 0;
 
   const handleMouseDown = (e) => {
-    if (zoomScale > 1 && e.button === 0) {
+    if (canPan && e.button === 0) {
       e.preventDefault();
       setIsDragging(true);
       setDragStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
@@ -347,11 +526,19 @@ export const DetailModal = React.memo(function DetailModal({
   };
 
   const handleMouseMove = (e) => {
-    if (isDragging && zoomScale > 1) {
+    if (isDragging && canPan) {
       e.preventDefault();
+      const rawX = e.clientX - dragStart.x;
+      const rawY = e.clientY - dragStart.y;
+      const curMaxY = maxScrollYRef.current;
+      const curMaxX = maxScrollXRef.current;
+
+      const nextY = curMaxY > 0 ? Math.min(0, Math.max(-curMaxY, rawY)) : (zoomScale > 1 ? rawY : 0);
+      const nextX = curMaxX > 0 ? Math.min(0, Math.max(-curMaxX, rawX)) : (zoomScale > 1 ? rawX : 0);
+
       setPanOffset({
-        x: e.clientX - dragStart.x,
-        y: e.clientY - dragStart.y,
+        x: nextX,
+        y: nextY,
       });
     }
   };
@@ -436,18 +623,27 @@ export const DetailModal = React.memo(function DetailModal({
       return <VideoPlayer src={url} />;
     }
 
+    const isFitWidth = fitMode === "fit-width";
+    const isFitHeight = fitMode === "fit-height";
+    const mediaClasses = `modal-media${isFitWidth ? " is-fit-width" : ""}${isFitHeight ? " is-fit-height" : ""}`;
+
     return (
       <img
         ref={imgRef}
         src={url}
         alt="modal media"
-        className="modal-media"
+        className={mediaClasses}
         draggable={false}
+        onLoad={(e) => {
+          if (e.target.naturalWidth && e.target.naturalHeight) {
+            setNaturalDims({ width: e.target.naturalWidth, height: e.target.naturalHeight });
+          }
+        }}
         style={{
           transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomScale})`,
-          cursor: zoomScale > 1 ? (isDragging ? "grabbing" : "grab") : "default",
+          cursor: canPan ? (isDragging ? "grabbing" : "grab") : "default",
           transition: isDragging ? "none" : "transform 0.1s ease-out",
-          transformOrigin: "center center",
+          transformOrigin: isFitWidth ? "top center" : (isFitHeight ? "center left" : "center center"),
         }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -466,6 +662,18 @@ export const DetailModal = React.memo(function DetailModal({
       <div className="modal-content modal-large" onClick={(e) => e.stopPropagation()}>
         <div className={mediaPaneClasses} ref={mediaPaneRef}>
           {renderModalMedia()}
+          {!isVideo && isStrip && (
+            <button
+              data-testid="fit-mode-btn"
+              className="fit-mode-btn"
+              onClick={toggleFitMode}
+              disabled={!url}
+              aria-label={fitMode === "contain" ? "Fit to Width" : "Fit to Screen"}
+              title={fitMode === "contain" ? "Fit to Width (Strip View)" : "Fit to Screen"}
+            >
+              {fitMode === "contain" ? <Expand size={18} /> : <Shrink size={18} />}
+            </button>
+          )}
           <button
             data-testid="fullscreen-btn"
             className="fullscreen-btn"
@@ -475,6 +683,84 @@ export const DetailModal = React.memo(function DetailModal({
           >
             {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
           </button>
+
+          {!isVideo && maxScrollY > 0 && (
+            <div className="strip-slider-container vertical" data-testid="vertical-strip-slider">
+              <button
+                type="button"
+                className="strip-slider-btn top"
+                onClick={() => scrollToRatioY(0)}
+                title="Jump to Top"
+                aria-label="Jump to Top"
+              >
+                <ChevronUp size={16} />
+              </button>
+              <div
+                className="strip-slider-track"
+                ref={sliderTrackRef}
+                onMouseDown={handleTrackMouseDownY}
+              >
+                <div
+                  className="strip-slider-progress"
+                  style={{ height: `${scrollPercentY}%` }}
+                />
+                <div
+                  className="strip-slider-thumb"
+                  style={{ top: `${scrollPercentY}%` }}
+                >
+                  <span className="strip-slider-tooltip">{Math.round(scrollPercentY)}%</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="strip-slider-btn bottom"
+                onClick={() => scrollToRatioY(1)}
+                title="Jump to Bottom"
+                aria-label="Jump to Bottom"
+              >
+                <ChevronDown size={16} />
+              </button>
+            </div>
+          )}
+
+          {!isVideo && maxScrollX > 0 && maxScrollY === 0 && (
+            <div className="strip-slider-container horizontal" data-testid="horizontal-strip-slider">
+              <button
+                type="button"
+                className="strip-slider-btn left"
+                onClick={() => scrollToRatioX(0)}
+                title="Jump to Left"
+                aria-label="Jump to Left"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <div
+                className="strip-slider-track horizontal"
+                ref={sliderTrackXRef}
+                onMouseDown={handleTrackMouseDownX}
+              >
+                <div
+                  className="strip-slider-progress horizontal"
+                  style={{ width: `${scrollPercentX}%` }}
+                />
+                <div
+                  className="strip-slider-thumb horizontal"
+                  style={{ left: `${scrollPercentX}%` }}
+                >
+                  <span className="strip-slider-tooltip">{Math.round(scrollPercentX)}%</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="strip-slider-btn right"
+                onClick={() => scrollToRatioX(1)}
+                title="Jump to Right"
+                aria-label="Jump to Right"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          )}
         </div>
 
         <div className={infoPaneClasses}>
