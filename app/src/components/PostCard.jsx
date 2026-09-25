@@ -8,15 +8,44 @@ export function isMediaVideo(url) {
   return cleanUrl.endsWith(".mp4") || cleanUrl.endsWith(".webm");
 }
 
+export function isLongStrip(post) {
+  if (!post) return false;
+  const width = Number(post.width);
+  const height = Number(post.height);
+  if (!width || !height || isNaN(width) || isNaN(height)) return false;
+  const ratio = height / width;
+  return ratio >= 2.0 || ratio <= 0.5;
+}
+
+export function getStripType(post) {
+  if (!post) return null;
+  const width = Number(post.width);
+  const height = Number(post.height);
+  if (!width || !height || isNaN(width) || isNaN(height)) return null;
+  const ratio = height / width;
+  if (ratio >= 2.0) return "vertical";
+  if (ratio <= 0.5) return "horizontal";
+  return null;
+}
+
 export function Thumbnail({ post }) {
-  const url = post.preview_url || post.sample_url || post.file_url;
+  const isStrip = isLongStrip(post);
+  // For long strip images, rule34's preview_url thumbnail is squashed to <=150px on the longest side,
+  // making a 1:10 comic strip only ~15px wide, which produces severe blur when zoomed with object-fit: cover.
+  // Using sample_url (~850px width) or file_url delivers crisp high-def resolution.
+  const url = isStrip
+    ? (post.sample_url || post.file_url || post.preview_url)
+    : (post.preview_url || post.sample_url || post.file_url);
+
   const isVideo = isMediaVideo(url);
+  const stripType = getStripType(post);
+  const stripClass = stripType === "vertical" ? " long-strip-vertical" : (stripType === "horizontal" ? " long-strip-horizontal" : "");
 
   if (isVideo) {
     return (
       <video
         src={url}
-        className="card-thumbnail"
+        className={`card-thumbnail${stripClass}`}
         loop
         muted
         playsInline
@@ -28,7 +57,7 @@ export function Thumbnail({ post }) {
     <img
       src={url || undefined}
       alt="media preview"
-      className="card-thumbnail"
+      className={`card-thumbnail${stripClass}`}
       loading="lazy"
       draggable={false}
     />
@@ -47,6 +76,8 @@ export const PostCard = React.memo(function PostCard({
   onSelectToggle,
 }) {
   const isVideo = isMediaVideo(post.file_url) || isMediaVideo(post.preview_url) || isMediaVideo(post.sample_url);
+  const stripType = getStripType(post);
+  const isStrip = Boolean(stripType);
 
   return (
     <div
@@ -68,6 +99,11 @@ export const PostCard = React.memo(function PostCard({
         {isVideo && (
           <span className="video-badge">
             <Play size={10} fill="white" /> VIDEO
+          </span>
+        )}
+        {isStrip && !isVideo && (
+          <span className="strip-badge">
+            {stripType === "vertical" ? "STRIP" : "PANORAMA"}
           </span>
         )}
         <span className="rating-badge">
