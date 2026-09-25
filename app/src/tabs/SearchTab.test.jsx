@@ -65,4 +65,35 @@ describe("SearchTab component", () => {
     fireEvent.click(nextButton);
     expect(handleSearch).toHaveBeenCalledWith(1);
   });
+
+  it("renders autocomplete suggestions and handles suggestion click", () => {
+    const handleSuggestionClick = vi.fn();
+    const mockSuggestions = [
+      { value: "solo_focus", count: 12000, label: "solo_focus (12000)" },
+    ];
+
+    render(
+      <SearchTab
+        searchQuery="solo"
+        setSearchQuery={vi.fn()}
+        suggestions={mockSuggestions}
+        searchResults={[]}
+        currentPage={0}
+        hasMore={false}
+        loading={false}
+        favorites={[]}
+        handleSearch={vi.fn()}
+        toggleFavorite={vi.fn()}
+        triggerDownload={vi.fn()}
+        setSelectedPost={vi.fn()}
+        handleSuggestionClick={handleSuggestionClick}
+      />
+    );
+
+    expect(screen.getByText("solo_focus")).toBeInTheDocument();
+    expect(screen.getByText("12,000")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("solo_focus"));
+    expect(handleSuggestionClick).toHaveBeenCalledWith("solo_focus");
+  });
 });
