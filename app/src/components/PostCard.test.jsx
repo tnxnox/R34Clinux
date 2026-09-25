@@ -64,4 +64,48 @@ describe("PostCard component", () => {
     fireEvent.click(buttons[1]);
     expect(onDownload).toHaveBeenCalledWith(mockPost);
   });
+
+  it("renders video badge and video element for video posts", () => {
+    const videoPost = {
+      ...mockPost,
+      preview_url: "http://example.com/preview.mp4",
+      file_url: "http://example.com/video.webm",
+    };
+
+    render(
+      <PostCard
+        post={videoPost}
+        isFavorite={false}
+        onCardClick={vi.fn()}
+        onFavoriteToggle={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(/VIDEO/)).toBeInTheDocument();
+    const video = document.querySelector("video");
+    expect(video).toBeInTheDocument();
+  });
+
+  it("handles selection checkbox toggle", () => {
+    const onSelectToggle = vi.fn();
+
+    render(
+      <PostCard
+        post={mockPost}
+        isFavorite={false}
+        isSelected={false}
+        onCardClick={vi.fn()}
+        onFavoriteToggle={vi.fn()}
+        onSelectToggle={onSelectToggle}
+      />
+    );
+
+    const checkbox = screen.getByRole("checkbox");
+    expect(checkbox).not.toBeChecked();
+
+    const checkboxContainer = checkbox.closest(".card-select-checkbox");
+    fireEvent.click(checkboxContainer);
+
+    expect(onSelectToggle).toHaveBeenCalledWith(mockPost.id);
+  });
 });
