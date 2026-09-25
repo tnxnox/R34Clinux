@@ -39,6 +39,14 @@
   transition: transform 0.5s ease;
 }
 
+.card-thumbnail.long-strip-vertical {
+  object-position: top center;
+}
+
+.card-thumbnail.long-strip-horizontal {
+  object-position: left center;
+}
+
 .post-card:hover .card-thumbnail {
   transform: scale(1.08);
 }
@@ -56,6 +64,25 @@
   align-items: center;
   gap: 4px;
   border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.strip-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: rgba(16, 185, 129, 0.85);
+  color: #ffffff;
+  padding: 3px 7px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(4px);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
 .rating-badge {
