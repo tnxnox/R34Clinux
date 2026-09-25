@@ -8,19 +8,20 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+static CLEAN_USER_ID_RE: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r"[^a-zA-Z0-9_-]").unwrap());
+
+static BODY_RE: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r"(?is)<body[^>]*>(.*?)</body>").unwrap());
+
 fn has_command(cmd: &str) -> bool {
-    match Command::new(cmd)
+    Command::new(cmd)
+        .arg("--version")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .spawn()
-    {
-        Ok(mut child) => {
-            child.kill().ok();
-            true
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
-        Err(_) => true,
-    }
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 fn detect_container_cmd() -> Option<Vec<String>> {
@@ -62,7 +63,10 @@ fn is_url_local(url: &str) -> bool {
     if let Ok(parsed) = url::Url::parse(url) {
         if let Some(host) = parsed.host_str() {
             let host_lower = host.to_lowercase();
-            return host_lower == "localhost" || host_lower == "127.0.0.1" || host_lower == "::1";
+            let trimmed_host = host_lower.trim_matches(|c| c == '[' || c == ']');
+            return trimmed_host == "localhost"
+                || trimmed_host == "127.0.0.1"
+                || trimmed_host == "::1";
         }
     }
     false
@@ -461,10 +465,7 @@ impl FlareSolverrFavoritesClient {
         website_password: String,
         solver_url: String,
     ) -> Self {
-        let cleaned_user_id = Regex::new(r"[^a-zA-Z0-9_-]")
-            .unwrap()
-            .replace_all(&user_id, "")
-            .to_string();
+        let cleaned_user_id = CLEAN_USER_ID_RE.replace_all(&user_id, "").to_string();
         let session_name = format!(
             "r34-{}",
             if cleaned_user_id.is_empty() {
@@ -517,74 +518,11 @@ impl FlareSolverrFavoritesClient {
     }
 
     fn extract_favorite_tile_ids(&self, text: &str) -> Vec<i64> {
-        let re = Regex::new(r#"(?i)<a[^>]+id=['"]p(\d+)['"][^>]*>"#).unwrap();
-        let mut ids = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-        for cap in re.captures_iter(text) {
-            if let Ok(id) = cap[1].parse::<i64>() {
-                if seen.insert(id) {
-                    ids.push(id);
-                }
-            }
-        }
-        ids
+        crate::html::extract_tile_ids(text)
     }
 
     fn extract_items(&self, text: &str) -> Vec<(i64, String)> {
-        let tile_re =
-            Regex::new(r#"(?i)<a[^>]+id=['"]p(\d+)['"][^>]*>\s*<img[^>]+src=['"]([^'"]+)['"]"#)
-                .unwrap();
-        let mut items = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-
-        for cap in tile_re.captures_iter(text) {
-            if let Ok(post_id) = cap[1].parse::<i64>() {
-                if seen.insert(post_id) {
-                    let mut preview = cap[2].to_string();
-                    if preview.starts_with("//") {
-                        preview = format!("https:{}", preview);
-                    }
-                    items.push((post_id, preview));
-                }
-            }
-        }
-
-        if !items.is_empty() {
-            return items;
-        }
-
-        // Fallback: extract IDs and images separately
-        let id_re = Regex::new(r"(?i)page=post(?:&|\?)s=view(?:&|\?)id=(\d+)").unwrap();
-        let preview_re = Regex::new(r#"(?i)<img[^>]+src="([^"]+)""#).unwrap();
-
-        let mut ids = Vec::new();
-        for cap in id_re.captures_iter(text) {
-            if let Ok(id) = cap[1].parse::<i64>() {
-                if seen.insert(id) {
-                    ids.push(id);
-                }
-            }
-        }
-
-        let mut previews = Vec::new();
-        for cap in preview_re.captures_iter(text) {
-            let mut src = cap[1].to_string();
-            if src.starts_with("//") {
-                src = format!("https:{}", src);
-            }
-            previews.push(src);
-        }
-
-        for (i, &post_id) in ids.iter().enumerate() {
-            let preview = if i < previews.len() {
-                previews[i].clone()
-            } else {
-                "".to_string()
-            };
-            items.push((post_id, preview));
-        }
-
-        items
+        crate::html::extract_items(text)
     }
 
     async fn ensure_web_login(&self, debug_logs: &mut String) -> Result<(), String> {
@@ -669,6 +607,15 @@ impl FlareSolverrFavoritesClient {
             Ok(posts) if !posts.is_empty() => {
                 let is_complete = posts.len() < limit as usize;
                 return Ok((posts, is_complete));
+            }
+            Ok(posts)
+                if self.website_username.trim().is_empty()
+                    || self.website_password.trim().is_empty() =>
+            {
+                debug_logs.push_str(
+                    "\nDAPI favorites returned empty and website credentials not set for HTML scrape fallback.",
+                );
+                return Ok((posts, true));
             }
             _ => {
                 debug_logs.push_str(
@@ -813,28 +760,31 @@ impl FlareSolverrFavoritesClient {
     }
 
     async fn hydrate_posts(&self, posts: &mut [Post]) {
-        // Fetch detailed post data from DAPI for posts with only IDs
+        // Fetch detailed post data from DAPI for posts with only IDs with bounded concurrency
+        use futures_util::stream::{self, StreamExt};
+
         let client = crate::api::Rule34Client::new(self.user_id.clone(), self.api_key.clone());
-        let mut futures = Vec::new();
+        let post_ids: Vec<(usize, i64)> =
+            posts.iter().enumerate().map(|(i, p)| (i, p.id)).collect();
 
-        for post in posts.iter() {
-            let id = post.id;
-            let tags = format!("id:{}", id);
-            let client_ref = &client;
-            futures.push(async move {
-                if let Ok(details) = client_ref.search_posts(&tags, 0, 1).await {
-                    if let Some(detail) = details.first() {
-                        return Some(detail.clone());
-                    }
+        let mut stream = stream::iter(post_ids)
+            .map(|(idx, id)| {
+                let client_ref = &client;
+                async move {
+                    let tags = format!("id:{}", id);
+                    let detail = if let Ok(details) = client_ref.search_posts(&tags, 0, 1).await {
+                        details.into_iter().next()
+                    } else {
+                        None
+                    };
+                    (idx, detail)
                 }
-                None
-            });
-        }
+            })
+            .buffer_unordered(3);
 
-        let results = futures_util::future::join_all(futures).await;
-        for (i, opt_post) in results.into_iter().enumerate() {
-            if let Some(detail) = opt_post {
-                posts[i] = detail;
+        while let Some((idx, opt_detail)) = stream.next().await {
+            if let Some(detail) = opt_detail {
+                posts[idx] = detail;
             }
         }
     }
@@ -995,8 +945,7 @@ impl FlareSolverrFavoritesClient {
 }
 
 fn extract_body_text(text: &str) -> String {
-    let re = Regex::new(r"(?is)<body[^>]*>(.*?)</body>").unwrap();
-    if let Some(cap) = re.captures(text) {
+    if let Some(cap) = BODY_RE.captures(text) {
         cap[1].trim().to_string()
     } else {
         text.trim().to_string()
@@ -1038,5 +987,84 @@ mod tests {
         assert!(client.looks_rate_limited("rate limit exceeded"));
         assert!(client.looks_rate_limited("retry-after: 60"));
         assert!(client.looks_rate_limited("HTTP 429 Rate Limited"));
+    }
+
+    #[test]
+    fn test_is_url_local() {
+        assert!(super::is_url_local("http://127.0.0.1:8191"));
+        assert!(super::is_url_local("http://localhost:8191/v1"));
+        assert!(super::is_url_local("http://[::1]:8191"));
+        assert!(!super::is_url_local("http://192.168.1.100:8191"));
+        assert!(!super::is_url_local("https://example.com/v1"));
+        assert!(!super::is_url_local("not a url"));
+    }
+
+    #[test]
+    fn test_extract_items_and_tile_ids() {
+        let client = FlareSolverrFavoritesClient::new(
+            "user1".to_string(),
+            "".to_string(),
+            "".to_string(),
+            "".to_string(),
+            "".to_string(),
+        );
+
+        let html = r#"
+            <span class="thumb">
+                <a id="p111" href="index.php?page=post&s=view&id=111">
+                    <img src="//img.rule34.xxx/thumbnails/111.jpg" />
+                </a>
+            </span>
+            <span class="thumb">
+                <a id="p222" href="index.php?page=post&s=view&id=222">
+                    <img src="https://img.rule34.xxx/thumbnails/222.jpg" />
+                </a>
+            </span>
+        "#;
+
+        let tile_ids = client.extract_favorite_tile_ids(html);
+        assert_eq!(tile_ids, vec![111, 222]);
+
+        let items = client.extract_items(html);
+        assert_eq!(items.len(), 2);
+        assert_eq!(
+            items[0],
+            (111, "https://img.rule34.xxx/thumbnails/111.jpg".to_string())
+        );
+        assert_eq!(
+            items[1],
+            (222, "https://img.rule34.xxx/thumbnails/222.jpg".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_body_text() {
+        let html = "<html><head><title>Test</title></head><body><h1>Hello</h1> <p>World  Test</p></body></html>";
+        let body = super::extract_body_text(html);
+        assert_eq!(body, "<h1>Hello</h1> <p>World  Test</p>");
+
+        let plain = "No body tag here";
+        assert_eq!(super::extract_body_text(plain), "No body tag here");
+    }
+
+    #[test]
+    fn test_looks_logged_in_and_authenticated() {
+        let client = FlareSolverrFavoritesClient::new(
+            "user1".to_string(),
+            "".to_string(),
+            "".to_string(),
+            "".to_string(),
+            "".to_string(),
+        );
+
+        let logged_in_html = r#"<div><a href="index.php?page=account&s=logout">Logout</a></div>"#;
+        let logged_out_html = r#"<div><a href="index.php?page=account&s=login">Login</a></div>"#;
+        assert!(client.looks_logged_in(logged_in_html));
+        assert!(!client.looks_logged_in(logged_out_html));
+
+        let auth_fav_html = r#"<div id="post-list"><a id="p123"></a></div>"#;
+        let login_required_html = r#"<form><input name="user"/><input name="pass"/></form>"#;
+        assert!(client.looks_favorites_view_authenticated(auth_fav_html));
+        assert!(!client.looks_favorites_view_authenticated(login_required_html));
     }
 }
