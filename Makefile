@@ -18,12 +18,13 @@ setup:
 	bash scripts/setup.sh
 
 check:
-	cd app/src-tauri && cargo check
+	cargo check --workspace
 
 test:
-	cd app/src-tauri && cargo test
+	cargo test --workspace
+	npm --prefix app test
 
 clean:
-	cd app/src-tauri && cargo clean
+	cargo clean
 	rm -rf app/dist
 
