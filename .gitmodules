@@ -1,3 +1,4 @@
 [submodule "docs/private"]
 	path = docs/private
 	url = git@github.com:tnxnox/R34Clinux-sub.git
+	ignore = untracked
