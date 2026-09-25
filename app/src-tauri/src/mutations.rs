@@ -276,6 +276,12 @@ pub async fn process_pending_mutations_impl(
                     prog.completed_mutations += 1;
                     prog.current_pending = count_active_mutations(&current_file);
                 }
+
+                // Polite pacing to mimic human cadence and prevent rate limits
+                if !cfg!(test) {
+                    let pace = random_range(1.2, 2.0);
+                    tokio::time::sleep(std::time::Duration::from_secs_f64(pace)).await;
+                }
             }
             Err(err_msg) => {
                 let mut current_file = load_pending_mutations()?;
@@ -351,6 +357,12 @@ pub async fn process_pending_mutations_impl(
                     let mut prog = progress_mutex.lock().unwrap();
                     prog.completed_mutations += 1;
                     prog.current_pending = count_active_mutations(&current_file);
+                }
+
+                // Polite pacing to mimic human cadence and prevent rate limits
+                if !cfg!(test) {
+                    let pace = random_range(1.2, 2.0);
+                    tokio::time::sleep(std::time::Duration::from_secs_f64(pace)).await;
                 }
             }
             Err(err_msg) => {
