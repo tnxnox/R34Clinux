@@ -17,6 +17,7 @@ pub struct AppStateInner {
     pub db: LocalFavoritesStore,
     pub settings: SettingsStore,
     pub downloader: DownloadManager,
+    pub client: reqwest::Client,
     pub sync_lock: TokioMutex<()>,
     pub sync_status: StdMutex<SyncStatus>,
     pub mutation_notify: tokio::sync::Notify,
@@ -130,7 +131,7 @@ pub async fn search_posts(
     if !s.has_credentials() {
         return Err("API credentials are not configured.".to_string());
     }
-    let client = Rule34Client::new(s.user_id, s.api_key);
+    let client = Rule34Client::with_client(state.0.client.clone(), s.user_id, s.api_key);
     let posts = client.search_posts(&tags, page, limit).await?;
 
     // Filter out posts with blacklisted tags (case-insensitive)
@@ -158,7 +159,7 @@ pub async fn autocomplete_tags(
     if !s.has_credentials() {
         return Err("API credentials are not configured.".to_string());
     }
-    let client = Rule34Client::new(s.user_id, s.api_key);
+    let client = Rule34Client::with_client(state.0.client.clone(), s.user_id, s.api_key);
     client.autocomplete_tags(&prefix).await
 }
 
@@ -456,7 +457,7 @@ pub async fn get_post_by_id(
     if !s.has_credentials() {
         return Err("API credentials are not configured.".to_string());
     }
-    let client = Rule34Client::new(s.user_id, s.api_key);
+    let client = Rule34Client::with_client(state.0.client.clone(), s.user_id, s.api_key);
     let post = client.fetch_post_by_id(id).await?;
     Ok(post.map(SerializedPost::from))
 }
@@ -506,7 +507,11 @@ pub async fn get_tags_with_types(
 
     if !missing_tags.is_empty() {
         let settings = state.0.settings.load();
-        let client = Rule34Client::new(settings.user_id.clone(), settings.api_key.clone());
+        let client = Rule34Client::with_client(
+            state.0.client.clone(),
+            settings.user_id.clone(),
+            settings.api_key.clone(),
+        );
 
         // Process in chunks of 3 and check for cancellation in between
         for chunk in missing_tags.chunks(3) {
