@@ -1,5 +1,4 @@
 use crate::models::Post;
-use regex::Regex;
 use reqwest::Client;
 use serde_json::Value;
 use std::time::Duration;
@@ -48,88 +47,7 @@ pub async fn fetch_page(url: &str, flare_solver_url: &str) -> Option<String> {
 }
 
 pub fn parse_scraped_favorites(html: &str) -> Vec<Post> {
-    let tile_re =
-        Regex::new(r#"(?i)<a[^>]+id=['"]p(\d+)['"][^>]*>\s*<img[^>]+src=['"]([^'"]+)['"]"#)
-            .unwrap();
-    let mut posts = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-
-    for cap in tile_re.captures_iter(html) {
-        if let Ok(post_id) = cap[1].parse::<i64>() {
-            if seen.insert(post_id) {
-                let mut preview = cap[2].to_string();
-                if preview.starts_with("//") {
-                    preview = format!("https:{}", preview);
-                }
-                posts.push(Post {
-                    id: post_id,
-                    tags: Vec::new(),
-                    rating: "".to_string(),
-                    score: None,
-                    width: None,
-                    height: None,
-                    file_size: None,
-                    source: "".to_string(),
-                    md5: "".to_string(),
-                    preview_url: preview.clone(),
-                    sample_url: preview,
-                    file_url: "".to_string(),
-                    created_at: "".to_string(),
-                });
-            }
-        }
-    }
-
-    if !posts.is_empty() {
-        return posts;
-    }
-
-    // Fallback: extract IDs and images separately
-    let id_re = Regex::new(r"(?i)page=post(?:&|\?)s=view(?:&|\?)id=(\d+)").unwrap();
-    let preview_re = Regex::new(r#"(?i)<img[^>]+src="([^"]+)""#).unwrap();
-
-    let mut ids = Vec::new();
-    for cap in id_re.captures_iter(html) {
-        if let Ok(id) = cap[1].parse::<i64>() {
-            if seen.insert(id) {
-                ids.push(id);
-            }
-        }
-    }
-
-    let mut previews = Vec::new();
-    for cap in preview_re.captures_iter(html) {
-        let mut src = cap[1].to_string();
-        if src.starts_with("//") {
-            src = format!("https:{}", src);
-        }
-        previews.push(src);
-    }
-
-    for (i, &post_id) in ids.iter().enumerate() {
-        let preview = if i < previews.len() {
-            previews[i].clone()
-        } else {
-            "".to_string()
-        };
-        posts.push(Post {
-            id: post_id,
-            tags: Vec::new(),
-            rating: "".to_string(),
-            score: None,
-            width: None,
-            height: None,
-            file_size: None,
-            source: "".to_string(),
-            md5: "".to_string(),
-            preview_url: preview.clone(),
-            sample_url: preview,
-            file_url: "".to_string(),
-            created_at: "".to_string(),
-        });
-    }
-
-    posts
+    crate::html::parse_scraped_posts(html)
 }
 
 pub async fn fetch_friend_favorites(
