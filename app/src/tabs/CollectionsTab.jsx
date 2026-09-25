@@ -1,14 +1,27 @@
-import React from "react";
+import React, { useState } from "react";
 import { Folder, Plus, Trash2 } from "lucide-react";
 import "./CollectionsTab.css";
 
 export function CollectionsTab({
-  newCollectionName,
-  setNewCollectionName,
+  newCollectionName: propName,
+  setNewCollectionName: propSetName,
   createCollection,
-  collections,
+  collections = [],
   deleteCollection,
 }) {
+  const [internalName, setInternalName] = useState("");
+  const name = propName !== undefined ? propName : internalName;
+  const setName = propSetName || setInternalName;
+
+  const handleCreate = () => {
+    if (createCollection) {
+      createCollection(name);
+      if (!propSetName) {
+        setInternalName("");
+      }
+    }
+  };
+
   return (
     <div className="collections-panel">
       <div className="create-collection-box">
@@ -16,13 +29,13 @@ export function CollectionsTab({
           type="text"
           className="form-input"
           placeholder="New collection name..."
-          value={newCollectionName}
-          onChange={(e) => setNewCollectionName(e.target.value)}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
         />
         <button
           className="btn-primary"
           style={{ width: "160px" }}
-          onClick={createCollection}
+          onClick={handleCreate}
         >
           <Plus size={16} style={{ marginRight: "6px" }} /> Create
         </button>
@@ -30,10 +43,10 @@ export function CollectionsTab({
 
       {collections.length > 0 ? (
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-          {collections.map((name) => (
-            <div key={name} className="collection-row">
-              <span style={{ fontWeight: "600" }}>{name}</span>
-              <button className="icon-btn" onClick={() => deleteCollection(name)}>
+          {collections.map((colName) => (
+            <div key={colName} className="collection-row">
+              <span style={{ fontWeight: "600" }}>{colName}</span>
+              <button className="icon-btn" onClick={() => deleteCollection && deleteCollection(colName)}>
                 <Trash2 size={16} className="text-danger" />
               </button>
             </div>
