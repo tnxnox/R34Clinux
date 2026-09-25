@@ -1,4 +1,3 @@
-use std::env;
 use std::path::Path;
 use std::process::Command;
 
@@ -46,63 +45,45 @@ fn check_prerequisites() -> bool {
 }
 
 fn main() {
-    // 1. Verify prerequisites and auto-run setup.sh if missing
-    if !check_prerequisites() {
-        println!("cargo:warning=Missing prerequisites. Running scripts/setup.sh...");
-        let setup_status = Command::new("bash").arg("../../scripts/setup.sh").status();
+    println!("cargo:rerun-if-changed=tauri.conf.json");
+    println!("cargo:rerun-if-changed=capabilities");
 
-        match setup_status {
-            Ok(status) if status.success() => {
-                println!("cargo:warning=System dependencies setup completed successfully.");
-            }
-            _ => {
-                panic!("Failed to configure system dependencies using scripts/setup.sh");
-            }
-        }
+    // 1. Check prerequisites and warn if missing (avoid interactive sudo in build script)
+    if !check_prerequisites() {
+        println!(
+            "cargo:warning=Missing prerequisites (Node.js, npm, or WebKit2GTK). If the build fails, run: bash scripts/setup.sh"
+        );
     }
 
-    // 2. Build frontend assets if in release mode or if dist is missing/empty
-    let profile = env::var("PROFILE").unwrap_or_default();
+    // 2. Build frontend assets only if dist is missing or empty
+    // Note: `npm run tauri build` already runs `beforeBuildCommand: "npm run build"`
     let dist_dir = Path::new("..").join("dist");
-
-    if profile == "release"
-        || !dist_dir.exists()
+    let dist_empty = !dist_dir.exists()
         || dist_dir
             .read_dir()
             .map(|mut d| d.next().is_none())
-            .unwrap_or(true)
-    {
-        println!("cargo:warning=Building frontend assets...");
+            .unwrap_or(true);
 
-        let npm_install = Command::new("npm")
-            .args(["install"])
+    if dist_empty && has_command("npm") {
+        println!("cargo:warning=Frontend dist is missing or empty; building frontend assets...");
+
+        let npm_build = Command::new("npm")
+            .args(["run", "build"])
             .current_dir("..")
             .status();
 
-        match npm_install {
-            Ok(status) if status.success() => {
-                let npm_build = Command::new("npm")
-                    .args(["run", "build"])
-                    .current_dir("..")
-                    .status();
-
-                if let Err(e) = npm_build {
-                    panic!("Failed to run npm run build: {}", e);
-                } else if let Ok(status) = npm_build
-                    && !status.success()
-                {
-                    panic!("npm run build failed");
-                }
-            }
-            Ok(status) => {
-                panic!("npm install failed with status: {}", status);
-            }
-            Err(e) => {
-                panic!(
-                    "Failed to run npm install: {}. Is Node.js/npm installed?",
-                    e
-                );
-            }
+        if let Err(e) = npm_build {
+            println!(
+                "cargo:warning=Failed to invoke npm run build: {}. Frontend assets might be missing.",
+                e
+            );
+        } else if let Ok(status) = npm_build
+            && !status.success()
+        {
+            println!(
+                "cargo:warning=npm run build exited with non-zero status: {}.",
+                status
+            );
         }
     }
 
