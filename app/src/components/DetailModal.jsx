@@ -1,7 +1,26 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Heart, Download, X, Maximize, Minimize, ChevronLeft, ChevronRight, Play, Pause, Volume2, VolumeX } from "lucide-react";
-import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { api } from "../services/api";
 import "./DetailModal.css";
+
+export function isMediaVideo(url) {
+  if (!url || typeof url !== "string") return false;
+  const cleanUrl = url.split("?")[0].split("#")[0].toLowerCase();
+  return cleanUrl.endsWith(".mp4") || cleanUrl.endsWith(".webm");
+}
+
+export function formatPostDate(createdAt) {
+  if (!createdAt) return "Unknown";
+  const num = Number(createdAt);
+  if (!isNaN(num) && num > 0) {
+    const ms = num < 100_000_000_000 ? num * 1000 : num;
+    const date = new Date(ms);
+    return isNaN(date.getTime()) ? "Unknown" : date.toLocaleDateString();
+  }
+  const date = new Date(createdAt);
+  return isNaN(date.getTime()) ? "Unknown" : date.toLocaleDateString();
+}
 
 const VideoPlayer = React.memo(function VideoPlayer({ src }) {
   const videoRef = useRef(null);
@@ -184,12 +203,12 @@ export const DetailModal = React.memo(function DetailModal({
         return;
       }
       try {
-        const res = await invoke("get_tags_with_types", {
+        const res = await api.getTagsWithTypes({
           postId: post.id,
           tags: post.tags,
         });
-        if (active) {
-          setTagTypes(res || {});
+        if (active && res && Object.keys(res).length > 0) {
+          setTagTypes(res);
         }
       } catch (err) {
         console.error("Failed to fetch tag types:", err);
@@ -198,7 +217,7 @@ export const DetailModal = React.memo(function DetailModal({
     fetchTypes();
     return () => {
       active = false;
-      const p = invoke("cancel_tag_fetching");
+      const p = api.cancelTagFetching();
       if (p && typeof p.catch === "function") {
         p.catch(() => {});
       }
@@ -355,12 +374,10 @@ export const DetailModal = React.memo(function DetailModal({
     const checkLocalFile = async () => {
       if (!post?.id) return;
       try {
-        const path = await invoke("get_downloaded_path", { postId: post.id, md5: post.md5 || "" });
+        const path = await api.getDownloadedPath({ postId: post.id, md5: post.md5 || "" });
         if (path && active) {
           const assetUrl = convertFileSrc(path);
           setLocalUrl(assetUrl);
-        } else if (active) {
-          setLocalUrl(prev => prev !== null ? null : prev);
         }
       } catch (err) {
         console.error("Failed to check local download path:", err);
@@ -375,7 +392,7 @@ export const DetailModal = React.memo(function DetailModal({
   if (!post) return null;
 
   const isFav = favorites.some((f) => f.id === post.id);
-  const isVideo = remoteUrl?.endsWith(".mp4") || remoteUrl?.endsWith(".webm");
+  const isVideo = isMediaVideo(url) || isMediaVideo(remoteUrl);
 
   const toggleFullscreen = async () => {
     if (!url || isFullscreenPending.current) return;
@@ -394,6 +411,23 @@ export const DetailModal = React.memo(function DetailModal({
       console.error("Fullscreen toggle error:", err);
     } finally {
       isFullscreenPending.current = false;
+    }
+  };
+
+  const handleDownloadClick = async () => {
+    if (!onDownload) return;
+    try {
+      const res = await onDownload(post);
+      if (res?.path) {
+        setLocalUrl(convertFileSrc(res.path));
+      } else {
+        const path = await api.getDownloadedPath({ postId: post.id, md5: post.md5 || "" });
+        if (path) {
+          setLocalUrl(convertFileSrc(path));
+        }
+      }
+    } catch (err) {
+      console.error("Download failed:", err);
     }
   };
 
@@ -482,9 +516,7 @@ export const DetailModal = React.memo(function DetailModal({
                 <div className="metadata-item">
                   <div className="metadata-label">Date</div>
                   <div style={{ fontWeight: "600" }}>
-                    {post.created_at
-                      ? new Date(parseInt(post.created_at) * 1000).toLocaleDateString()
-                      : "Unknown"}
+                    {formatPostDate(post.created_at)}
                   </div>
                 </div>
               </div>
@@ -633,7 +665,7 @@ export const DetailModal = React.memo(function DetailModal({
               <Heart size={16} fill={isFav ? "currentColor" : "none"} />
               Favorite
             </button>
-            <button className="btn-action download" onClick={() => onDownload(post)}>
+            <button className="btn-action download" onClick={handleDownloadClick}>
               <Download size={16} />
               Download
             </button>
