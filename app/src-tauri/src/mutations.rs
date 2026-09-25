@@ -127,9 +127,11 @@ pub fn queue_pending_remove(post_id: i64, reason: &str) -> Result<(), String> {
     save_pending_mutations(&file)
 }
 
+static RETRY_AFTER_RE: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"(?i)retry[-_ ]?after[^0-9]*(\d+)").unwrap());
+
 fn extract_retry_after_seconds(message: &str) -> Option<f64> {
-    let re = regex::Regex::new(r"(?i)retry[-_ ]?after[^0-9]*(\d+)").unwrap();
-    if let Some(cap) = re.captures(message) {
+    if let Some(cap) = RETRY_AFTER_RE.captures(message) {
         if let Ok(val) = cap[1].parse::<f64>() {
             return Some(val.abs());
         }
@@ -261,10 +263,7 @@ pub async fn process_pending_mutations_impl(
         match solver_client.remove_favorite(m.id, &mut debug_logs).await {
             Ok(_) => {
                 let mut current_file = load_pending_mutations()?;
-                if let Some(item) = current_file.remove.iter_mut().find(|item| item.id == m.id) {
-                    item.attempts = 0;
-                    item.next_attempt_at = now_ts + 600.0;
-                }
+                current_file.remove.retain(|item| item.id != m.id);
                 save_pending_mutations(&current_file)?;
 
                 {
@@ -340,10 +339,7 @@ pub async fn process_pending_mutations_impl(
         match solver_client.add_favorite(m.id, &mut debug_logs).await {
             Ok(_) => {
                 let mut current_file = load_pending_mutations()?;
-                if let Some(item) = current_file.add.iter_mut().find(|item| item.id == m.id) {
-                    item.attempts = 0;
-                    item.next_attempt_at = now_ts + 600.0;
-                }
+                current_file.add.retain(|item| item.id != m.id);
                 save_pending_mutations(&current_file)?;
 
                 {
@@ -571,6 +567,36 @@ mod tests {
         // The attempt count should be 0 because it's an offline error!
         assert_eq!(file.add[0].attempts, 0);
         assert!(is_offline_error(&file.add[0].last_error));
+
+        if test_path.exists() {
+            fs::remove_file(&test_path).ok();
+        }
+    }
+
+    #[test]
+    fn test_completed_mutation_retention_and_removal() {
+        let _guard = TEST_MUTEX.blocking_lock();
+        let test_path = pending_mutations_path();
+        if test_path.exists() {
+            fs::remove_file(&test_path).ok();
+        }
+
+        queue_pending_add(555, "add item").unwrap();
+        queue_pending_remove(666, "remove item").unwrap();
+
+        let mut file = load_pending_mutations().unwrap();
+        assert_eq!(file.add.len(), 1);
+        assert_eq!(file.remove.len(), 1);
+
+        // Simulate successful mutation completion (retain id != completed)
+        file.add.retain(|m| m.id != 555);
+        file.remove.retain(|m| m.id != 666);
+        save_pending_mutations(&file).unwrap();
+
+        let file_after = load_pending_mutations().unwrap();
+        assert_eq!(file_after.add.len(), 0);
+        assert_eq!(file_after.remove.len(), 0);
+        assert_eq!(count_active_mutations(&file_after), 0);
 
         if test_path.exists() {
             fs::remove_file(&test_path).ok();
