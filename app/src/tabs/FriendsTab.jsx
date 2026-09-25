@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { Users, Trash2, Heart, ChevronLeft, ChevronRight } from "lucide-react";
 import { PostCard } from "../components/PostCard";
 import "./FriendsTab.css";
@@ -6,24 +6,44 @@ import "./FriendsTab.css";
 export function FriendsTab({
   activeFriend,
   setActiveFriend,
-  friendUserId,
-  setFriendUserId,
-  friendDisplayName,
-  setFriendDisplayName,
-  friendNotes,
-  setFriendNotes,
+  friendUserId: propUserId,
+  setFriendUserId: propSetUserId,
+  friendDisplayName: propDisplayName,
+  setFriendDisplayName: propSetDisplayName,
+  friendNotes: propNotes,
+  setFriendNotes: propSetNotes,
   addFriend,
-  friends,
+  friends = [],
   removeFriend,
   loadingFriendFavs,
-  friendFavorites,
+  friendFavorites = [],
   setFriendFavorites,
-  friendPage,
+  friendPage = 0,
   fetchFriendFavs,
-  favorites,
+  favorites = [],
   toggleFavorite,
   setSelectedPost,
 }) {
+  const [internalUserId, setInternalUserId] = useState("");
+  const [internalDisplayName, setInternalDisplayName] = useState("");
+  const [internalNotes, setInternalNotes] = useState("");
+
+  const userId = propUserId !== undefined ? propUserId : internalUserId;
+  const setUserId = propSetUserId || setInternalUserId;
+  const displayName = propDisplayName !== undefined ? propDisplayName : internalDisplayName;
+  const setDisplayName = propSetDisplayName || setInternalDisplayName;
+  const notes = propNotes !== undefined ? propNotes : internalNotes;
+  const setNotes = propSetNotes || setInternalNotes;
+
+  const handleAddFriend = () => {
+    if (addFriend) {
+      addFriend({ userId, displayName, notes });
+      if (!propSetUserId) setInternalUserId("");
+      if (!propSetDisplayName) setInternalDisplayName("");
+      if (!propSetNotes) setInternalNotes("");
+    }
+  };
+
   if (activeFriend) {
     return (
       <div>
@@ -32,7 +52,7 @@ export function FriendsTab({
             className="btn-secondary"
             onClick={() => {
               setActiveFriend(null);
-              setFriendFavorites([]);
+              if (setFriendFavorites) setFriendFavorites([]);
             }}
           >
             &larr; Back to Friends
@@ -66,7 +86,7 @@ export function FriendsTab({
             <div className="pagination">
               <button
                 className="btn-secondary"
-                onClick={() => fetchFriendFavs(activeFriend.user_id, friendPage - 1)}
+                onClick={() => fetchFriendFavs && fetchFriendFavs(activeFriend.user_id, friendPage - 1)}
                 disabled={friendPage === 0}
               >
                 <ChevronLeft size={16} /> Previous
@@ -74,7 +94,7 @@ export function FriendsTab({
               <span className="page-num">Page {friendPage + 1}</span>
               <button
                 className="btn-secondary"
-                onClick={() => fetchFriendFavs(activeFriend.user_id, friendPage + 1)}
+                onClick={() => fetchFriendFavs && fetchFriendFavs(activeFriend.user_id, friendPage + 1)}
               >
                 Next <ChevronRight size={16} />
               </button>
@@ -108,27 +128,27 @@ export function FriendsTab({
             type="text"
             className="form-input"
             placeholder="Friend User ID"
-            value={friendUserId}
-            onChange={(e) => setFriendUserId(e.target.value)}
+            value={userId}
+            onChange={(e) => setUserId(e.target.value)}
           />
           <input
             type="text"
             className="form-input"
             placeholder="Display Name"
-            value={friendDisplayName}
-            onChange={(e) => setFriendDisplayName(e.target.value)}
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
           />
           <input
             type="text"
             className="form-input"
             placeholder="Notes"
-            value={friendNotes}
-            onChange={(e) => setFriendNotes(e.target.value)}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
           />
           <button
             className="btn-primary"
             style={{ width: "150px" }}
-            onClick={addFriend}
+            onClick={handleAddFriend}
           >
             Add Friend
           </button>
@@ -151,14 +171,14 @@ export function FriendsTab({
                   className="btn-secondary"
                   onClick={() => {
                     setActiveFriend(friend);
-                    fetchFriendFavs(friend.user_id, 0);
+                    if (fetchFriendFavs) fetchFriendFavs(friend.user_id, 0);
                   }}
                 >
                   View Favorites
                 </button>
                 <button
                   className="icon-btn"
-                  onClick={() => removeFriend(friend.user_id)}
+                  onClick={() => removeFriend && removeFriend(friend.user_id)}
                 >
                   <Trash2 size={16} />
                 </button>
