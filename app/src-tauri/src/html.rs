@@ -34,9 +34,18 @@ pub fn derive_cdn_urls(
         let dir_id = cap[1].to_string();
         let md5 = cap[2].to_string();
         let ext = cap[3].to_string();
-        let sample_url = format!("https://wimg.rule34.xxx/samples/{}/sample_{}.jpg", dir_id, md5);
-        let candidate_file_url = format!("https://wimg.rule34.xxx//images/{}/{}.{}", dir_id, md5, ext);
-        (Some(dir_id), Some(md5), Some(sample_url), Some(candidate_file_url))
+        let sample_url = format!(
+            "https://wimg.rule34.xxx/samples/{}/sample_{}.jpg",
+            dir_id, md5
+        );
+        let candidate_file_url =
+            format!("https://wimg.rule34.xxx//images/{}/{}.{}", dir_id, md5, ext);
+        (
+            Some(dir_id),
+            Some(md5),
+            Some(sample_url),
+            Some(candidate_file_url),
+        )
     } else {
         (None, None, None, None)
     }
@@ -203,9 +212,7 @@ pub async fn resolve_cdn_posts_media(client: &reqwest::Client, posts: &mut [Post
     let mut stream = stream::iter(indices)
         .map(|idx| {
             let client_ref = client.clone();
-            async move {
-                (idx, client_ref)
-            }
+            async move { (idx, client_ref) }
         })
         .buffer_unordered(8);
 
@@ -285,6 +292,10 @@ mod tests {
             posts[0].sample_url,
             "https://wimg.rule34.xxx/samples/819/sample_5be30947f5c4d29d251959d62721d7df.jpg"
         );
-        assert!(posts[0].file_url.contains("5be30947f5c4d29d251959d62721d7df"));
+        assert!(
+            posts[0]
+                .file_url
+                .contains("5be30947f5c4d29d251959d62721d7df")
+        );
     }
 }
