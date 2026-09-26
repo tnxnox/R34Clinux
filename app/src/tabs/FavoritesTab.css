@@ -1,0 +1,126 @@
+.favorites-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.favorites-search-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.favorites-search-input-container {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.favorites-search-icon {
+  position: absolute;
+  left: 14px;
+  color: var(--text-muted, #94a3b8);
+  pointer-events: none;
+}
+
+.favorites-search-input {
+  width: 100%;
+  padding: 12px 38px 12px 42px;
+  background: var(--bg-surface, #1e293b);
+  border: 1px solid var(--border-color, #334155);
+  border-radius: 10px;
+  color: var(--text-main, #f8fafc);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.favorites-search-input:focus {
+  border-color: var(--accent, #6366f1);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.favorites-search-clear {
+  position: absolute;
+  right: 12px;
+  background: none;
+  border: none;
+  color: var(--text-muted, #94a3b8);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 50%;
+  transition: color 0.15s, background 0.15s;
+}
+
+.favorites-search-clear:hover {
+  color: var(--text-main, #f8fafc);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.favorites-filters-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.favorites-filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.favorites-filter-select {
+  padding: 8px 12px;
+  background: var(--bg-surface, #1e293b);
+  border: 1px solid var(--border-color, #334155);
+  border-radius: 8px;
+  color: var(--text-main, #f8fafc);
+  font-size: 13px;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.favorites-filter-select:focus {
+  border-color: var(--accent, #6366f1);
+}
+
+.favorites-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--text-muted, #94a3b8);
+  padding: 0 2px;
+}
+
+.favorites-reset-link {
+  background: none;
+  border: none;
+  color: var(--accent, #6366f1);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  transition: opacity 0.15s;
+}
+
+.favorites-reset-link:hover {
+  opacity: 0.8;
+}
+
+.favorites-empty-filtered {
+  text-align: center;
+  color: var(--text-muted, #94a3b8);
+  margin-top: 60px;
+  padding: 40px 20px;
+}
